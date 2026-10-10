@@ -1,0 +1,35 @@
+package transform
+
+import (
+	"bytes"
+	"io"
+	"strings"
+	"testing"
+
+	"github.com/kiaamaaio/logscrub/internal/detect"
+	"github.com/kiaamaaio/logscrub/internal/label"
+	"github.com/kiaamaaio/logscrub/internal/synthlog"
+)
+
+// BenchmarkEngineMask は、合成ログ(8MB、1MB の JSON 行を含む)を、既定の種別で mask する時間を測る。
+// 入出力の書き換えを含む、変換処理全体の速度(入出力の実ファイルは含まない)。PLAN のベンチマーク記録用。
+func BenchmarkEngineMask(b *testing.B) {
+	var sb strings.Builder
+	if _, err := synthlog.Generate(&sb, synthlog.Config{Size: 8 << 20, Seed: 1, LongLineEvery: 4 << 20}); err != nil {
+		b.Fatal(err)
+	}
+	data := []byte(sb.String())
+	det, err := detect.New(detect.Options{})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.SetBytes(int64(len(data)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		eng := &Engine{Det: det, Rep: NewMasker(label.DefaultFormat)}
+		if err := eng.Run([]io.Reader{bytes.NewReader(data)}, io.Discard); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

@@ -128,7 +128,7 @@ v1 の方針: **開発者がログで出会いやすい情報に絞る**。国�
   - 例: `"api_key": "abc def"` → `"api_key": "<secret_1>"`
   - 例: `{"msg":"password=abc123"}` → `{"msg":"password=<secret_1>"}`(閉じ引用符を残す)
 - 値が空の場合は置換しない。
-- 値が `Bearer ` / `Basic ` で始まる場合(`Authorization: Bearer abc`、`token: Bearer abc`)は、方式名を残し、その後ろの値(RFC 7235 の token68: 英数字と `-` `.` `_` `~` `+` `/`、末尾に `=`)だけを置換する。方式名の後ろに空白が 1 つ以上必要。キー名が `Authorization` の場合は、方式名がなければ置換しない
+- 値が `Bearer ` / `Basic ` で始まる場合(`Authorization: Bearer abc`、`token: Bearer abc`)は、方式名を残し、その後ろの値(RFC 7235 の token68: 英数字と `-` `.` `_` `~` `+` `/`、末尾に `=`)だけを置換する。方式名の後ろに空白が 1 つ以上必要。**方式名の後ろが値として読めない場合(置換済みのラベル `Bearer <secret_1>`、`Basic` の値が base64 でない場合)は、何も置換しない**(方式名の語を値として置換しない。冪等性のため)。キー名が `Authorization` の場合は、方式名がなければ置換しない
 
 補足:
 

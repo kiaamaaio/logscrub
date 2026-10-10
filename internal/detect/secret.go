@@ -92,12 +92,16 @@ func (secretFinder) fixed(line []byte, dst []Match) []Match {
 
 // ---- Authorization ヘッダ(Bearer / Basic) ----
 
-// schemeCredentials は、line[p:] が `Bearer <値>` / `Basic <値>` で始まる場合に、値の範囲を返す(Q13、決定事項 15)。
+// schemeCredentials は、line[p:] が `Bearer <値>` / `Basic <値>` の形かを調べる(Q13、決定事項 15)。
 //
-// 方式名は、大文字・小文字を区別せず、後ろに空白(スペース・タブ)が 1 つ以上ある。
-// 値は、RFC 7235 の token68(英数字と `-` `.` `_` `~` `+` `/`、末尾に `=` が続いてもよい)。
-// Basic は、値が base64 として解読でき、結果に `:`(`user:pass` の形)を含む場合に限る。
-func schemeCredentials(line []byte, p int) (start, end int, ok bool) {
+// 方式名は、大文字・小文字を区別せず、後ろに空白(スペース・タブ)が 1 つ以上ある。この形のときは、
+// isScheme が true になる(値が読めなくても)。値は、RFC 7235 の token68(英数字と `-` `.` `_` `~` `+` `/`、
+// 末尾に `=` が続いてもよい)。Basic は、値が base64 として解読でき、結果に `:`(`user:pass` の形)を含む場合に限る。
+// 値が読めたときは、その範囲を start、end に返し、ok が true になる。
+//
+// 方式名で始まるのに値が読めない場合(置換済みのラベルなど)に、方式名の語を値として置換しないよう、
+// 呼び出し側は、isScheme が true のときは、ok でなくても、他の規則を適用しない。
+func schemeCredentials(line []byte, p int) (start, end int, ok, isScheme bool) {
 	length := 0
 	basic := false
 	switch {
@@ -106,20 +110,20 @@ func schemeCredentials(line []byte, p int) (start, end int, ok bool) {
 	case hasPrefixFold(line[p:], "basic"):
 		length, basic = len("basic"), true
 	default:
-		return 0, 0, false
+		return 0, 0, false, false
 	}
 	q := p + length
 	if q >= len(line) || line[q] != ' ' && line[q] != '\t' {
-		return 0, 0, false
+		return 0, 0, false, false
 	}
 	for q < len(line) && (line[q] == ' ' || line[q] == '\t') {
 		q++
 	}
 	e := token68End(line, q)
 	if e == q || basic && !basicCredentials(line[q:e]) {
-		return 0, 0, false
+		return 0, 0, false, true
 	}
-	return q, e, true
+	return q, e, true, true
 }
 
 // hasPrefixFold は、b が、小文字の ASCII 文字列 lower で、大文字・小文字を区別せずに始まるかを返す。
@@ -314,8 +318,8 @@ func bareValueEnd(line []byte, vs int) int {
 //
 // '=' または ':' の手前が、対象のキー名(引用符、または `\"` で囲まれていてもよい)なら、その後ろの値が対象になる。
 //   - 区切りの前後の空白(スペース・タブ)は、任意個を許す(Q15)
-//   - 値が `Bearer ` / `Basic ` で始まる場合は、方式名の後ろの値だけが対象。
-//     キー名が Authorization で、方式名がなければ対象でない
+//   - 値が `Bearer ` / `Basic ` で始まる場合は、方式名の後ろの値だけが対象
+//     (後ろが値として読めなければ、何も置換しない)。キー名が Authorization で、方式名がなければ対象でない
 //   - 値が引用符(" または ')で始まる場合は、閉じ引用符の手前まで。`\` の次の文字は、値の一部。
 //     `\"` で始まる場合は、次の `\"` の手前まで(ログに文字列として埋め込まれた JSON)。
 //     閉じ引用符がなければ、行末まで(Q16)
@@ -392,8 +396,10 @@ func (secretFinder) keyed(line []byte, dst []Match) []Match {
 		case line[vs] == '\\' && vs+1 < n && line[vs+1] == '"':
 			escaped, cs = true, vs+2
 		}
-		if s, e, ok := schemeCredentials(line, cs); ok {
-			dst = append(dst, Match{Start: s, End: e, Kind: KindSecret})
+		if s, e, ok, isScheme := schemeCredentials(line, cs); isScheme {
+			if ok {
+				dst = append(dst, Match{Start: s, End: e, Kind: KindSecret})
+			}
 			continue
 		}
 		if authOnly {

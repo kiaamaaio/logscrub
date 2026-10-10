@@ -15,6 +15,10 @@ import (
 // 並びは、`--stats` の出力順にも使う。
 var Types = []string{"email", "ipv4_global", "ipv4_private", "ipv6_global", "ipv6_private", "secret", "uuid"}
 
+// NumTypes は、len(Types)。統計や連番の表を、固定長の配列で持つための定数
+// (TestTypesAreTheDocumentedSet で、len(Types) と一致することを確認している)。
+const NumTypes = 7
+
 var typeBytes = func() [][]byte {
 	bs := make([][]byte, len(Types))
 	for i, s := range Types {
@@ -194,4 +198,15 @@ func matchNumber(line []byte, p int) (n int, end int, ok bool) {
 		n = n*10 + int(c-'0')
 	}
 	return n, end, true
+}
+
+// TypeIndex は、種別名 typ の、Types での位置を返す。Types にない名前では -1。
+// 統計や連番の表を、Types の順(固定)の配列で持つために使う。
+func TypeIndex(typ string) int {
+	for i, t := range Types {
+		if t == typ {
+			return i
+		}
+	}
+	return -1
 }

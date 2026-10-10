@@ -160,6 +160,14 @@ func TestSecretBearerAndBasic(t *testing.T) {
 		{"bearer jwt", "Authorization: Bearer " + jwt, []string{jwt, jwt}},
 		// 他の対象のキー名の値が方式名で始まる場合も、方式名を残して、値だけを置換する
 		{"token key", "token: Bearer abc123", []string{"abc123"}},
+		// 方式名の後ろが値として読めない場合は、方式名の語を値として置換しない(冪等性)
+		{"token key bearer placeholder", "token: Bearer <secret_1>", nil},
+		{"token key bearer bracket placeholder", "token: Bearer [secret-1]", nil},
+		{"token key basic prose", "token: Basic setup complete", nil},
+		{"token key basic not base64", "token: Basic abc!def", nil},
+		// 方式名の後ろに空白がなければ、方式名ではない(値として置換する)
+		{"token key bearer alone", "token: Bearer", []string{"Bearer"}},
+		{"token key bearer word", "token=Bearerabc", []string{"Bearerabc"}},
 		{"api key header", "X-Api-Key: Bearer abc123", []string{"abc123"}},
 		{"basic", "Authorization: Basic " + basic, []string{basic}},
 		{"basic padded", "Authorization: Basic dXNlcjpwYXNzd29yZA==", []string{"dXNlcjpwYXNzd29yZA=="}},
@@ -584,16 +592,16 @@ func refSecrets(line []byte) [][2]int {
 		case line[vs] == '\\' && vs+1 < len(line) && line[vs+1] == '"':
 			re, cs = refEscaped, vs+2
 		}
-		// 方式名(Bearer / Basic)
+		// 方式名(Bearer / Basic)。後ろが値として読めなければ、何も置換しない。
 		if loc := refScheme.FindSubmatchIndex(line[cs:]); loc != nil {
 			scheme := strings.ToLower(string(line[cs+loc[2] : cs+loc[3]]))
 			q := cs + loc[1]
 			if tl := refToken68.FindIndex(line[q:]); tl != nil {
 				if e := q + tl[1]; scheme != "basic" || refBasicOK(line[q:e]) {
 					out = append(out, [2]int{q, e})
-					continue
 				}
 			}
+			continue
 		}
 		if schemeOnly {
 			continue

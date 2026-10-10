@@ -1,0 +1,17 @@
+2026-10-11T03:25:56.789Z INFO  [worker-3] app.http.Router: request id=req-1 user=taro@example.com ip=192.168.0.12 path=/api/v1/items status=200
+2026-10-11T03:25:57.001Z INFO  [worker-1] app.http.Router: request id=req-2 user=hanako@example.com ip=203.0.113.45 path=/login status=302
+2026-10-11T03:25:57.120Z WARN  [worker-1] app.auth.Login: failed login for taro@example.com from 203.0.113.45 (attempt 3)
+2026-10-11T03:25:58.250Z DEBUG [worker-2] app.http.Client: GET https://user:pass@10.0.0.5:8443/health -> 200
+2026-10-11T03:25:58.900Z INFO  [worker-2] app.http.Client: Authorization: Bearer abc123def456ghi789
+2026-10-11T03:25:59.100Z INFO  [worker-4] app.config: loaded password=hunter2&user=admin&retries=3
+2026-10-11T03:25:59.300Z INFO  [worker-4] app.config: {"api_key": "abc def", "max_tokens": 4096, "token_count": 5}
+2026-10-11T03:26:00.010Z ERROR [worker-3] app.queue.Worker: aws key AKIAIOSFODNN7EXAMPLE rejected
+2026-10-11T03:26:00.200Z INFO  [worker-5] app.cache.Store: session_id=123e4567-e89b-42d3-a456-426614174000 renewed
+2026-10-11T03:26:00.300Z INFO  [worker-5] app.cache.Store: trace {123e4567-e89b-42d3-a456-426614174000} urn:uuid:01890a5d-ac96-774b-bcce-b302099a8057
+2026-10-11T03:26:01.000Z INFO  [worker-1] app.net.Dial: connecting to [2001:4860:4860::8888]:443 via fe80::1%eth0 and ::ffff:10.0.0.1
+2026-10-11T03:26:01.100Z INFO  [worker-1] app.net.Dial: bound 0.0.0.0:8080 and 255.255.255.255 and ::1
+2026-10-11T03:26:02.000Z ERROR [worker-2] app.cpp: terminate called after throwing std::bad_alloc in fmt::Error
+2026-10-11T03:26:03.000Z INFO  [worker-3] app.user: ユーザー 山田太郎 (taro@example.com) が 10.1.2.3 からログイン。連絡先は 03-1234-5678、〒123-4567
+2026-10-11T03:26:04.000Z INFO  [worker-3] app.json: {"message":"{\"password\":\"abc123\",\"user\":\"x\"}","pin":123456,"token":null}
+2026-10-11T03:26:05.000Z INFO  [worker-3] app.already: from <email_1> to <ipv4_private_1> with password=<secret_1>
+2026-10-11T03:26:06.000Z INFO  [worker-3] app.dup: taro@example.com again, hanako@example.com, taro@example.com

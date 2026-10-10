@@ -108,6 +108,9 @@ func TestTypesAreTheDocumentedSet(t *testing.T) {
 	if !equal(Types, want) {
 		t.Errorf("Types = %q, want %q", Types, want)
 	}
+	if len(Types) != NumTypes {
+		t.Errorf("len(Types) = %d, NumTypes = %d", len(Types), NumTypes)
+	}
 }
 
 func TestScanDefaultFormat(t *testing.T) {

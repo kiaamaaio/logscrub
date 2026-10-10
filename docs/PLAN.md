@@ -351,12 +351,28 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 - 「除外の確認」(受け入れ基準): `03-1234-5678`、`09012345678`、`123-4567` と、その変形(`090-1234-5678`、`〒123-4567`、`2026-10-11` など)が、すべての種別(uuid を含む)で検出されないことを、`TestPhoneAndPostalCodesAreNotDetected` で確認した
 - 検出器の構成: Q2 のとおり、正規表現がマッチャーで、前処理(ハイフンの位置)だけを手書きにした。測定(下の記録)は、目標を大きく超える
 
-### 段階 7: mask(`transform.Masker`、`Engine`、`Stats`)
+### 段階 7: mask(`transform.Masker`、`Engine`、`Stats`) — ✅ 完了(2026-10-11)
 
 - 行の書き換え(一致していない部分は元のスライスをそのまま書く)
 - 最初に現れた順の連番、種別名(IP は区別込み)ごとのカウンタ、`--mask-format`
 - 冪等性のテスト: すべてのテスト入力で `mask(mask(x)) == mask(x)` を確認。`testing.F` のファズテストでも確認する
-- 前提となる確認: Q3、Q4、Q19
+- 前提となる確認: Q3、Q4、Q19(確定済み)
+
+**実装メモ・気づいた点**
+
+- 実装: `internal/transform/{mask,stats,engine}.go`。`label.TypeIndex` / `label.NumTypes` を追加した(統計・連番の表を、`label.Types` の順の固定長の配列で持つため)
+- **`Masker`**: 種別名(IP は区別込み)ごとに、「値のバイト列(完全一致。Q3)→ 連番」の map を持つ。初めて見た値に、その種別の次の番号を振る(Q4)。`--allow` の値、特殊アドレス、`--ip-scope` 外、保護範囲は、`Detector` が候補から外すので、番号を消費しない。map の反復には依存しない。restore 用の逆引き(番号 → 値)は、段階 9 で、必要になった形で加える
+- **`Engine`**: `stream.ForEachLine`(入力ごとに行を区切る = Q22)で読み、`Detector.Find` で範囲を決め、`Replacer` で書き換えて、64KB のバッファ付きで書く。一致のない行は、読んだスライスをそのまま書く。`Run` は、`Stats` に加算する(`Engine.Stats` は、PLAN の案のポインタでなく、値)
+- **`Stats`**(Q19、Q31): 種別ごとの置換した出現回数(`Count` / `Types` は `label.Types` の順で、0 件は出さない / `Total`)、読んだ行数(`Lines`)、置換せずに残した置換済みの形の数(`Kept`)と、その行番号(`KeptLines`。入力をまたいで通しで数える 1 始まり、昇順、最初の 5 件まで)。値は持たない。stderr への出力(`--stats` と通知の文面)は、段階 10 が、この値から作る
+- `testdata/app.log`(17 行。日本語、email、各種 IP、トークン、UUID、JSON、コードの記号、電話番号、置換済みの形)と、手で確認した `testdata/app.mask.golden` を追加した。段階 9(restore の往復)、段階 10(E2E)でも使う
+- 受け入れ基準の「同じ入力・同じオプションで 2 回実行すると同じ出力」「置換済みテキストを再度流しても変わらない(mask)」「日本語」「64KB 超」「CRLF・末尾改行」は、`internal/transform/mask_test.go` で確認した
+
+**冪等性のテストで見つけた不具合と、性質の見直し**
+
+- **不具合(修正済み)**: `token: Bearer abc.def-ghi` → 1 回目は `token: Bearer <secret_1>`、2 回目は、方式名の後ろが値として読めないため、キー名の値として `Bearer` の語を置換して、`token: <secret_1> <secret_1>` になっていた。方式名(`Bearer ` / `Basic `)で始まる値は、後ろが値として読めない場合、何も置換しないことにした(SPEC 4.1 に追記。`secretFinder` を修正)。`Authorization: Bearer <secret_1>` は、もとから置換されなかった
+- **ファズテストの性質の見直し**: ファズテスト(任意のバイト列)で、`000000A10.0.0.0fC00::` が見つかった。1 回目は `10.0.0.0` だけを置換し、2 回目は、間に挟まっていた `0.0.0.0` がなくなって独立した `fC00::` を IPv6 として検出する。置換によって、隣の文字列の文脈が変わる現象で、現実のログではほぼ起きない
+  - 仕様の冪等性(置換済みの値を再度置換しない)には反しないので、ファズテストの性質を、「2 回目に新しく検出する値は、1 回目のラベルに隣接するものだけ。ラベルと重なる検出や、置換と無関係な場所での検出は、不具合」に改めた(`FuzzMaskStable`)。1 回目と 2 回目が完全に同じであること(`mask(mask(x)) == mask(x)`)は、現実的な入力(受け入れ基準の例、サンプルログ、合成ログ 3MB、各種書式)で、引き続き確認している
+  - ファズテストは、60 秒 × 4 ラウンド(合計約 940 万回)で、この性質の違反が見つからなかった
 
 ### 段階 8: hash(`transform.Hasher`、`LoadKey`)
 
@@ -619,7 +635,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 | 4. ipv4 / ipv6 | ✅ 完了 | 2026-10-11。IPv4 は前処理つきの正規表現(Q2: 置き換え不要)。IPv6 は精度重視に改訂(SPEC 4.3、決定事項 14)。`BenchmarkFind` 約 860MB/s |
 | 5. secret | ✅ 完了 | 2026-10-11。固定形式は正規表現、キー名ベースは手がかり周辺の走査(正規表現の別実装と乱数で一致)。精度重視・JSON の文法の保持に改訂(SPEC 4.1、決定事項 15)。`BenchmarkFind` 約 250MB/s |
 | 6. uuid | ✅ 完了 | 2026-10-11。正規表現 + ハイフンの位置の前処理(正規表現の別実装と乱数で一致)。`BenchmarkFind` 約 250MB/s |
-| 7. mask | 未着手 | |
+| 7. mask | ✅ 完了 | 2026-10-11。`BenchmarkEngineMask` 約 200MB/s(検出 + 書き換え。入出力の実ファイルを除く) |
 | 8. hash | 未着手 | |
 | 9. restore | 未着手 | |
 | 10. CLI | 未着手 | Q31 の stderr 出力 |
@@ -644,4 +660,5 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 | 2026-10-11 | 5 | `BenchmarkSecretFinder`(secret の検出器だけ) | 約 0.37 GB/s、1 パスあたり約 3,300 回の割り当て |
 | 2026-10-11 | 6 | `BenchmarkFind`(全 5 種別の検出器がそろった。置換済みの形の走査と重なりの解決を含む) | 約 0.25 GB/s(1 バイトあたり約 4.0ns) |
 | 2026-10-11 | 6 | `BenchmarkUUIDFinder`(uuid の検出器だけ) | 約 7.1 GB/s、割り当て 0 |
+| 2026-10-11 | 7 | `BenchmarkEngineMask`(合成ログ 8MB を既定の種別で mask。検出と書き換えと連番。入出力の実ファイルを除く) | 約 0.20 GB/s、1 パスあたり約 38,000 回の割り当て(約 13MB) |
 | 2026-10-11 | 5 | 改訂後の `BenchmarkFind` / `BenchmarkSecretFinder` | 約 0.25 GB/s / 約 0.39 GB/s(`Bearer` の走査をなくしたぶん、わずかに速い) |
