@@ -104,7 +104,7 @@ v1 の方針: **開発者がログで出会いやすい情報に絞る**。国�
 | Google API キー | `AIza` + 英数字・`-`・`_` 35 文字 |
 | `sk-` 形式の API キー | `sk-` + 英数字・`-`・`_` 20 文字以上(前が英数字でないこと) |
 | JWT | `eyJ…` `.` `eyJ…` `.` `…` の 3 部構成 |
-| Authorization ヘッダ | `Bearer <値>` / `Basic <値>` の値部分 |
+| Authorization ヘッダ | `Bearer <値>` / `Basic <値>` の値部分。キー名(`Authorization`、`Proxy-Authorization`、または下記の対象のキー名)の値が方式名で始まる場合に限る(`got Bearer abc` のような文章中は対象外)。`Basic` は、値が base64 として解読でき、結果に `:`(`user:pass` の形)を含む場合に限る |
 | キー名ベース | 下記「キー名ベースのルール」参照 |
 
 キー名ベースのルール:
@@ -112,23 +112,29 @@ v1 の方針: **開発者がログで出会いやすい情報に絞る**。国�
 - 対象のキー名: `password` `passwd` `secret` `token` `api_key` `apikey` `access_key` `private_key` `client_secret` `access_token` `refresh_token` `auth_token` `session_id`
 - キー名の照合:
   - 大文字・小文字を区別しない。`-` と `_` は同一視する(`api-key` = `api_key`)
-  - キー名は、区切り(`_` `-` `.` または英数字以外)の単位で照合する。上記の語がキー名の末尾の区切り単位として現れれば対象とする
-    - 対象になる例: `token`、`access_token`、`X-Auth-Token`、`db.password`、`DB_PASSWORD`
-    - 対象にならない例: `tokens`、`max_tokens`、`token_count`、`passwordless`
+  - キー名は、区切りの単位で照合する。区切りは、`_` `-` `.` または英数字以外に加えて、**小文字・数字から大文字への変わり目**(`accessToken` の `s` と `T` の間)と、**大文字の連なりの終わり**(`APIKey` の `I` と `K` の間)とする(camelCase。2026-10-11 に改訂。決定事項 15)。上記の語がキー名の末尾の区切り単位として現れれば対象とする
+    - 対象になる例: `token`、`access_token`、`X-Auth-Token`、`db.password`、`DB_PASSWORD`、`accessToken`、`clientSecret`、`sessionId`、`APIKey`
+    - 対象にならない例: `tokens`、`max_tokens`、`maxTokens`、`token_count`、`tokenCount`、`passwordless`、`PGPASSWORD`(大文字だけの語は 1 つの単位)
     - `pwd` は対象にしない。環境変数の `PWD=/home/...`(現在のディレクトリ)を誤検出するため
-- キーと値の区切り: `=`、`:`、`: `(YAML、HTTP ヘッダ)、JSON の `"key": "value"`
+- キーと値の区切り: `=`、`:`、`: `(YAML、HTTP ヘッダ)、JSON の `"key": "value"`。区切りの前後の空白(スペース・タブ)は、任意個を許す
+- キー名は、引用符(`"` または `'`)で囲まれていてもよい。ログに JSON を文字列として埋め込んだ形(`\"password\":\"abc\"`)のように、引用符が `\"` でもよい
 - 値の範囲:
-  - クォート(`"` または `'`)で囲まれている場合は、閉じクォートまで(エスケープされたクォートは値の一部とする)
-  - クォートなしの場合は、空白・`&`・`,`・`;`・`}`・`]`・行末のいずれかの直前まで
-- **値の部分のみ置換**し、キー名・区切り・クォートは残す
+  - 値が引用符(`"` または `'`、または `\"`)で始まる場合は、閉じ引用符の手前まで(`\` の次の文字は、値の一部とする)。閉じ引用符がなければ、行末まで
+  - 引用符なしの場合は、空白(スペース・タブ)・`&`・`,`・`;`・`}`・`]`・`)`・`"`・`'`・行末のいずれかの直前まで。JSON の文字列の中のエスケープ(`\"` `\'` `\n` `\r` `\t` `\u0026`)がある場合も、その `\` の直前まで(`\\` は 1 つの文字)。**空白で終わるため、空白を含む値(`password: my secret phrase`)は、最初の語だけが置換される**
+  - 引用符なしの値が `{` または `[` で始まる場合は、置換しない(構造であって、値ではない)
+  - **キー名が引用符で囲まれている場合(JSON、Python の辞書の形)は、値が引用符で囲まれた文字列のものだけを置換する**。数値・`true`・`false`・`null`・`{`・`[` は置換しない(置換すると、JSON の文法が壊れるため)
+- **値の部分のみ置換**し、キー名・区切り・引用符は残す
   - 例: `password=abc123&user=x` → `password=<secret_1>&user=x`
   - 例: `"api_key": "abc def"` → `"api_key": "<secret_1>"`
+  - 例: `{"msg":"password=abc123"}` → `{"msg":"password=<secret_1>"}`(閉じ引用符を残す)
 - 値が空の場合は置換しない。
+- 値が `Bearer ` / `Basic ` で始まる場合(`Authorization: Bearer abc`、`token: Bearer abc`)は、方式名を残し、その後ろの値(RFC 7235 の token68: 英数字と `-` `.` `_` `~` `+` `/`、末尾に `=`)だけを置換する。方式名の後ろに空白が 1 つ以上必要。キー名が `Authorization` の場合は、方式名がなければ置換しない
 
 補足:
 
 - キー名ベースは、形式を知らない独自トークンも拾うための保険。
 - 上記に当てはまらない独自形式のトークンは検出されない。この限界を README に明記する。
+- キー名ベースの限界(README に明記する): 引用符なしで空白を含む値は、最初の語だけが置換される。JSON の数値だけのトークン(`"pin": 123456`)は、文法を壊さないため置換されない。引用符なしの値に含まれる `"` `'` `)` `&` `,` `;` で、値が途中で終わる。
 - PEM 秘密鍵のような複数行にまたがるブロックは v1 の対象外。
 
 ### 4.2 `uuid` の対象(v1)
@@ -391,9 +397,16 @@ secret:
 
 - [ ] 4.1 の各形式(AWS、GitHub、Slack、Stripe、Google、`sk-`、JWT)がそれぞれ `<secret_N>` になる
 - [ ] `Authorization: Bearer xxxxx` の値部分のみが置換される
+- [ ] `got Bearer abc123 here` のような、キー名のない文章中の `Bearer` は置換されない
+- [ ] `token: Bearer abc123` は、`abc123` だけが置換される(方式名は残る)
 - [ ] `password=abc123&user=x` が `password=<secret_1>&user=x` になる
 - [ ] `"api_key": "abc def"` が `"api_key": "<secret_1>"` になる
 - [ ] `X-Auth-Token: xxx`、`DB_PASSWORD=xxx` は置換され、`max_tokens: 4096`、`token_count=5`、`PWD=/home/user` は置換されない
+- [ ] `accessToken=xxx`、`clientSecret: xxx`、`APIKey=xxx` は置換され、`maxTokens=5`、`PGPASSWORD=xxx` は置換されない
+- [ ] JSON の 1 行に対する置換の結果が、JSON として妥当なままである(`{"msg":"password=abc"}` の閉じ引用符、`"token": 12345` の数値、入れ子の `{` `[` を壊さない)
+- [ ] `"token": 12345`、`"password": null`、`"token": {"a":1}` は置換されない
+- [ ] ログに文字列として埋め込まれた JSON(`{"message":"{\"password\":\"abc\"}"}`)の値が置換される
+- [ ] JSON の文字列の中の `token=abc\ndef`、`?token=abc\u0026user=x` は、`abc` だけが置換される
 
 UUID:
 
@@ -450,6 +463,7 @@ CLI:
 12. `restore` は v1 に含める。対応表はファイルに保存せず、`--source` で渡した元の入力から毎回作り直す
 13. CLI は Go 標準の `flag` のみで実装し、外部ライブラリは使わない。オプションはファイル名の前後どちらに書いてもよい(6.1 参照)
 14. IPv6 は、誤検出を防ぐため、割り当て済みの範囲(`2000::/3`、`fc00::/7`、`fe80::/10`、`ff00::/8`、`::1`、`::`、`::ffff:0:0/96`、`64:ff9b::/96`)だけを検出する。前後の文字の条件は、単独の `:` の区切り扱いと、英字・`_` と癒着した端のグループの切り離しに改めた(2026-10-11、段階 4 の実測に基づく。仕様 7 章の「見逃しを減らす側」より、IPv6 の誤検出の抑制を優先する)
+15. `secret` のキー名ベースと Authorization を、精度重視と JSON の文法の保持を基準に改めた(2026-10-11、段階 5 の実測と確認に基づく)。camelCase を区切りとする。`Bearer` / `Basic` は、キー名の値の位置に限る。キー名が引用符で囲まれた形では、文字列の値だけを置換する。引用符なしの値の終端に、`"` `'` `)` を加える
 
 ## 11. 未決事項
 
