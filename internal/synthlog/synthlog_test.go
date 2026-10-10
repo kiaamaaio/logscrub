@@ -3,6 +3,8 @@ package synthlog
 import (
 	"bytes"
 	"encoding/json"
+	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -104,6 +106,55 @@ func TestGenerateWithoutTargetsHasNoAt(t *testing.T) {
 	for _, line := range bytes.Split(out, []byte("\n")) {
 		if bytes.Contains(line, []byte("@")) && !bytes.Contains(line, []byte("@example.")) {
 			t.Fatalf("unexpected '@' in line: %q", line)
+		}
+	}
+}
+
+// ValuePool を指定すると、検出対象の値の種類数が、その数以下に抑えられる(メモリ測定用)。
+func TestGenerateValuePoolBoundsDistinctValues(t *testing.T) {
+	const pool = 40
+	out, st := generate(t, Config{Size: 3 << 20, Seed: 2, LongLineEvery: 1 << 20, ValuePool: pool})
+	if st.TargetLines == 0 || st.LongLines == 0 {
+		t.Fatalf("stats = %+v", st)
+	}
+	re := regexp.MustCompile(strings.Join([]string{
+		`[a-z0-9]+@example\.[a-z.]+`,
+		`\b\d+\.\d+\.\d+\.\d+\b`,
+		`AKIA[A-Z0-9]{16}`,
+		`ghp_[A-Za-z0-9]{36}`,
+		`[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}`,
+		`Bearer [A-Za-z0-9_-]{40}`,
+		`(?:password|api_key|db_password)=[A-Za-z0-9]+`,
+		`(?:2001:db8|fe80|fd00)::[0-9a-f:]+`,
+	}, "|"))
+	distinct := map[string]struct{}{}
+	for _, m := range re.FindAll(out, -1) {
+		distinct[string(m)] = struct{}{}
+	}
+	if len(distinct) == 0 || len(distinct) > pool {
+		t.Errorf("distinct values = %d, want 1..%d", len(distinct), pool)
+	}
+	// ValuePool なしでは、値の種類数が、大きく増える(この確認が、上の確認の意味を保つ)
+	free, _ := generate(t, Config{Size: 3 << 20, Seed: 2, LongLineEvery: 1 << 20})
+	freeDistinct := map[string]struct{}{}
+	for _, m := range re.FindAll(free, -1) {
+		freeDistinct[string(m)] = struct{}{}
+	}
+	if len(freeDistinct) < 20*pool {
+		t.Errorf("without a pool: distinct values = %d, want many more than %d", len(freeDistinct), pool)
+	}
+}
+
+func TestGenerateValuePoolIsDeterministicAndValid(t *testing.T) {
+	c := Config{Size: 2 << 20, Seed: 4, LongLineEvery: 1 << 20, ValuePool: 25}
+	a, _ := generate(t, c)
+	b, _ := generate(t, c)
+	if !bytes.Equal(a, b) {
+		t.Error("same config produced different output")
+	}
+	for _, line := range bytes.Split(a, []byte("\n")) {
+		if len(line) >= 1<<20 && !json.Valid(line) {
+			t.Fatal("a long line is not valid JSON")
 		}
 	}
 }

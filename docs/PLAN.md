@@ -441,13 +441,27 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 - 通知の文面は、仕様の例を基準に、1 件のとき `1 string was left unchanged because it looks already replaced (line 12)`、6 行以上のとき `(lines 1, 2, 3, 4, 5, ...)` とした。戻せなかったラベルは、50 件まで並べ、超える場合は `, ...`(件数は全体)
 - 出力ファイルは、入力の検証後に、`os.Create` で作る(途中で失敗した場合は、書きかけのファイルが残りうる。一時ファイルと rename にはしていない)
 
-### 段階 11: 性能・メモリ・README
+### 段階 11: 性能・メモリ・README — ✅ 完了(2026-10-11)
 
 - 合成ログ(100MB)で `cmd/logscrub` を実測し、50MB/s を確認。足りなければ 4.4 節の手順で改善する
 - 最大メモリ使用量の確認(値の種類数を一定に保った 100MB 入力で、最大 RSS が入力サイズに比例して増えないこと)。`golang` イメージには `/usr/bin/time` がないため、テストからビルド済みのバイナリを子プロセスで起動し、`ProcessState.SysUsage()` の `Maxrss` を読む(標準ライブラリのみで完結する)
 - 性能・メモリの測定もコンテナ内で行う。合成ログはコンテナ内で生成し、リポジトリ外の一時領域に置く
 - README: 使い方、`secret` の対応形式、限界(仕様に「README に明記する」とあるもの全部)、ベンチ結果
-- 前提となる確認: Q29
+- 前提となる確認: Q29(確定済み)
+
+**実装メモ・気づいた点**
+
+- 測定テスト: `cmd/logscrub/perf_test.go`。`go test` の中で、バイナリをビルドし、合成ログを一時ファイルに作り、子プロセスとして実行して、実時間と `Maxrss` を測る。時間がかかるので、`-perf` を付けたときだけ実行する(`./scripts/go test -run Perf -v ./cmd/logscrub -perf [-perf-size 100]`)。50MB/s を下回ると、テストが失敗する。メモリは、入力が 5 倍になっても、最大メモリ使用量が 16MB 以上増えないことを確認する
+- `synthlog.Config.ValuePool` を追加した。検出対象の値を、固定数の候補から選ぶので、出力が大きくなっても、値の種類数が増えない(メモリの測定用)。0 では、従来どおり、行ごとにほぼ異なる値
+- **測定結果**(合成ログ 100MB、AMD Ryzen 9 9950X、WSL2 上の Docker コンテナ(`golang:1.27.2`、2 CPU)内、3 回の最速)
+  - `logscrub mask < big.log > /dev/null`: 約 195MB/s、最大 30MB
+  - `cat big.log | logscrub mask > /dev/null`: 約 176MB/s、最大 30MB
+  - `--types default,uuid`: 約 182MB/s、最大 34MB
+  - 値の種類数が 1,000 のとき、入力 20MB / 50MB / 100MB の最大メモリ使用量は、どれも 16.8MB(入力の大きさに比例しない)。ほぼすべての値が異なる 100MB では、31.6MB(対応表が、値の種類数に比例して増える)
+  - **目標(50MB/s)の約 3.5 倍以上**。4.4 節の改善手順(手書きへの置き換えなど)は、必要なかった
+- README: 使い方(mask / hash / restore / types)、オプション、終了コード、検出対象、`secret` の対応形式、性質(決定的・冪等・値を出さない)、限界(仕様で「README に明記する」とされたもの、および実装で見つけたもの)、性能、開発(Docker、構成)。例の出力は、ビルドしたバイナリで確かめた
+- 仕様 8 章の構成(案)を、実際の構成に合わせて直した
+
 
 ---
 
@@ -686,8 +700,11 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 | 7. mask | ✅ 完了 | 2026-10-11。`BenchmarkEngineMask` 約 200MB/s(検出 + 書き換え。入出力の実ファイルを除く) |
 | 8. hash | ✅ 完了 | 2026-10-11。`BenchmarkEngineHash` 約 210MB/s。email の除外を、hash 出力形・ラベルに広げた(SPEC 5.2) |
 | 9. restore | ✅ 完了 | 2026-10-11。`BenchmarkRestore` 約 185MB/s |
-| 10. CLI | 未着手 | Q31 の stderr 出力 |
-| 11. 性能・README | 未着手 | |
+| 10. CLI | ✅ 完了 | 2026-10-11。受け入れ基準を `cli.Run` 経由の E2E テストで通した。仕様で決まっていなかった点を記録(段階 10 の節) |
+| 11. 性能・README | ✅ 完了 | 2026-10-11。実測 約 176〜195MB/s(目標の約 3.5 倍以上)、最大メモリ 16.8〜34MB |
+
+**v1 の全段階が完了した(2026-10-11)。** 受け入れ基準(SPEC 9 章)の、CLI から確認できる項目は `internal/cli/cli_test.go` で、
+性能・メモリ(100MB)の項目は `cmd/logscrub/perf_test.go`(`-perf`)で確認している。
 
 ### ベンチマーク記録
 
@@ -709,6 +726,11 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 | 2026-10-11 | 6 | `BenchmarkFind`(全 5 種別の検出器がそろった。置換済みの形の走査と重なりの解決を含む) | 約 0.25 GB/s(1 バイトあたり約 4.0ns) |
 | 2026-10-11 | 6 | `BenchmarkUUIDFinder`(uuid の検出器だけ) | 約 7.1 GB/s、割り当て 0 |
 | 2026-10-11 | 7 | `BenchmarkEngineMask`(合成ログ 8MB を既定の種別で mask。検出と書き換えと連番。入出力の実ファイルを除く) | 約 0.20 GB/s、1 パスあたり約 38,000 回の割り当て(約 13MB) |
+| 2026-10-11 | 11 | **実バイナリ**: `logscrub mask < big.log > /dev/null`(合成ログ 100MB、3 回の最速。`cmd/logscrub/perf_test.go`) | 約 195 MB/s、最大メモリ 30 MB |
+| 2026-10-11 | 11 | 実バイナリ: `cat big.log \| logscrub mask > /dev/null`(パイプ) | 約 176 MB/s、最大メモリ 30 MB |
+| 2026-10-11 | 11 | 実バイナリ: `--types default,uuid` | 約 182 MB/s、最大メモリ 34 MB |
+| 2026-10-11 | 11 | 実バイナリ: 値の種類数 1,000 の合成ログ(20 / 50 / 100MB) | 最大メモリ 16.8 MB(どれも同じ) |
+| 2026-10-11 | 11 | 実バイナリ: ほぼすべての値が異なる 100MB | 最大メモリ 31.6 MB |
 | 2026-10-11 | 9 | `BenchmarkRestore`(8MB の合成ログの mask 結果を、元の入力から restore。元の入力の処理 + 回答の走査) | 約 0.19 GB/s(元の入力の大きさあたり)、1 パスあたり約 38,000 回の割り当て(約 24MB) |
 | 2026-10-11 | 8 | `BenchmarkEngineHash`(同じ合成ログを hash モード(`full`、12 桁)で変換。HMAC-SHA256) | 約 0.21 GB/s、1 パスあたり約 19,000 回の割り当て(約 11MB) |
 | 2026-10-11 | 5 | 改訂後の `BenchmarkFind` / `BenchmarkSecretFinder` | 約 0.25 GB/s / 約 0.39 GB/s(`Bearer` の走査をなくしたぶん、わずかに速い) |

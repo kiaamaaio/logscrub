@@ -30,6 +30,10 @@ type Config struct {
 	Seed uint64
 	// LongLineEvery は、この間隔(出力のバイト数)ごとに、1MB の JSON を 1 行で挟む。0 で挟まない。
 	LongLineEvery int
+	// ValuePool が 0 より大きい場合は、検出対象の値(メールアドレス、IP アドレス、トークン、UUID)を、
+	// この数の候補からだけ選ぶ。出力が大きくなっても、値の種類数が増えない。メモリ使用量が、
+	// 入力の大きさでなく、値の種類数に比例することの測定に使う。0 では、行ごとに、ほぼ異なる値になる。
+	ValuePool int
 }
 
 // Stats は、作ったログの内訳。
@@ -42,7 +46,7 @@ type Stats struct {
 
 // Generate は、c に従う合成ログを w に書く。
 func Generate(w io.Writer, c Config) (Stats, error) {
-	g := &generator{rng: rand.New(rand.NewPCG(c.Seed, c.Seed^0x9e3779b97f4a7c15))}
+	g := &generator{rng: rand.New(rand.NewPCG(c.Seed, c.Seed^0x9e3779b97f4a7c15)), seed: c.Seed, pool: c.ValuePool}
 	bw := bufio.NewWriterSize(w, 64<<10)
 	var st Stats
 	nextLong := c.LongLineEvery
@@ -71,7 +75,9 @@ func Generate(w io.Writer, c Config) (Stats, error) {
 }
 
 type generator struct {
-	rng *rand.Rand
+	rng  *rand.Rand
+	seed uint64
+	pool int
 }
 
 var (
@@ -149,6 +155,12 @@ func (g *generator) normalLine(dst []byte, index int) ([]byte, bool) {
 
 // targetFragment は、検出対象を 1 つ含む `key=value` の形の断片を返す。
 func (g *generator) targetFragment() string {
+	if g.pool > 0 {
+		// 候補の番号 k から、決まった値を作る(同じ k なら、同じ値)。
+		k := g.rng.IntN(g.pool)
+		sub := &generator{rng: rand.New(rand.NewPCG(g.seed^0x5bd1e995, uint64(k)+1))}
+		return sub.targetFragment()
+	}
 	switch g.rng.IntN(10) {
 	case 0, 1:
 		return fmt.Sprintf("user=%s%d@example.%s", g.lower(4+g.rng.IntN(6)), g.rng.IntN(1000), g.pick([]string{"com", "org", "co.jp"}))
@@ -205,6 +217,11 @@ func (g *generator) longLine(dst []byte) []byte {
 		}
 		dst = fmt.Appendf(dst, `{"seq":%d,"level":%q,"msg":%q`, i, g.pick(levels), g.pick(words)+" "+g.pick(words)+" "+g.pick(words))
 		if g.rng.IntN(100) < targetPercent {
+			if g.pool > 0 {
+				dst = fmt.Appendf(dst, `,"note":%q`, g.targetFragment())
+				dst = append(dst, '}')
+				continue
+			}
 			switch g.rng.IntN(3) {
 			case 0:
 				dst = fmt.Appendf(dst, `,"user":"%s%d@example.com"`, g.lower(6), g.rng.IntN(1000))
