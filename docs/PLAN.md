@@ -35,7 +35,7 @@
 
 ## 1. パッケージ構成と主要な型・関数
 
-仕様 8 章の構成を土台に、2 つのパッケージを追加する。
+仕様 8 章の構成を土台に、3 つのパッケージ(`cli`、`label`、`synthlog`)を追加する。
 
 ```
 logscrub/
@@ -47,7 +47,8 @@ logscrub/
 │   ├── label/                   # 【追加】--mask-format の解析/生成/走査、hash 出力形の走査
 │   ├── detect/                  # 種別ごとの検出、重なりの解決、置換対象外の除外
 │   ├── transform/               # mask.go, hash.go, restore.go, engine.go(行の書き換え)
-│   └── stream/                  # 行単位の入出力(改行コード・末尾改行の保持)
+│   ├── stream/                  # 行単位の入出力(改行コード・末尾改行の保持)
+│   └── synthlog/                # 【追加】性能測定用の合成ログの生成器(Q29)
 └── testdata/                    # 往復テスト・E2E 用の入力と期待出力
 ```
 
@@ -57,6 +58,7 @@ logscrub/
 |---|---|
 | `internal/label` を追加 | ラベルの書式は「mask で生成」「restore で読み取り」「検出時に置換済みとして除外」の 3 か所で使う。`detect` に置くと `transform` → `detect` の依存は良いが、書式の責務が検出に混ざる。`transform` に置くと `detect` → `transform` の循環になる。独立させて両方から使う |
 | `internal/cli` を追加し、`main.go` は薄くする | `cli.Run(args, stdin, stdout, stderr, getenv) int` にすると、終了コード・stdout/stderr の分離・オプション順序などの受け入れ基準を、バイナリを作らずにテストで確認できる |
+| `internal/synthlog` を追加 | ベンチマーク(段階 2〜)と性能測定(段階 11)で同じ合成ログを使うため。テスト以外のコードからは使わない |
 | `transform/engine.go` を追加 | 「行を読む → 検出 → 置換 → 書く」の流れを mask / hash / restore(の対応表作り直し)で共有する。restore が mask と**同じコード経路**で連番を振ることが、連番の決定性(4.3 節)の要になる |
 
 ### 主要な型・関数(案)
@@ -98,8 +100,8 @@ func ScanHashed(line []byte, hexLen int, fn func(start, end int))
 **detect**
 
 ```go
-type Kind uint8   // Email, IPv4, IPv6, Secret, UUID(この順が同じ長さのときの優先順位)
-type Class uint8  // ClassNone, Global, Private, Special(IP のみ使用)
+type Kind uint8   // KindEmail, KindIPv4, KindIPv6, KindSecret, KindUUID(0 は無効)
+type Class uint8  // ClassNone, ClassGlobal, ClassPrivate, ClassSpecial(IP のみ使用)
 
 type Match struct {
     Start, End int  // 置換する範囲(行内のバイト位置)
@@ -108,7 +110,7 @@ type Match struct {
 }
 func (m Match) LabelType() string  // "email", "ipv4_private" など
 
-func ParseTypes(spec string) (KindSet, error)  // "default,uuid" → 集合。不明な名前はエラー
+func ParseTypes(spec string) (KindSet, error)  // "default,uuid" → 集合。不明な名前はエラー(完全一致のみ)
 
 type Options struct {
     Kinds        KindSet
@@ -116,23 +118,29 @@ type Options struct {
     IPScope      Scope           // All / Global / Private
     Allow        map[string]struct{}
     Format       label.Format    // 置換済みラベルの除外用
-    HashLen      int             // hash 出力形の除外用(→ Q10)
+    HashLen      int             // hash 出力形の除外用(→ Q10)。ゼロ値は 12、範囲は 8〜64
 }
-type Detector struct { ... }
+type Detector struct { ... }       // 作業領域を持つので、同時に使えない
 func New(o Options) (*Detector, error)
 // Find は、重なりを解決し、除外を適用した結果を、開始位置の順に dst に追記して返す。
-func (d *Detector) Find(line []byte, dst []Match) []Match
+// 2 つ目の戻り値は、置換済みの形のため置換せずに残した範囲の数(Q31)。
+func (d *Detector) Find(line []byte, dst []Match) ([]Match, int)
 ```
+
+`Options` のゼロ値の項目は既定値になる(`Kinds` は `DefaultKinds`、`Format` は `label.DefaultFormat`、`IPScope` は `ScopeAll`、`HashLen` は 12)。
+`UUIDVersions` が 0 以外なら `Kinds` に uuid が加わる。1〜8 以外のビットはエラー。
 
 内部では種別ごとに次の形の検出器を持つ。
 
 ```go
 type finder interface {
     kind() Kind
-    may(line []byte, hint lineHint) bool             // 前処理(4.4 節)。必要条件だけを見る
-    find(line []byte, dst []candidate) []candidate   // 候補を追記(重なりはまだ解決しない)
+    find(line []byte, dst []Match) []Match           // 候補を追記(重なりはまだ解決しない)
 }
 ```
+
+前処理(4.4 節)用の `may(line, hint)` は、最初に必要になる段階 3(email の `@`)で、`finder` に加える。
+段階 2 の時点では、前処理を使う検出器がなく、どのヒントが要るかを推測で決めることになるため。
 
 **transform**
 
@@ -194,7 +202,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 - 通常の行(64KB 以内)は、コピーも割り当てもしない(`TestReaderShortLinesDoNotAllocate`)。50MB/s のための前提
 - 「`go.mod` に外部依存なし」は、`modfile_test.go` が `require` などの指令と `go.sum` の有無を確認する。全段階で維持される
 
-### 段階 2: 検出の枠組み(`label`、`detect` の骨組み)
+### 段階 2: 検出の枠組み(`label`、`detect` の骨組み) — ✅ 完了(2026-10-11)
 
 - `label.ParseFormat` / `Append` / `Scan`、`label.ScanHashed`
 - `detect.ParseTypes`、`Kind` / `Match`、重なりの解決、置換済みの値の除外、`--allow` と IP の区別による除外の差し込み口
@@ -202,7 +210,28 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
   - 長いほうが勝つ / 同じ長さは優先順位 / 一部だけ重なる / 3 つ以上が連鎖して重なる / 同じ種別・同じ長さ
   - 置換済みラベル・hash 出力形との重なり(4.2 節の方針)
 - ベンチマークの枠(`BenchmarkFind`、合成ログの生成器)をこの時点で用意し、以降の段階で毎回測る
-- 前提となる確認: Q1、Q2、Q10、Q11、Q12
+- 前提となる確認: Q1、Q2、Q10、Q11、Q12(すべて確定済み)
+
+**実装メモ・気づいた点**
+
+- 実装: `internal/label/{format,hashed}.go`、`internal/detect/{kind,detector}.go`、`internal/synthlog/synthlog.go`。テストは各パッケージの `*_test.go`
+- `Detector.Find` の戻り値は `([]Match, int)`(PLAN の案は `[]Match` のみ)。2 つ目は Q31 の件数で、置換済みの形のため残した範囲のうち、重なりの解決で残ったものの数。段階 7 以降の `Engine` が、件数と行番号を集計して stderr に出す
+- `finder` に `may` / `lineHint` はまだ入れていない(上の 1 章を参照)。段階 3 で、最初に必要になった形で加える
+- 重なりの解決は、塊ごとに解決する方式にした(4.1 節)。`TestManyDisjointCandidates`(10 万件)と、乱数 3000 通りの参照実装との一致テストで確認
+- 「保護範囲」の数え方(Q31): 置換済みの形の文字列は、競合する候補がなくても数える(`<email_1>` だけの行でも 1 件)。仕様 9 章「置換済みの形の文字列を含む入力では、件数と行番号が stderr に通知される」に合わせた。競合する候補に負けて置換された場合は数えない。`--allow` で残したものは数えない
+- `--allow` は、検出器が見つけた候補のテキストとの完全一致で判定する(候補にならない文字列は対象外)。大文字・小文字は区別する
+- `label.ScanHashed` は、`hash_<hex>@ドメイン` の範囲をドメインの末尾までとする。ドメインの形(`([A-Za-z0-9-]+\.)+[A-Za-z]{2,}`、末尾の `.` を含めない)は `label` 内の `domainEnd` が持つ。**段階 3 の email 検出器は、この形と範囲が一致するように作り、`hash_<hex>@ドメイン` が検出対象外であることを、検出器側のテストでも確認する**(範囲が保護範囲より長いと、保護範囲が負けて再ハッシュされるため)
+- `KindSet` のゼロ値は「`DefaultKinds`」として扱う(`--types` が空になることはないため)
+- `New` で、`HashLen`(8〜64、Q21)、`UUIDVersions`(1〜8)、`IPScope` を検証する。CLI のオプション解析(段階 10)は、文字列から値を作るところだけを持てばよい
+- 追加した `synthlog`: Q29 の条件(200 バイト前後、約 30% の行に検出対象、`LongLineEvery` ごとに 1MB の JSON 行)の合成ログを、同じ設定なら同じ内容で作る。`Stats` で内訳が分かる。検出対象でない行には `@` や IP アドレスを入れない
+
+**仕様・計画で決まっていなかったため、文面どおりに実装した点(異論があれば指摘してほしい)**
+
+- `--types` の名前は、完全一致のみ(`Email`、`email, uuid` の空白、`email,` の空の要素は、存在しない種別名としてエラー)
+- `{type}` / `{n}` の前後にリテラルがない書式(`{type}_{n}`、`{type}{n}`)では、`my_email_1` の中の `email_1` もラベルとして扱う(単語の境界は見ない)。このため、`client_secret_1` のような本物の値が保護範囲になりうる。既定の `<{type}_{n}>` では起きない
+- hash 出力形の前後の文字は、英数字かどうかだけで判定する(Q10 の確定内容どおり)。`_` は英数字に含めないので、`my_email_<hex>` も保護範囲になる
+
+**ベンチマーク(`BenchmarkFind`)**: 検出器がまだないため、置換済みの形の走査と重なりの解決だけの数値(基準値)。後の段階の数値と比べる
 
 ### 段階 3: email
 
@@ -358,7 +387,8 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 - 負けた候補は、重なっていない部分も含めて捨てる(仕様「一部だけ重なる場合も 1 つに決める」)。部分を再検出はしない
 - 同じ種別・同じ長さの重なりは開始位置が前のほうを採る(仕様に記述なし。順序が決定的であれば良い点なので、確認事項には入れず、この方針で進める。異論があれば指摘してほしい)
 - ipv4 と ipv6 は同じ優先順位だが、同じ長さで重なることは形式上起きない(IPv6 は必ず `:` を含み、IPv4 は含まない)
-- 候補は 1 行に数個なので、単純なソート + 線形の重なり確認で十分
+- 実装は、候補を開始位置で並べ、**重なる候補の塊(推移的に重なるもの)ごと**に上の規則で解決する。塊が違う候補は重ならないので、全体に対する貪欲法と同じ結果になる(乱数テストで、単純な参照実装との一致を確認している)。
+  当初は「候補は 1 行に数個なので、単純なソート + 線形の重なり確認で十分」としていたが、1MB の JSON 1 行に候補が数万件ある場合に 2 乗の時間になるため変えた
 
 ### 4.2 冪等性(置換済みの値を検出しない仕組み)
 
@@ -487,7 +517,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 |---|---|---|
 | 計画 | 完了 | 2026-10-11 作成。Q1〜Q31 確定 |
 | 1. 入出力の土台 | ✅ 完了 | 2026-10-11。`go test ./...`、`go vet ./...`(`-race` も)通過 |
-| 2. 検出の枠組み | 未着手 | 保護範囲の件数・行番号を数える仕組みを含める(Q31) |
+| 2. 検出の枠組み | ✅ 完了 | 2026-10-11。`Find` が保護範囲の件数を返す(行番号の集計は `Engine`、段階 7) |
 | 3. email | 未着手 | |
 | 4. ipv4 / ipv6 | 未着手 | |
 | 5. secret | 未着手 | |
@@ -500,4 +530,6 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 
 ### ベンチマーク記録
 
-(段階 2 以降で追記)
+| 日付 | 段階 | 内容 | 結果 |
+|---|---|---|---|
+| 2026-10-11 | 2 | `BenchmarkFind`(8MB の合成ログ。検出器なし = 置換済みの形の走査と重なりの解決のみ) | 約 10 GB/s、割り当て 0(AMD Ryzen 9 9950X、Docker コンテナ内、`GOMAXPROCS=2`) |
