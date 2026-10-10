@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Go の操作を Docker コンテナ内で実行するラッパー(docs/PLAN.md 0 章)。
+# 引数はそのまま go に渡す。例: ./scripts/go test ./...
+set -euo pipefail
+
+image="golang:1.27.2"
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+mkdir -p "$repo/.cache"
+
+exec docker run --rm -i \
+  --network none \
+  -u "$(id -u):$(id -g)" \
+  -v "$repo":/src -w /src \
+  -v "$repo/.cache":/cache \
+  -e HOME=/tmp \
+  -e GOCACHE=/cache/go-build \
+  -e GOMODCACHE=/cache/mod \
+  -e GOTOOLCHAIN=local \
+  "$image" go "$@"
