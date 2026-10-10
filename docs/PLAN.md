@@ -433,7 +433,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 - restore は、`--source` と ANSWER_FILE をすべて開いてから、`transform.Restore` に渡す。`--source -` は、ANSWER_FILE を指定した場合だけ(両方が標準入力なら、エラー)。stdin は 1 回だけ使える
 - 終了コード 0: 戻せないラベルがあっても(警告のみ)。通知(置換済みの形を残した件数と行番号)は、終了コードを変えない
 
-**仕様で決まっていなかったため、決めた点(異論があれば指摘してほしい)**
+**仕様で決まっていなかったため、決めた点(2026-10-11 に、利用者が確認済み。問題なし)**
 
 - `--output -` は、標準出力(ファイル名 `-` ではない)。入力の `-` が標準入力であることに合わせた
 - `logscrub --help` / `-h` / `help`(サブコマンドなし)と、`logscrub <command> --help` は、使い方を stdout に出して、終了コード 0。サブコマンドなし・不明なサブコマンドは、使い方を stderr に出して、終了コード 1(仕様どおり)
