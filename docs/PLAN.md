@@ -49,7 +49,7 @@ logscrub/
 │   ├── transform/               # mask.go, hash.go, restore.go, engine.go(行の書き換え)
 │   ├── stream/                  # 行単位の入出力(改行コード・末尾改行の保持)
 │   └── synthlog/                # 【追加】性能測定用の合成ログの生成器(Q29)
-└── testdata/                    # 往復テスト・E2E 用の入力と期待出力
+└── (各パッケージの testdata/)   # 往復テスト・E2E 用の入力と期待出力(実際は internal/transform/testdata/)
 ```
 
 ### 仕様 8 章から変える点と理由
@@ -196,13 +196,13 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 
 **実装メモ・気づいた点**
 
-- 実装: `internal/stream/reader.go`(`Reader`)、`internal/stream/copy.go`(`ForEachLine`、`Copy`)。テストは `internal/stream/*_test.go` とリポジトリ直下の `modfile_test.go`
+- 実装: `internal/stream/reader.go`(`Reader`)、`internal/stream/copy.go`(`ForEachLine`、`Copy`)。テストは `internal/stream/*_test.go` と `cmd/logscrub/modfile_test.go`(当初はリポジトリ直下に置いていたが、直下にテストだけのパッケージを作らないよう移した)
 - `go mod init` は `go 1.27.2` と書くため、PLAN の指定どおり `go 1.27` に直した
 - Q22 は確定済みなので、「回答前は保留」としていた複数入力のテストも、この段階で実装した。複数入力の処理は `ForEachLine` に置いたので、段階 7 の `Engine.Run` はこれを使えばよい
 - `Reader.Next` の読み込みエラー時の扱い: 読みかけの行は返さずエラーだけを返す(エラーなら処理全体を異常終了するため)
 - 「受け入れ基準の 100MB を処理でき、メモリが増え続けない」は段階 11 で確認する。この段階の `Reader` は、**1 行がどれだけ長くてもその行をまるごとメモリに持つ**(行の長さに上限を設けない、という仕様 7 章の結果)。改行のない巨大な入力は、その大きさ分のメモリを使う。README の限界に書く候補
 - 通常の行(64KB 以内)は、コピーも割り当てもしない(`TestReaderShortLinesDoNotAllocate`)。50MB/s のための前提
-- 「`go.mod` に外部依存なし」は、`modfile_test.go` が `require` などの指令と `go.sum` の有無を確認する。全段階で維持される
+- 「`go.mod` に外部依存なし」は、`cmd/logscrub/modfile_test.go` が `require` などの指令と `go.sum` の有無を確認する。全段階で維持される
 
 ### 段階 2: 検出の枠組み(`label`、`detect` の骨組み) — ✅ 完了(2026-10-11)
 
@@ -364,7 +364,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 - **`Masker`**: 種別名(IP は区別込み)ごとに、「値のバイト列(完全一致。Q3)→ 連番」の map を持つ。初めて見た値に、その種別の次の番号を振る(Q4)。`--allow` の値、特殊アドレス、`--ip-scope` 外、保護範囲は、`Detector` が候補から外すので、番号を消費しない。map の反復には依存しない。restore 用の逆引き(番号 → 値)は、段階 9 で、必要になった形で加える
 - **`Engine`**: `stream.ForEachLine`(入力ごとに行を区切る = Q22)で読み、`Detector.Find` で範囲を決め、`Replacer` で書き換えて、64KB のバッファ付きで書く。一致のない行は、読んだスライスをそのまま書く。`Run` は、`Stats` に加算する(`Engine.Stats` は、PLAN の案のポインタでなく、値)
 - **`Stats`**(Q19、Q31): 種別ごとの置換した出現回数(`Count` / `Types` は `label.Types` の順で、0 件は出さない / `Total`)、読んだ行数(`Lines`)、置換せずに残した置換済みの形の数(`Kept`)と、その行番号(`KeptLines`。入力をまたいで通しで数える 1 始まり、昇順、最初の 5 件まで)。値は持たない。stderr への出力(`--stats` と通知の文面)は、段階 10 が、この値から作る
-- `testdata/app.log`(17 行。日本語、email、各種 IP、トークン、UUID、JSON、コードの記号、電話番号、置換済みの形)と、手で確認した `testdata/app.mask.golden` を追加した。段階 9(restore の往復)、段階 10(E2E)でも使う
+- `internal/transform/testdata/app.log`(17 行。日本語、email、各種 IP、トークン、UUID、JSON、コードの記号、電話番号、置換済みの形)と、手で確認した `testdata/app.mask.golden` を追加した。段階 9(restore の往復)、段階 10(E2E)でも使う
 - 受け入れ基準の「同じ入力・同じオプションで 2 回実行すると同じ出力」「置換済みテキストを再度流しても変わらない(mask)」「日本語」「64KB 超」「CRLF・末尾改行」は、`internal/transform/mask_test.go` で確認した
 
 **冪等性のテストで見つけた不具合と、性質の見直し**

@@ -755,18 +755,6 @@ func TestRestoreNotifiesUnchangedStrings(t *testing.T) {
 	}
 }
 
-// ---- 標準ライブラリだけ ----
-
-func TestGoModHasNoDependencies(t *testing.T) {
-	b, err := os.ReadFile("../../go.mod")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(b), "require") {
-		t.Errorf("go.mod has requirements:\n%s", b)
-	}
-}
-
 // 受け入れ基準: 出力が、そのまま stdout へ書かれ、stderr と混ざらない(全体を通して)。
 func TestStdoutOnlyHasTheTransformedText(t *testing.T) {
 	r := run(t, "a@x.com <email_1>\n", nil, "mask", "--stats", "--fail-on-detect")

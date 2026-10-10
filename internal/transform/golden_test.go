@@ -12,23 +12,23 @@ import (
 
 func readSample(t testing.TB) string {
 	t.Helper()
-	b, err := os.ReadFile("../../testdata/app.log")
+	b, err := os.ReadFile("testdata/app.log")
 	if err != nil {
 		t.Fatal(err)
 	}
 	return string(b)
 }
 
-// testdata/app.log を mask した結果が、testdata/app.mask.golden と一致する。
+// testdata/app.log を mask した結果が、testdata/app.mask.golden と一致する(internal/transform/testdata)。
 // 期待値は、手で確認したもの。仕様の変更で変わる場合は、内容を確認してから更新する。
 func TestMaskGolden(t *testing.T) {
-	want, err := os.ReadFile("../../testdata/app.mask.golden")
+	want, err := os.ReadFile("testdata/app.mask.golden")
 	if err != nil {
 		t.Fatal(err)
 	}
 	got, _ := mask(t, detect.Options{Kinds: detect.DefaultKinds.With(detect.KindUUID)}, readSample(t))
 	if got != string(want) {
-		t.Errorf("mask output differs from testdata/app.mask.golden\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		t.Errorf("mask output differs from internal/transform/testdata/app.mask.golden\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
 

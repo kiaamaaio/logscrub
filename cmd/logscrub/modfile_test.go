@@ -1,4 +1,4 @@
-package logscrub
+package main
 
 import (
 	"os"
@@ -8,7 +8,7 @@ import (
 
 // 受け入れ基準: go.mod に外部の依存がない(標準ライブラリのみ)。
 func TestGoModHasNoDependencies(t *testing.T) {
-	b, err := os.ReadFile("go.mod")
+	b, err := os.ReadFile("../../go.mod")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +22,7 @@ func TestGoModHasNoDependencies(t *testing.T) {
 			t.Errorf("go.mod:%d: unexpected directive %q (外部の依存は使わない)", i+1, f[0])
 		}
 	}
-	if _, err := os.Stat("go.sum"); err == nil {
+	if _, err := os.Stat("../../go.sum"); err == nil {
 		t.Error("go.sum exists; 外部の依存は使わない")
 	}
 }

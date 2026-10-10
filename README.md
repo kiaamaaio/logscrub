@@ -248,11 +248,10 @@ $ ./scripts/go build -o bin/logscrub ./cmd/logscrub
 | `cmd/logscrub` | 入口(`cli.Run` を呼ぶだけ)。性能・メモリの測定テストもここ |
 | `internal/cli` | サブコマンド、オプションの解析、入出力、終了コード |
 | `internal/detect` | 種別ごとの検出と、範囲の重なりの解決、置換済みの値の除外 |
-| `internal/transform` | mask / hash / restore と、行の書き換え(Engine)、統計 |
+| `internal/transform` | mask / hash / restore と、行の書き換え(Engine)、統計。`testdata/` に、サンプルログと、手で確認した期待値 |
 | `internal/label` | ラベルの書式と、hash 出力形の走査 |
 | `internal/stream` | 行単位の入出力(改行コードの保持) |
 | `internal/synthlog` | 性能測定用の合成ログの生成器 |
-| `testdata` | サンプルログと、手で確認した期待値 |
 
 仕様は [docs/SPEC.md](docs/SPEC.md)、実装計画と進捗・判断の記録は [docs/PLAN.md](docs/PLAN.md) にあります。
 

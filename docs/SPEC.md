@@ -351,12 +351,12 @@ logscrub/
 ├── internal/
 │   ├── cli/           # サブコマンドの振り分け、オプションの解析(標準の flag のみ)、入出力、終了コード
 │   ├── detect/        # 種別ごとの検出、範囲の重なりの解決、置換済みの値・--allow・IP の区別による除外
-│   ├── transform/     # mask.go、hash.go、restore.go、engine.go(行の書き換え)、stats.go、key.go
+│   ├── transform/     # mask.go、hash.go、restore.go、engine.go(行の書き換え)、stats.go、key.go。
+│   │                  #   testdata/ に、サンプルログと、手で確認した期待値、ファズテストの入力
 │   ├── label/         # --mask-format の解析・生成・走査、hash 出力形の走査、メールアドレスの構文
 │   ├── stream/        # 行単位の入出力(改行コードの保持を含む)
 │   └── synthlog/      # 性能測定用の合成ログの生成器
 ├── scripts/go         # Go の操作を Docker コンテナ(golang:1.27.2)の中で行うラッパー
-├── testdata/          # サンプルログと、手で確認した期待値
 └── docs/              # SPEC.md(この文書)、PLAN.md(実装計画と進捗・判断の記録)
 ```
 
