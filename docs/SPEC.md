@@ -239,6 +239,7 @@ HMAC-SHA256(秘密鍵つき)の先頭 N 文字(既定 12)を使う。単純な S
 | `full` | `taro@example.com` | `email_3f9a1c0b7d2e`(全体をハッシュ) |
 
 - `local` の出力は、ローカルパートを `hash_` + 16 進数の形にする。この形(`hash_` + `--hash-length` 桁の 16 進数)のローカルパートを持つメールアドレスは、**検出の対象外**とする。再度流しても再ハッシュされないようにするため(冪等性)。
+- 同じ理由で、ローカルパートが、hash の出力形(`<種別>_` + `--hash-length` 桁の 16 進数。例: `email_3f9a1c0b7d2e`)や、現在の `--mask-format` のラベルそのもの(例: `{type}_{n}` 書式の `email_1`)であるメールアドレスも、検出の対象外とする。`user@example.com@bastion.example.org` のように、`@` が続く入力の、先頭の `user@example.com` だけが置換された結果(`email_<hex>@bastion.example.org`)を、全体で 1 つのメールアドレスとして再度置換しないため。
 - email 以外の種別は、値全体をハッシュする。出力は `<種別>_<hex>`(例: `ipv4_global_a1b2c3d4e5f6`)。
 - `hash` モードは復元不可。
 

@@ -33,3 +33,29 @@ func BenchmarkEngineMask(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkEngineHash は、同じ合成ログを、hash モード(`--email-hash full`、12 桁)で変換する時間を測る。
+func BenchmarkEngineHash(b *testing.B) {
+	var sb strings.Builder
+	if _, err := synthlog.Generate(&sb, synthlog.Config{Size: 8 << 20, Seed: 1, LongLineEvery: 4 << 20}); err != nil {
+		b.Fatal(err)
+	}
+	data := []byte(sb.String())
+	det, err := detect.New(detect.Options{})
+	if err != nil {
+		b.Fatal(err)
+	}
+	h, err := NewHasher([]byte("benchmark-key"), 12, EmailHashFull)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.SetBytes(int64(len(data)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		eng := &Engine{Det: det, Rep: h}
+		if err := eng.Run([]io.Reader{bytes.NewReader(data)}, io.Discard); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

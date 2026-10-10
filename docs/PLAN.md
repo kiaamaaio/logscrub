@@ -374,11 +374,29 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
   - 仕様の冪等性(置換済みの値を再度置換しない)には反しないので、ファズテストの性質を、「2 回目に新しく検出する値は、1 回目のラベルに隣接するものだけ。ラベルと重なる検出や、置換と無関係な場所での検出は、不具合」に改めた(`FuzzMaskStable`)。1 回目と 2 回目が完全に同じであること(`mask(mask(x)) == mask(x)`)は、現実的な入力(受け入れ基準の例、サンプルログ、合成ログ 3MB、各種書式)で、引き続き確認している
   - ファズテストは、60 秒 × 4 ラウンド(合計約 940 万回)で、この性質の違反が見つからなかった
 
-### 段階 8: hash(`transform.Hasher`、`LoadKey`)
+### 段階 8: hash(`transform.Hasher`、`LoadKey`) — ✅ 完了(2026-10-11)
 
 - HMAC-SHA256 の先頭 N 桁、email の `local` / `full`、鍵の読み込み(環境変数 / `--key-file`)
 - 冪等性: `hash(hash(x)) == hash(x)`(ファズテスト含む)
-- 前提となる確認: Q10、Q18、Q20、Q21
+- 前提となる確認: Q10、Q18、Q20、Q21(確定済み)
+
+**実装メモ・気づいた点**
+
+- 実装: `internal/transform/{hash,key}.go`。桁数の定数(`DefaultHashLen` 12、`MinHashLen` 8、`MaxHashLen` 64)は、`label` に置き、`detect` と `transform` で共有する
+- **`Hasher`**(`Replacer`): HMAC-SHA256 に渡すのは、値のバイト列だけ(`local` はローカルパートだけ。種別名は含めない。正規化しない)。出力は、小文字の 16 進数の先頭 `hashLen` 桁。`<種別>_<hex>`(IP は区別込み。例: `ipv4_private_dca2f4f38564`)、`local` のメールアドレスは `hash_<hex>@ドメイン`。`NewHasher` は、鍵が空・桁数が 8〜64 の範囲外・`EmailHash` が不明、ならエラー(0 は既定の 12)。エラーに鍵を含めない
+  - 別マシンでも同じ出力になることは、Python の `hmac` で別に求めた値(`TestHashKnownAnswers`、`TestHashLength`)で確認した
+- **`LoadKey`**: `--key-file` を優先し、末尾の改行(`\n` または `\r\n`)を 1 つだけ除く。ファイルが読めない場合は、環境変数に切り替えずに、エラーにする(意図しない鍵で変換しないため)。空の鍵はエラー。環境変数 `LOGSCRUB_KEY` は、そのまま(改行は除かない)
+- **Engine は、mask と同じものを使う**(`Replacer` を差し替えるだけ)。hash モードでは、`detect.Options.HashLen` を `--hash-length` と同じにする必要がある(置換済みの hash 出力形を認識する桁数)。mask と restore は、常に既定の 12(Q10)
+- 受け入れ基準: `--email-hash local` が `hash_<hex>@example.com` になり再度流しても変わらない、`full` で全体が置換される、`password=secret_3f9a1c0b7d2e` が再ハッシュされない、鍵が未設定ならエラー(`LoadKey`)、を `hash_test.go`・`key_test.go` で確認した。CLI の終了コードは、段階 10 で確認する
+
+**冪等性のテストで見つけた不具合と、仕様の追記**
+
+- ファズテスト(`FuzzHashStable`)が、`0@0.AA@0.AA` のような、`@` が続く入力で、非冪等を見つけた。1 回目: 先頭の `0@0.AA` だけが email として置換され、`email_<hex>@0.AA` になる。2 回目: `email_<hex>` に `@0.AA` が続くので、全体が 1 つのメールアドレス(ローカルパート `email_<hex>`)として再検出され、再ハッシュされる。実在しうる形(`ssh user@example.com@bastion.example.org` のような、踏み台経由の表記)
+- 修正: ローカルパートが、hash の出力形(`<種別>_<hex>`)、または現在の `--mask-format` のラベルそのもの(`{type}_{n}` 書式の `email_1`)であるメールアドレスは、検出の対象外にした(SPEC 5.2 に追記。`label.IsHashedLocalPart` を `<種別>_<hex>` に広げ、`label.Format.IsLabel` を追加し、`emailFinder` に書式を渡した)。mask の既定書式(`<...>`)では、ラベルがローカルパートの文字でないので、もともと起きない
+- **ファズテストの性質の見直し(隣接の範囲)**: `0@0.AA:::1`(hash)と `::1:1.0.0.0`(mask)が見つかった。どちらも、置換によって、ラベルの 16 進数と連なっていた区切りが切り離され、ラベルの 1 文字隣(`:` を挟む)の値が、新しく検出できるようになる現象で、段階 7 で見つけた「置換で文脈が変わる」と同じ種類。ファズテストの「ラベルに隣接する」の範囲を、間が 1 バイト以内に広げた(mask と hash で、共通の `checkSecondPass` にした)
+- 保存されたファズの入力(`internal/transform/testdata/fuzz/`)は、回帰テストとして残す
+- ファズテスト: 修正後に、hash(`local` と `full`)が 91 秒、mask が 61 秒、違反が見つからなかった(段階 7 の分と合わせて、合計 1,000 万回以上)
+- 性能: `BenchmarkEngineHash` は、`BenchmarkEngineMask` と同程度(HMAC の計算が増えるが、連番の map がなくなる)
 
 ### 段階 9: restore
 
@@ -636,7 +654,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 | 5. secret | ✅ 完了 | 2026-10-11。固定形式は正規表現、キー名ベースは手がかり周辺の走査(正規表現の別実装と乱数で一致)。精度重視・JSON の文法の保持に改訂(SPEC 4.1、決定事項 15)。`BenchmarkFind` 約 250MB/s |
 | 6. uuid | ✅ 完了 | 2026-10-11。正規表現 + ハイフンの位置の前処理(正規表現の別実装と乱数で一致)。`BenchmarkFind` 約 250MB/s |
 | 7. mask | ✅ 完了 | 2026-10-11。`BenchmarkEngineMask` 約 200MB/s(検出 + 書き換え。入出力の実ファイルを除く) |
-| 8. hash | 未着手 | |
+| 8. hash | ✅ 完了 | 2026-10-11。`BenchmarkEngineHash` 約 210MB/s。email の除外を、hash 出力形・ラベルに広げた(SPEC 5.2) |
 | 9. restore | 未着手 | |
 | 10. CLI | 未着手 | Q31 の stderr 出力 |
 | 11. 性能・README | 未着手 | |
@@ -661,4 +679,5 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 | 2026-10-11 | 6 | `BenchmarkFind`(全 5 種別の検出器がそろった。置換済みの形の走査と重なりの解決を含む) | 約 0.25 GB/s(1 バイトあたり約 4.0ns) |
 | 2026-10-11 | 6 | `BenchmarkUUIDFinder`(uuid の検出器だけ) | 約 7.1 GB/s、割り当て 0 |
 | 2026-10-11 | 7 | `BenchmarkEngineMask`(合成ログ 8MB を既定の種別で mask。検出と書き換えと連番。入出力の実ファイルを除く) | 約 0.20 GB/s、1 パスあたり約 38,000 回の割り当て(約 13MB) |
+| 2026-10-11 | 8 | `BenchmarkEngineHash`(同じ合成ログを hash モード(`full`、12 桁)で変換。HMAC-SHA256) | 約 0.21 GB/s、1 パスあたり約 19,000 回の割り当て(約 11MB) |
 | 2026-10-11 | 5 | 改訂後の `BenchmarkFind` / `BenchmarkSecretFinder` | 約 0.25 GB/s / 約 0.39 GB/s(`Bearer` の走査をなくしたぶん、わずかに速い) |

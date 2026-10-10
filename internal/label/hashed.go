@@ -2,6 +2,13 @@ package label
 
 import "bytes"
 
+// hash 出力形の 16 進数の桁数(`--hash-length`、仕様 5.2)。
+const (
+	DefaultHashLen = 12 // 既定。mask と restore では、常にこの桁数で、hash 出力形を置換済みとみなす(Q10)
+	MinHashLen     = 8
+	MaxHashLen     = 64 // SHA-256 の 16 進数の全桁
+)
+
 // ScanHashed は、line の中の hash モードの出力形を、左から順に見つけ、fn を呼ぶ。
 // 見つけるのは、次の 2 つの形(hexLen は 16 進数の桁数、16 進数は小文字のみ)。
 //

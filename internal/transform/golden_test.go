@@ -55,13 +55,48 @@ func TestMaskSyntheticLogIsIdempotent(t *testing.T) {
 
 // ---- ファズテスト: 2 回目の変換と、行の構造の保持 ----
 
-// 2 回目の変換が、新しく検出する値は、1 回目の置換結果(ラベル)に隣接するものだけ。
+// secondPassSpan は、1 回目の置換結果(ラベル、hash 出力形)の範囲。
+type secondPassSpan struct{ s, e int }
+
+// checkSecondPass は、1 回目の結果 once に、2 回目の検出を行い、次を確認する。
 //
-// 置換によって、隣の文字列の文脈が変わり(間に挟まっていた文字がなくなり)、それまで検出できなかった値が、
-// 新しく検出できることがある(`000000A10.0.0.0fC00::` の `fC00::`)。これは、冪等性の定義(置換済みの値を再度
-// 置換しない)には反しないので、許す。
-// 一方、ラベルと重なる検出(再置換)や、置換と無関係な場所での検出は、1 回目の検出漏れ、または、
-// ラベルを値として読む不具合なので、許さない。
+//   - 検出した範囲が、ラベルと重ならない(再置換でない)
+//   - 検出した範囲が、ラベルのすぐ隣(間が 1 バイト以内)にある
+//
+// 置換によって、隣の文字列の文脈が変わり(間に挟まっていた文字がなくなり、または、ラベルの 16 進数と
+// 連なっていた区切りが切り離され)、それまで検出できなかった値が、新しく検出できることがある
+// (`000000A10.0.0.0fC00::` の `fC00::`、`0@0.AA:::1` の `::1`)。これは、冪等性の定義(置換済みの値を
+// 再度置換しない)には反しないので、許す。
+// 一方、ラベルと重なる検出や、置換と無関係な場所での検出は、1 回目の検出漏れ、または、ラベルを値として
+// 読む不具合なので、許さない。
+func checkSecondPass(t *testing.T, det *detect.Detector, in, once string, placeholders func(b []byte) []secondPassSpan) {
+	t.Helper()
+	for _, line := range strings.SplitAfter(once, "\n") {
+		content := strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+		b := []byte(content)
+		matches, _ := det.Find(b, nil)
+		if len(matches) == 0 {
+			continue
+		}
+		phs := placeholders(b)
+		for _, m := range matches {
+			near := false
+			for _, p := range phs {
+				if m.Start < p.e && p.s < m.End {
+					t.Fatalf("the second pass would replace a placeholder\n in:   %q\n once: %q\n match: %q", in, once, content[m.Start:m.End])
+				}
+				if m.Start-p.e <= 1 && m.Start >= p.e || p.s-m.End <= 1 && p.s >= m.End {
+					near = true
+				}
+			}
+			if !near {
+				t.Fatalf("the second pass would replace a value that is not next to a placeholder\n in:   %q\n once: %q\n match: %q",
+					in, once, content[m.Start:m.End])
+			}
+		}
+	}
+}
+
 func FuzzMaskStable(f *testing.F) {
 	for _, s := range []string{
 		"taro@example.com 192.168.0.1\n", "password=abc123&user=x\n", `"api_key": "abc def"` + "\n",
@@ -70,7 +105,7 @@ func FuzzMaskStable(f *testing.F) {
 		`{"m":"{\"password\":\"abc\",\"user\":\"a@x.com\"}"}` + "\n", "std::string fmt::Error d::bad\n",
 		"AKIAIOSFODNN7EXAMPLE ghp_" + strings.Repeat("a", 36) + "\n", "<email_1> password=<secret_1>\n",
 		"token: Bearer abc.def-ghi\n", "接続元 10.0.0.1 から taro@example.com\n", "\xff\xfe a@b.co\r\n", "hash_3f9a1c0b7d2e@example.com\n",
-		"000000A10.0.0.0fC00::\n",
+		"000000A10.0.0.0fC00::\n", "0@0.AA@0.AA\n", "ssh user@example.com@bastion.example.org\n",
 	} {
 		f.Add(s)
 	}
@@ -87,32 +122,10 @@ func FuzzMaskStable(f *testing.F) {
 		if strings.HasSuffix(in, "\n") != strings.HasSuffix(once, "\n") {
 			t.Fatalf("final newline changed: %q -> %q", in, once)
 		}
-		// 2 回目の検出: 行ごとに、検出した範囲と、ラベルの範囲を比べる。
-		for _, line := range strings.SplitAfter(once, "\n") {
-			content := strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
-			b := []byte(content)
-			matches, _ := det.Find(b, nil)
-			if len(matches) == 0 {
-				continue
-			}
-			type span struct{ s, e int }
-			var phs []span
-			label.DefaultFormat.Scan(b, func(s, e int, _ string, _ int) { phs = append(phs, span{s, e}) })
-			for _, m := range matches {
-				touching := false
-				for _, p := range phs {
-					if m.Start < p.e && p.s < m.End {
-						t.Fatalf("the second pass would replace a placeholder\n in:   %q\n once: %q\n match: %q", in, once, content[m.Start:m.End])
-					}
-					if m.Start == p.e || m.End == p.s {
-						touching = true
-					}
-				}
-				if !touching {
-					t.Fatalf("the second pass would replace a value that is not next to a placeholder\n in:   %q\n once: %q\n match: %q",
-						in, once, content[m.Start:m.End])
-				}
-			}
-		}
+		checkSecondPass(t, det, in, once, func(b []byte) []secondPassSpan {
+			var phs []secondPassSpan
+			label.DefaultFormat.Scan(b, func(s, e int, _ string, _ int) { phs = append(phs, secondPassSpan{s, e}) })
+			return phs
+		})
 	})
 }

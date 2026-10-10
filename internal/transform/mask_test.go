@@ -164,6 +164,20 @@ func TestMaskCustomFormat(t *testing.T) {
 	}
 }
 
+// ラベルの後ろに `@` が続く入力(`{type}_{n}` のような、ローカルパートの文字だけの書式)でも、再置換されない。
+func TestMaskIsIdempotentForLabelFollowedByAtSign(t *testing.T) {
+	for _, format := range []string{"<{type}_{n}>", "{type}_{n}", "[{type}-{n}]", "{type}{n}"} {
+		opts := detect.Options{Format: mustFormat(t, format)}
+		for _, in := range []string{"ssh user@example.com@bastion.example.org\n", "a@b.co@c.com\n"} {
+			once, _ := mask(t, opts, in)
+			twice, st := mask(t, opts, once)
+			if once != twice || st.Total() != 0 {
+				t.Errorf("format %q: mask(mask(%q)) != mask(%q)\n once:  %q\n twice: %q", format, in, in, once, twice)
+			}
+		}
+	}
+}
+
 func TestMaskNumberFirstFormat(t *testing.T) {
 	opts := detect.Options{Format: mustFormat(t, "#{n}:{type}")}
 	got, _ := mask(t, opts, "a@x.com b@x.com a@x.com\n")

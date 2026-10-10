@@ -210,3 +210,14 @@ func TypeIndex(typ string) int {
 	}
 	return -1
 }
+
+// IsLabel は、b 全体が、ちょうど 1 つのラベル(現在の書式、既知の種別名、先頭 0 のない 1 以上の連番)かを返す。
+func (f Format) IsLabel(b []byte) bool {
+	found := false
+	f.Scan(b, func(start, end int, _ string, _ int) {
+		if start == 0 && end == len(b) {
+			found = true
+		}
+	})
+	return found
+}

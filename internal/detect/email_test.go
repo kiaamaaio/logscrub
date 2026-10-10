@@ -88,6 +88,9 @@ func TestEmailFinderIgnores(t *testing.T) {
 		"名前@example.com", "user@例え.jp", "user@\xff.com",
 		// 検出対象外: ローカルパートが hash_<hex> の形(仕様 5.2、決定事項 11)
 		"hash_3f9a1c0b7d2e@example.com", "to <hash_000000000000@example.org>.",
+		// 検出対象外: ローカルパートが、hash の出力形(<種別>_<hex>)。`user@example.com@bastion.example.org` の、
+		// 先頭だけがハッシュされた結果を、全体で 1 つのメールアドレスとして、再度検出しない。
+		"email_3f9a1c0b7d2e@bastion.example.org", "ipv4_private_3f9a1c0b7d2e@example.com", "secret_000000000000@example.com",
 	} {
 		if got := emailsIn(line); len(got) != 0 {
 			t.Errorf("emails(%q) = %q, want none", line, got)
@@ -105,7 +108,10 @@ func TestEmailFinderDetectsLookalikesOfHashedLocalPart(t *testing.T) {
 		"x.hash_3f9a1c0b7d2e@example.com",   // ローカルパートの一部
 		"hash_3f9a1c0b7d2e.x@example.com",   // 後ろに文字がある
 		"hash-3f9a1c0b7d2e@example.com",     // 区切りが違う
-		"email_3f9a1c0b7d2e@example.com",    // hash 出力形だが、ローカルパートは hash_ ではない
+		"foo_3f9a1c0b7d2e@example.com",      // 知らない種別名
+		"email_3F9A1C0B7D2E@example.com",    // 大文字
+		"email_3f9a1c0b7d2@example.com",     // 11 桁
+		"xemail_3f9a1c0b7d2e@example.com",   // 前に文字がある
 		"hash_3f9a1c0b7d2e4455@example.com", // 16 桁(桁数が合わない)
 	} {
 		got := emailsIn(line)
@@ -332,4 +338,31 @@ func BenchmarkEmailAnchorScan(b *testing.B) {
 			dst = anchorScan(line, dst[:0])
 		}
 	}
+}
+
+// ローカルパートが、現在の書式のラベルそのものなら、検出対象外(ラベルの後ろに `@` が続く入力を、再度置換しない)。
+func TestEmailFinderIgnoresLabelAsLocalPart(t *testing.T) {
+	f, err := label.ParseFormat("{type}_{n}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	finder := emailFinder{hashLen: 12, format: f}
+	for _, line := range []string{"email_1@bastion.example.org", "to secret_12@example.com"} {
+		if got := finder.find([]byte(line), nil); len(got) != 0 {
+			t.Errorf("%q: got %+v, want none", line, got)
+		}
+	}
+	// 既定の書式のラベルは、ローカルパートの文字でないので、そもそも一致しない。別の書式では、検出する。
+	if got := (emailFinder{hashLen: 12}).find([]byte("email_1@bastion.example.org"), nil); len(got) != 1 {
+		t.Errorf("default format: got %+v, want 1 match", got)
+	}
+}
+
+// Detector を通すと、置換済みの形として残した数に数えられる。
+func TestDetectorKeepsHashedFormFollowedByAtSign(t *testing.T) {
+	d := newEmailDetector(t, Options{})
+	check(t, d, "ssh email_3f9a1c0b7d2e@bastion.example.org", nil, 1)
+	f, _ := label.ParseFormat("{type}_{n}")
+	d2 := newEmailDetector(t, Options{Format: f})
+	check(t, d2, "ssh email_1@bastion.example.org", nil, 1)
 }

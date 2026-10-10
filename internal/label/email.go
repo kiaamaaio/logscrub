@@ -42,13 +42,31 @@ func EmailDomainEnd(b []byte, i int) int {
 	return end
 }
 
-// IsHashedLocalPart は、メールアドレスのローカルパート local が、
-// `--email-hash local` の出力の形(`hash_` + 小文字の 16 進数 hexLen 桁)かどうかを返す。
+// IsHashedLocalPart は、メールアドレスのローカルパート local が、hash モードの出力と同じ形かどうかを返す。
+//
+//   - `hash_` + 小文字の 16 進数 hexLen 桁(`--email-hash local` の出力。仕様 5.2)
+//   - `<種別>_` + 小文字の 16 進数 hexLen 桁(`--email-hash full` などの出力。種別は Types のいずれか)
+//
 // この形のローカルパートを持つメールアドレスは、検出の対象外(仕様 5.2)。
+// `user@example.com@bastion.example.org` の先頭だけがハッシュされた結果
+// (`email_<hex>@bastion.example.org`)を、全体で 1 つのメールアドレスとして、再度ハッシュしないため。
 func IsHashedLocalPart(local []byte, hexLen int) bool {
-	const prefix = "hash_"
-	return hexLen > 0 && len(local) == len(prefix)+hexLen &&
-		bytes.HasPrefix(local, []byte(prefix)) && isLowerHex(local[len(prefix):])
+	if hexLen <= 0 {
+		return false
+	}
+	hashed := func(prefix []byte) bool {
+		n := len(prefix)
+		return len(local) == n+1+hexLen && bytes.HasPrefix(local, prefix) && local[n] == '_' && isLowerHex(local[n+1:])
+	}
+	if hashed([]byte("hash")) {
+		return true
+	}
+	for _, t := range typeBytes {
+		if hashed(t) {
+			return true
+		}
+	}
+	return false
 }
 
 func isLabelChar(c byte) bool { return isAlnum(c) || c == '-' }

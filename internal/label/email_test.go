@@ -75,10 +75,59 @@ func TestIsHashedLocalPart(t *testing.T) {
 		{"hash_", 12, false},
 		{"", 12, false},
 		{"hash_3f9a1c0b7d2e", 0, false},
+		// hash の出力形(<種別>_<hex>)も、同じく、置換済みの形
+		{"email_3f9a1c0b7d2e", 12, true},
+		{"ipv4_global_3f9a1c0b7d2e", 12, true},
+		{"ipv4_private_3f9a1c0b7d2e", 12, true},
+		{"ipv6_global_3f9a1c0b7d2e", 12, true},
+		{"ipv6_private_3f9a1c0b7d2e", 12, true},
+		{"secret_3f9a1c0b7d2e", 12, true},
+		{"uuid_3f9a1c0b7d2e", 12, true},
+		{"email_3f9a1c0b7d2e4455", 16, true},
+		{"email_3f9a1c0b7d2e4455", 12, false},
+		{"foo_3f9a1c0b7d2e", 12, false},
+		{"ipv4_3f9a1c0b7d2e", 12, false},
+		{"email_3F9A1C0B7D2E", 12, false},
+		{"xemail_3f9a1c0b7d2e", 12, false},
+		{"email-3f9a1c0b7d2e", 12, false},
+		{"email_", 12, false},
 	}
 	for _, tt := range tests {
 		if got := IsHashedLocalPart([]byte(tt.local), tt.hexLen); got != tt.want {
 			t.Errorf("IsHashedLocalPart(%q, %d) = %v, want %v", tt.local, tt.hexLen, got, tt.want)
 		}
+	}
+}
+
+func TestFormatIsLabel(t *testing.T) {
+	for _, tt := range []struct {
+		format string
+		in     string
+		want   bool
+	}{
+		{"<{type}_{n}>", "<email_1>", true},
+		{"<{type}_{n}>", "email_1", false},
+		{"<{type}_{n}>", "<email_1>x", false},
+		{"<{type}_{n}>", "x<email_1>", false},
+		{"<{type}_{n}>", "<email_01>", false},
+		{"{type}_{n}", "email_1", true},
+		{"{type}_{n}", "email_12", true},
+		{"{type}_{n}", "email_1x", false},
+		{"{type}_{n}", "xemail_1", false},
+		{"{type}_{n}", "email_0", false},
+		{"[{type}-{n}]", "[secret-3]", true},
+		{"{n}-{type}", "7-uuid", true},
+		{"{type}_{n}", "", false},
+	} {
+		f, err := ParseFormat(tt.format)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := f.IsLabel([]byte(tt.in)); got != tt.want {
+			t.Errorf("%q.IsLabel(%q) = %v, want %v", tt.format, tt.in, got, tt.want)
+		}
+	}
+	if (Format{}).IsLabel([]byte("<email_1>")) {
+		t.Error("the zero Format matched")
 	}
 }

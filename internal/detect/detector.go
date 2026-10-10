@@ -9,12 +9,6 @@ import (
 	"github.com/kiaamaaio/logscrub/internal/label"
 )
 
-const (
-	defaultHashLen = 12
-	minHashLen     = 8
-	maxHashLen     = 64 // SHA-256 の 16 進数の全桁
-)
-
 // finder は、1 つの種別の検出器。
 //
 // find は、line の中の候補を dst に追記して返す。この時点では、重なりも、置換しない値も気にしない。
@@ -97,7 +91,7 @@ func New(o Options) (*Detector, error) {
 func builtinFinders(o Options) []finder {
 	var fs []finder
 	if o.Kinds.Has(KindEmail) {
-		fs = append(fs, emailFinder{hashLen: o.HashLen})
+		fs = append(fs, emailFinder{hashLen: o.HashLen, format: o.Format})
 	}
 	if o.Kinds.Has(KindIPv4) {
 		fs = append(fs, ipv4Finder{})
@@ -124,9 +118,9 @@ func normalize(o Options) (Options, error) {
 	}
 	switch {
 	case o.HashLen == 0:
-		o.HashLen = defaultHashLen
-	case o.HashLen < minHashLen || o.HashLen > maxHashLen:
-		return o, fmt.Errorf("hash length must be between %d and %d", minHashLen, maxHashLen)
+		o.HashLen = label.DefaultHashLen
+	case o.HashLen < label.MinHashLen || o.HashLen > label.MaxHashLen:
+		return o, fmt.Errorf("hash length must be between %d and %d", label.MinHashLen, label.MaxHashLen)
 	}
 	if o.Kinds == 0 {
 		o.Kinds = DefaultKinds
