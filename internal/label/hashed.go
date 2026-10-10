@@ -39,8 +39,8 @@ func ScanHashed(line []byte, hexLen int, fn func(start, end int)) {
 		// hash_<16 進数>@ドメイン
 		if p >= 4 && string(line[p-4:p]) == "hash" && e < len(line) && line[e] == '@' {
 			s := p - 4
-			if s == 0 || !isLocalPartChar(line[s-1]) {
-				if end := domainEnd(line, e+1); end > 0 {
+			if s == 0 || !IsEmailLocalChar(line[s-1]) {
+				if end := EmailDomainEnd(line, e+1); end > 0 {
 					fn(s, end)
 					i = end
 					continue
@@ -59,34 +59,6 @@ func typeEndingAt(line []byte, p int) string {
 	return ""
 }
 
-// domainEnd は、line[i:] から始まるメールアドレスのドメイン
-// (`([A-Za-z0-9-]+\.)+[A-Za-z]{2,}`)の末尾の位置を返す。ドメインでなければ -1。
-// 末尾の `.` は含めない(文末の `user@example.com.` の `.` を範囲に入れない)。
-func domainEnd(line []byte, i int) int {
-	end := -1
-	j := i
-	first := true
-	for {
-		k := j
-		for k < len(line) && isLabelChar(line[k]) {
-			k++
-		}
-		if k == j {
-			break
-		}
-		if !first && isAlphaAtLeast2(line[j:k]) {
-			end = k
-		}
-		if k < len(line) && line[k] == '.' {
-			j = k + 1
-			first = false
-			continue
-		}
-		break
-	}
-	return end
-}
-
 func isLowerHex(b []byte) bool {
 	for _, c := range b {
 		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
@@ -98,23 +70,4 @@ func isLowerHex(b []byte) bool {
 
 func isAlnum(c byte) bool {
 	return c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
-}
-
-// isLocalPartChar は、メールアドレスのローカルパートに使う文字。
-func isLocalPartChar(c byte) bool {
-	return isAlnum(c) || c == '.' || c == '_' || c == '%' || c == '+' || c == '-'
-}
-
-func isLabelChar(c byte) bool { return isAlnum(c) || c == '-' }
-
-func isAlphaAtLeast2(b []byte) bool {
-	if len(b) < 2 {
-		return false
-	}
-	for _, c := range b {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z') {
-			return false
-		}
-	}
-	return true
 }

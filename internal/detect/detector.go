@@ -85,47 +85,64 @@ func (c cand) priority() int {
 
 // New は、o に従う Detector を作る。
 func New(o Options) (*Detector, error) {
-	return newDetector(o, builtinFinders(o))
+	n, err := normalize(o)
+	if err != nil {
+		return nil, err
+	}
+	return newDetector(n, builtinFinders(n))
 }
 
-// builtinFinders は、種別ごとの検出器を返す。検出器は、段階 3 以降で加わる。
-func builtinFinders(Options) []finder { return nil }
+// builtinFinders は、種別ごとの検出器を返す。o は normalize 済みでなければならない。
+// 検出器は、段階が進むごとに加わる(email は段階 3)。
+func builtinFinders(o Options) []finder {
+	var fs []finder
+	if o.Kinds.Has(KindEmail) {
+		fs = append(fs, emailFinder{hashLen: o.HashLen})
+	}
+	return fs
+}
+
+// normalize は、o を検証し、ゼロ値の項目を既定値にして返す。何度適用しても結果は同じ。
+func normalize(o Options) (Options, error) {
+	if o.UUIDVersions&^(0xFF<<1) != 0 {
+		return o, errors.New("uuid versions must be between 1 and 8")
+	}
+	if o.IPScope > ScopePrivate {
+		return o, fmt.Errorf("invalid ip scope %d", o.IPScope)
+	}
+	switch {
+	case o.HashLen == 0:
+		o.HashLen = defaultHashLen
+	case o.HashLen < minHashLen || o.HashLen > maxHashLen:
+		return o, fmt.Errorf("hash length must be between %d and %d", minHashLen, maxHashLen)
+	}
+	if o.Kinds == 0 {
+		o.Kinds = DefaultKinds
+	}
+	if o.UUIDVersions != 0 {
+		o.Kinds = o.Kinds.With(KindUUID)
+	}
+	if o.Format.IsZero() {
+		o.Format = label.DefaultFormat
+	}
+	return o, nil
+}
 
 // newDetector は、検出器を差し替えられるようにした New(テスト用)。
 func newDetector(o Options, finders []finder) (*Detector, error) {
-	if o.UUIDVersions&^(0xFF<<1) != 0 {
-		return nil, errors.New("uuid versions must be between 1 and 8")
-	}
-	if o.IPScope > ScopePrivate {
-		return nil, fmt.Errorf("invalid ip scope %d", o.IPScope)
-	}
-	hashLen := o.HashLen
-	switch {
-	case hashLen == 0:
-		hashLen = defaultHashLen
-	case hashLen < minHashLen || hashLen > maxHashLen:
-		return nil, fmt.Errorf("hash length must be between %d and %d", minHashLen, maxHashLen)
-	}
-	kinds := o.Kinds
-	if kinds == 0 {
-		kinds = DefaultKinds
-	}
-	if o.UUIDVersions != 0 {
-		kinds = kinds.With(KindUUID)
-	}
-	format := o.Format
-	if format.IsZero() {
-		format = label.DefaultFormat
+	o, err := normalize(o)
+	if err != nil {
+		return nil, err
 	}
 	d := &Detector{
-		kinds:   kinds,
+		kinds:   o.Kinds,
 		scope:   o.IPScope,
 		allow:   o.Allow,
-		format:  format,
-		hashLen: hashLen,
+		format:  o.Format,
+		hashLen: o.HashLen,
 	}
 	for _, f := range finders {
-		if kinds.Has(f.kind()) {
+		if d.kinds.Has(f.kind()) {
 			d.finders = append(d.finders, f)
 		}
 	}
