@@ -333,11 +333,23 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 - 文章中の `token: expired` の `expired` は、置換される(キー名のあとの区切りと値の形で、文章と区別できない)
 - `Basic` は、base64 として解読でき `:` を含む値だけ。形式の違う値は、置換されない
 
-### 段階 6: uuid
+### 段階 6: uuid — ✅ 完了(2026-10-11)
 
 - 8-4-4-4-12、バージョン(1〜8、または `--uuid-versions`)、バリアント、前後の文字、`{...}` / `urn:uuid:`
 - 全種別がそろうので、「除外の確認」(電話番号・郵便番号が検出されない)をここで確認する
-- 前提となる確認: Q9
+- 前提となる確認: Q9(確定済み)
+
+**実装メモ・気づいた点**
+
+- 実装: `internal/detect/uuid.go`(`uuidFinder`)。`builtinFinders` が、`Kinds` に uuid があるとき(`--types ...uuid`、または `--uuid-versions` で加わる)に、`Options.UUIDVersions` を渡して作る
+- 判定: 正規表現 `^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[1-8][0-9A-Fa-f]{3}-[89ABab][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}`(正規表現がマッチャー)に、前後が英数字でないこと(ハイフンは許す)と、バージョンの絞り込み(3 つ目のグループの先頭桁。`UUIDVersions` のビット。0 は 1〜8 のすべて)を重ねる
+  - 正規表現の `[1-8]` と、バージョンのビット判定は重複している(0、9 以上は、どちらでも拒否される)。結果は変わらないが、仕様の文言を両方に残した
+- 前処理(`find` の中): ハイフンを `IndexByte` で探し、その位置を最初のハイフンとして、8・13・18・23 バイト目に 4 つが並ぶ位置にだけ、正規表現を当てる。日付(`2026-10-11`)のハイフンでは当てない。前の一致の終端より前の位置も飛ばす
+  - 前処理なしの全位置に正規表現を当てる別実装 `refUUIDs` を、テストに置き、乱数 6 万通り(バージョンの指定も乱数)で一致を確認している
+- **Q9(置換範囲)**: UUID の 36 バイトだけ。`{<uuid_1>}`、`urn:uuid:<uuid_1>` になる。`{` と `:` が英数字でないので、前後の条件だけで一致する(特別な処理はない)。SPEC 4.2 と受け入れ基準に、この確定内容を書き足した
+- 他の種別との重なり: 同じ範囲なら email → ip → secret → uuid の順(仕様 4 章)なので、`session_id=<uuid>` は、キー名ベースの secret が勝つ(`TestDetectorUUIDPriority`)。キー名がなければ uuid になる
+- 「除外の確認」(受け入れ基準): `03-1234-5678`、`09012345678`、`123-4567` と、その変形(`090-1234-5678`、`〒123-4567`、`2026-10-11` など)が、すべての種別(uuid を含む)で検出されないことを、`TestPhoneAndPostalCodesAreNotDetected` で確認した
+- 検出器の構成: Q2 のとおり、正規表現がマッチャーで、前処理(ハイフンの位置)だけを手書きにした。測定(下の記録)は、目標を大きく超える
 
 ### 段階 7: mask(`transform.Masker`、`Engine`、`Stats`)
 
@@ -606,7 +618,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 | 3. email | ✅ 完了 | 2026-10-11。正規表現のまま(Q2: 置き換え不要)。`BenchmarkFind` 約 2.7GB/s |
 | 4. ipv4 / ipv6 | ✅ 完了 | 2026-10-11。IPv4 は前処理つきの正規表現(Q2: 置き換え不要)。IPv6 は精度重視に改訂(SPEC 4.3、決定事項 14)。`BenchmarkFind` 約 860MB/s |
 | 5. secret | ✅ 完了 | 2026-10-11。固定形式は正規表現、キー名ベースは手がかり周辺の走査(正規表現の別実装と乱数で一致)。精度重視・JSON の文法の保持に改訂(SPEC 4.1、決定事項 15)。`BenchmarkFind` 約 250MB/s |
-| 6. uuid | 未着手 | |
+| 6. uuid | ✅ 完了 | 2026-10-11。正規表現 + ハイフンの位置の前処理(正規表現の別実装と乱数で一致)。`BenchmarkFind` 約 250MB/s |
 | 7. mask | 未着手 | |
 | 8. hash | 未着手 | |
 | 9. restore | 未着手 | |
@@ -630,4 +642,6 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 | 2026-10-11 | 4 | `BenchmarkFind`(改訂後) | 約 0.86 GB/s |
 | 2026-10-11 | 5 | `BenchmarkFind`(email + ipv4 + ipv6 + secret。uuid は未実装) | 約 0.24 GB/s(1 バイトあたり約 4.1ns) |
 | 2026-10-11 | 5 | `BenchmarkSecretFinder`(secret の検出器だけ) | 約 0.37 GB/s、1 パスあたり約 3,300 回の割り当て |
+| 2026-10-11 | 6 | `BenchmarkFind`(全 5 種別の検出器がそろった。置換済みの形の走査と重なりの解決を含む) | 約 0.25 GB/s(1 バイトあたり約 4.0ns) |
+| 2026-10-11 | 6 | `BenchmarkUUIDFinder`(uuid の検出器だけ) | 約 7.1 GB/s、割り当て 0 |
 | 2026-10-11 | 5 | 改訂後の `BenchmarkFind` / `BenchmarkSecretFinder` | 約 0.25 GB/s / 約 0.39 GB/s(`Bearer` の走査をなくしたぶん、わずかに速い) |
