@@ -294,17 +294,21 @@ logscrub types   [--verbose]
 - FILE 省略時、または `-` を指定した場合は stdin から読む。出力は既定で stdout。
 - `mask` で FILE を複数指定した場合は、指定した順に連結して 1 つの入力として処理する(連番も通しで振る)。
 - `restore` の ANSWER_FILE は 1 つだけ指定できる。
-- `--output FILE`: 出力先をファイルにする。
-- `--stats`: 種別ごとの検出件数を **stderr** に出力する(生の値は出さない)。IP アドレスは `ipv4_global` のように区別ごとに数える。
+- `--output FILE`(`-o`): 出力先をファイルにする。`-` は標準出力。出力先が、入力ファイル(`FILE`、`--source`、ANSWER_FILE)のどれかと同じファイルの場合は、入力を消さないため、何も書かずにエラー終了する。入力ファイルは、処理を始める前にすべて開き、開けないものがあれば、出力を始める前にエラー終了する。
+- `--stats`: 置換した件数を、種別ごとに **stderr** に出力する(生の値は出さない)。IP アドレスは `ipv4_global` のように区別ごとに数える。形式は、1 行 1 種別の `logscrub: email=3`。件数は、値の種類数でなく、置換した出現回数で、`--allow` で残した値や特殊アドレスは数えない。0 件の種別は出さない。並びは、`email`、`ipv4_global`、`ipv4_private`、`ipv6_global`、`ipv6_private`、`secret`、`uuid` の順。
+- hash 専用のオプション(`--hash-length`、`--email-hash`、`--key-file`)を、`--mode mask`(既定)で指定すると、エラー終了する。`--hash-length` は 8〜64。
 - `--allow VALUE`: 置換しない値(例: 問い合わせ窓口のアドレス)。完全一致で判定する。複数回指定できる。
 - `--fail-on-detect`: 1 件でも検出した場合、終了コード 2 で終える(出力は通常どおり行う)。
-- 終了コード: 0=正常、1=エラー、2=`--fail-on-detect` 指定時に検出あり。
+- 終了コード: 0=正常、1=エラー、2=`--fail-on-detect` 指定時に検出あり。エラー(1)は、2 より優先する(書き込みエラーなどで処理が失敗した場合は、検出があっても 1)。
 - 置換済みの形(4 章「置換済みの値は検出しない」)のため置換せずに残した文字列が 1 件以上あれば、処理の最後に **stderr** へ 1 行だけ通知する。`mask`(`--mode hash` を含む)と `restore` の `--source` の処理で共通。
   - 出すのは件数と行番号(最初の 5 件まで)のみ。値は出さない
   - 例: `logscrub: 2 strings were left unchanged because they look already replaced (lines 12, 40). Check them before sharing.`
   - 終了コードは変えない。`--fail-on-detect` の件数にも含めない。抑止するオプションは設けない
   - 置換済みの出力を再度流した場合も出る(元の値か前回の出力かは区別できないため)
-- `logscrub types`: 対応する種別の一覧を出す。`--verbose` で `secret` の対応形式も列挙する。
+  - 行番号は、入力をまたいで通しで数える(1 始まり)。件数が 1 件のときは `1 string was left unchanged because it looks already replaced (line 12)`。行が 6 行以上あるときは、最初の 5 行のあとに `, ...` を付ける
+- `logscrub types`: 対応する種別の一覧を出す。1 行 1 種別で、種別 ID、既定で有効か(`on` / `off`)、説明。IP アドレスの区別(`ipv4_global` など)は、説明の中で示す。`--verbose` で `secret` の対応形式(4.1)も列挙する。
+- `--help` / `-h`(サブコマンドの後ろ、または単独)は、使い方を **stdout** に出して、終了コード 0 で終わる。`mask --help` には、`secret` の対応形式(4.1)も出す。
+- `restore` で戻せなかったラベルの一覧は、50 件までを出し、超える場合は `, ...` を付ける(件数は、全体を出す)。件数が 1 件のときは `1 label could not be restored`。
 
 ### 6.1 CLI の実装方針
 
@@ -438,6 +442,10 @@ restore:
 - [ ] `--allow support@example.com` を指定すると、そのアドレスだけが置換されずに残る
 - [ ] `--fail-on-detect` で、検出ありなら終了コード 2、検出なしなら 0 になる
 - [ ] `--stats` の件数が stderr に出て、stdout には混ざらない
+- [ ] `--hash-length`、`--email-hash`、`--key-file` を `--mode mask` で指定するとエラー終了する
+- [ ] `--output` が入力ファイルと同じファイルなら、入力を変えずにエラー終了する(終了コード 1)
+- [ ] 入力ファイルが開けない場合は、出力ファイルを作らず、何も書かずにエラー終了する
+- [ ] 書き込みエラーなどで処理が失敗した場合は、`--fail-on-detect` で検出があっても、終了コード 1 になる
 - [ ] `--mask-format '[{type}-{n}]'` が反映され、`{n}` を含まない書式はエラー終了する
 - [ ] 置換済みの形の文字列(`<email_1>`、`secret_3f9a1c0b7d2e` 等)を含む入力では、件数と行番号が stderr に 1 行で通知され、値は出ず、終了コードは変わらない
 

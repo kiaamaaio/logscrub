@@ -417,11 +417,29 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 - ファズテスト(`FuzzRestoreRoundTrip`): ラベルと同じ形の文字列を含まない任意の入力で、`restore(mask(x)) == x` が成り立つ。120 秒で違反なし
 - 性能: `BenchmarkRestore`(8MB の合成ログ。元の入力の処理 + 回答 8MB の走査)は、約 185MB/s
 
-### 段階 10: CLI(`cli`、`cmd/logscrub`)
+### 段階 10: CLI(`cli`、`cmd/logscrub`) — ✅ 完了(2026-10-11)
 
 - サブコマンド、オプションの前後自由な解析、`--`、`-`、`-o`、`--help`、`types [--verbose]`、終了コード、`--output`、`--stats`、`--fail-on-detect`
 - 受け入れ基準を `cli.Run` 経由の E2E テストとして全項目そろえる(段階 3〜9 で個別に確認したものも、ここで改めて通す)
-- 前提となる確認: Q25、Q26、Q27、Q28
+- 前提となる確認: Q25、Q26、Q27、Q28(確定済み)
+
+**実装メモ・気づいた点**
+
+- 実装: `cmd/logscrub/main.go`(`os.Exit(cli.Run(...))` だけ)、`internal/cli/{cli,flags,common,mask,restore,types,usage}.go`。標準の `flag` だけを使う。`detect.ParseUUIDVersions` / `detect.ParseScope`(`--uuid-versions` と `--ip-scope` の解析。段階 2 で見送ったもの)と、`Stats.KeptLineCount`(通知で行番号の省略を示すため)を追加した
+- **オプションの前後自由な解析**(`parseArgs`): 「`Parse` → 残りの先頭を 1 つファイル名にして取る → 残りを再度 `Parse`」を繰り返す。`flag` は、終端の `--` と、オプションの値としての `--`(`--allow --`)を区別して教えてくれないので、`Parse` が読んだ引数の数から、`flag` の読み方を再現して判定する(`endedWithTerminator`)。単独の `-` は、ファイル名(標準入力)
+- **処理の順序**: オプションの値の検証(`--mode`、`--types`、`--uuid-versions`、`--ip-scope`、`--mask-format`、`--hash-length`、`--email-hash`、鍵)→ 入力をすべて開く → 出力先を開く(入力と同じファイルなら、開かずにエラー)→ 変換 → 統計・通知 → 終了コード。開けない入力があれば、何も書かずに終わる
+- Q25(hash 専用のオプションを mask モードで指定するとエラー)、Q26(`--output` が入力と同じファイルならエラー)、Q27(`types` の形式。1 行 1 種別、`on` / `off`、説明)、Q28(エラー(1)は、`--fail-on-detect` の 2 より優先)、Q19(`--stats` は、置換した出現回数を、`label.Types` の順に、1 行 1 種別の `logscrub: email=3`。0 件は出さない)を実装した。確定内容を、SPEC 6 章と 9 章に書き足した
+- hash モードでも、`--mask-format` は受け付ける。ハッシュの出力には使わず、検出器が、すでに置換済みのラベルを認識する書式としてだけ使う
+- restore は、`--source` と ANSWER_FILE をすべて開いてから、`transform.Restore` に渡す。`--source -` は、ANSWER_FILE を指定した場合だけ(両方が標準入力なら、エラー)。stdin は 1 回だけ使える
+- 終了コード 0: 戻せないラベルがあっても(警告のみ)。通知(置換済みの形を残した件数と行番号)は、終了コードを変えない
+
+**仕様で決まっていなかったため、決めた点(異論があれば指摘してほしい)**
+
+- `--output -` は、標準出力(ファイル名 `-` ではない)。入力の `-` が標準入力であることに合わせた
+- `logscrub --help` / `-h` / `help`(サブコマンドなし)と、`logscrub <command> --help` は、使い方を stdout に出して、終了コード 0。サブコマンドなし・不明なサブコマンドは、使い方を stderr に出して、終了コード 1(仕様どおり)
+- `--stats` で、検出が 0 件のときは、何も出さない(Q19「0 件の種別は出さない」の延長)
+- 通知の文面は、仕様の例を基準に、1 件のとき `1 string was left unchanged because it looks already replaced (line 12)`、6 行以上のとき `(lines 1, 2, 3, 4, 5, ...)` とした。戻せなかったラベルは、50 件まで並べ、超える場合は `, ...`(件数は全体)
+- 出力ファイルは、入力の検証後に、`os.Create` で作る(途中で失敗した場合は、書きかけのファイルが残りうる。一時ファイルと rename にはしていない)
 
 ### 段階 11: 性能・メモリ・README
 

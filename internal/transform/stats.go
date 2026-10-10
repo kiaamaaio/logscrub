@@ -26,6 +26,9 @@ type Stats struct {
 	// KeptLines は、Kept の文字列がある行の行番号(入力をまたいで通しで数える。1 始まり。
 	// 重複なし、昇順、最初の MaxKeptLines 件まで)。
 	KeptLines []int
+	// KeptLineCount は、Kept の文字列がある行の数(KeptLines は、最初の MaxKeptLines 件だけ)。
+	// 通知で、行番号を省略したことを示すために使う。
+	KeptLineCount int
 
 	counts [label.NumTypes]int
 }
@@ -40,6 +43,7 @@ func (s *Stats) add(m detect.Match) {
 // addKept は、行番号 line の行で、置換せずに残した文字列を n 件数える(1 行につき 1 回呼ぶ)。
 func (s *Stats) addKept(n, line int) {
 	s.Kept += n
+	s.KeptLineCount++
 	if len(s.KeptLines) < MaxKeptLines {
 		s.KeptLines = append(s.KeptLines, line)
 	}

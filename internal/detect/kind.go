@@ -151,3 +151,29 @@ func (m Match) LabelType() string {
 	}
 	return ""
 }
+
+// ParseUUIDVersions は、`--uuid-versions` の値(カンマ区切りの 1〜8)を、ビット i がバージョン i の集合にする(仕様 4.2)。
+// 1〜8 以外、空の要素、空白、数字以外は、エラー。
+func ParseUUIDVersions(spec string) (uint16, error) {
+	var set uint16
+	for _, v := range strings.Split(spec, ",") {
+		if len(v) != 1 || v[0] < '1' || v[0] > '8' {
+			return 0, fmt.Errorf("invalid uuid version %q (valid: 1 to 8, comma separated)", v)
+		}
+		set |= 1 << (v[0] - '0')
+	}
+	return set, nil
+}
+
+// ParseScope は、`--ip-scope` の値(all、global、private)を解析する(仕様 4.3)。
+func ParseScope(s string) (Scope, error) {
+	switch s {
+	case "all":
+		return ScopeAll, nil
+	case "global":
+		return ScopeGlobal, nil
+	case "private":
+		return ScopePrivate, nil
+	}
+	return 0, fmt.Errorf("invalid ip scope %q (valid: all, global, private)", s)
+}

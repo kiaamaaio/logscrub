@@ -131,3 +131,44 @@ func TestLabelTypesMatchLabelPackage(t *testing.T) {
 		t.Errorf("Match produces %q which is not in label.Types", typ)
 	}
 }
+
+func TestParseUUIDVersions(t *testing.T) {
+	tests := []struct {
+		in   string
+		want uint16
+	}{
+		{"4", 1 << 4},
+		{"4,7", 1<<4 | 1<<7},
+		{"7,4", 1<<4 | 1<<7},
+		{"4,4", 1 << 4},
+		{"1,2,3,4,5,6,7,8", 0xFF << 1},
+		{"1", 1 << 1},
+		{"8", 1 << 8},
+	}
+	for _, tt := range tests {
+		got, err := ParseUUIDVersions(tt.in)
+		if err != nil || got != tt.want {
+			t.Errorf("ParseUUIDVersions(%q) = %b, %v; want %b", tt.in, got, err, tt.want)
+		}
+	}
+	// 1〜8 以外は、エラー(仕様 4.2)。空の要素・空白・数字以外も、エラー。
+	for _, in := range []string{"", "0", "9", "10", "a", "4,", ",4", "4,,7", " 4", "4 ", "-1", "4;7", "v4", "4.0", "０"} {
+		if _, err := ParseUUIDVersions(in); err == nil {
+			t.Errorf("ParseUUIDVersions(%q) succeeded, want error", in)
+		}
+	}
+}
+
+func TestParseScope(t *testing.T) {
+	for in, want := range map[string]Scope{"all": ScopeAll, "global": ScopeGlobal, "private": ScopePrivate} {
+		got, err := ParseScope(in)
+		if err != nil || got != want {
+			t.Errorf("ParseScope(%q) = %v, %v; want %v", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "ALL", "Global", "public", "all ", "g"} {
+		if _, err := ParseScope(in); err == nil {
+			t.Errorf("ParseScope(%q) succeeded, want error", in)
+		}
+	}
+}

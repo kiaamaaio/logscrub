@@ -315,6 +315,9 @@ func TestStatsKeptLines(t *testing.T) {
 	}
 	// 行番号は、入力をまたいで通しで数える(1 始まり)。重なりなく、昇順。
 	want := []int{2, 4, 6}
+	if st.KeptLineCount != 3 {
+		t.Errorf("KeptLineCount = %d, want 3", st.KeptLineCount)
+	}
 	if len(st.KeptLines) != len(want) {
 		t.Fatalf("KeptLines = %v, want %v", st.KeptLines, want)
 	}
@@ -336,6 +339,10 @@ func TestStatsKeptLinesAreLimitedToFive(t *testing.T) {
 	}
 	if len(st.KeptLines) != MaxKeptLines || st.KeptLines[0] != 1 || st.KeptLines[4] != 5 {
 		t.Errorf("KeptLines = %v", st.KeptLines)
+	}
+	// 記録は 5 件までだが、行の数は、すべて数える(通知で、省略を示すため)。
+	if st.KeptLineCount != 20 {
+		t.Errorf("KeptLineCount = %d, want 20", st.KeptLineCount)
 	}
 }
 
