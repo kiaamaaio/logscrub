@@ -176,14 +176,15 @@ func TestIPv6Detection(t *testing.T) {
 		{"full form", "2001:0db8:0000:0000:0000:ff00:0042:8329", []string{"ipv6_global=2001:0db8:0000:0000:0000:ff00:0042:8329"}},
 		{"uppercase", "2001:DB8::A", []string{"ipv6_global=2001:DB8::A"}},
 		{"trailing double colon", "2001:db8::", []string{"ipv6_global=2001:db8::"}},
-		{"eight groups", "1:2:3:4:5:6:7:8", []string{"ipv6_global=1:2:3:4:5:6:7:8"}},
+		{"eight groups", "2001:1:2:3:4:5:6:7", []string{"ipv6_global=2001:1:2:3:4:5:6:7"}},
 		{"in text", "from fe80::1 to 2001:db8::2 ok", []string{"ipv6_private=fe80::1", "ipv6_global=2001:db8::2"}},
 		// 受け入れ基準: ::ffff:10.0.0.1 は、全体で 1 つの ipv6_private(IPv4 部分だけにならない)
 		{"ipv4 mapped private", "::ffff:10.0.0.1", []string{"ipv6_private=::ffff:10.0.0.1"}},
 		{"ipv4 mapped global", "::ffff:203.0.113.5", []string{"ipv6_global=::ffff:203.0.113.5"}},
 		{"ipv4 mapped in text", "peer ::ffff:192.168.0.1 up", []string{"ipv6_private=::ffff:192.168.0.1"}},
 		{"ipv4 mapped sentence end", "peer ::ffff:10.0.0.1.", []string{"ipv6_private=::ffff:10.0.0.1"}},
-		{"ipv4 embedded not mapped", "::10.0.0.1", []string{"ipv6_global=::10.0.0.1"}},
+		// IPv4-compatible は、割り当てのない範囲(::/8)なので IPv6 としては検出しない。IPv4 部分は IPv4 として検出する。
+		{"ipv4 compatible is unassigned", "::10.0.0.1", []string{"ipv4_private=10.0.0.1"}},
 		{"nat64", "64:ff9b::10.0.0.1", []string{"ipv6_global=64:ff9b::10.0.0.1"}},
 		// ゾーンは範囲に含める(Q6)
 		{"zone", "fe80::1%eth0", []string{"ipv6_private=fe80::1%eth0"}},
@@ -203,6 +204,17 @@ func TestIPv6Detection(t *testing.T) {
 		{"japanese around", "接続元::1から", []string{"ipv6_private=::1"}},
 		{"sentence end", "connected to 2001:db8::1.", []string{"ipv6_global=2001:db8::1"}},
 		{"two in a row", "::1 ::1", []string{"ipv6_private=::1", "ipv6_private=::1"}},
+		// 前後の整理(仕様 4.3): 単独の ':' は区切り、英字・'_' と癒着した端のグループは切り離す
+		{"label colon", "src:2001:db8::1", []string{"ipv6_global=2001:db8::1"}},
+		{"label colon long", "ipv6addr:2001:db8::5", []string{"ipv6_global=2001:db8::5"}},
+		{"label with digit", "tcp6:fe80::1", []string{"ipv6_private=fe80::1"}},
+		{"label colon loopback", "ip6:::1", []string{"ipv6_private=::1"}},
+		{"trailing colon", "from 2001:db8::1: refused", []string{"ipv6_global=2001:db8::1"}},
+		{"bracket colon port", "client:[2001:db8::2]:5000", []string{"ipv6_global=2001:db8::2"}},
+		{"hex letters after", "addr=2001:db8::1abc", []string{"ipv6_global=2001:db8::1abc"}},
+		{"parentheses", "(2001:db8:0:0:0:0:0:1)", []string{"ipv6_global=2001:db8:0:0:0:0:0:1"}},
+		{"quoted", `"ip":"2001:db8::1"`, []string{"ipv6_global=2001:db8::1"}},
+		{"zone then text", "peer=fe80::a00:27ff:fe4e:66a1%enp0s3 up", []string{"ipv6_private=fe80::a00:27ff:fe4e:66a1%enp0s3"}},
 
 		// 検出しない: 形式として不正
 		{"time", "12:34:56", nil},
@@ -215,6 +227,20 @@ func TestIPv6Detection(t *testing.T) {
 		{"single colon", "a:b", nil},
 		{"colon only", ":", nil},
 		{"key colon value", "key: value", nil},
+		// 割り当てのない範囲は検出しない(仕様 4.3、決定事項 14)
+		{"unassigned low", "::2", nil},
+		{"unassigned one", "1::2", nil},
+		{"unassigned 64", "64::1", nil},
+		{"unassigned 100", "100::1", nil},
+		{"unassigned 4000", "4000::1", nil},
+		{"unassigned site local", "fec0::1", nil},
+		{"hex words", "dead::beef", nil},
+		{"hex words upper", "FACE::CAFE", nil},
+		{"unassigned with zone", "1::1%eth0", nil},
+		{"hex words with zone", "dead::beef%eth0", nil},
+		// 後ろが英字・'_' と癒着したものは、アドレスとして扱わない(仕様 4.3)
+		{"glued letters after", "2001:db8::1xyz", nil},
+		{"glued underscore after", "fe80::1_suffix", nil},
 		// 特殊アドレスは置換しない
 		{"unspecified", "::", nil},
 		{"multicast", "ff02::1", nil},
@@ -232,28 +258,40 @@ func TestIPv6Detection(t *testing.T) {
 	}
 }
 
-// 仕様の前後の文字の条件(IPv6: 前後が 16 進数・コロンでないこと)を、そのまま適用した結果。
-// 次の動作は、仕様どおりだが、見落としや誤検出につながる。仕様の見直しがあれば、ここを直す。
-func TestIPv6SpecLiteralBehaviors(t *testing.T) {
-	tests := []struct {
-		name string
-		line string
-		want []string
-		why  string
-	}{
-		// 16 進数の文字が、前後に続くと、それも候補の一部になる(前が 16 進数でないことを満たすため)。
-		{"c++ std::string", "std::string", []string{"ipv6_global=d::"}, "'d' は 16 進数なので、`d::` が IPv6 になる"},
-		{"c++ std::bad_alloc", "std::bad_alloc", []string{"ipv6_global=d::bad"}, "'d' と 'bad' が 16 進数"},
-		{"rust fmt::Error", "fmt::Error", []string{"ipv6_global=::E"}, "'r' は 16 進数でなく、`::E` が IPv6 になる"},
-		// 後ろがコロンのときは、候補に含まれ、形式として不正になる。
-		{"trailing colon", "from 2001:db8::1: refused", nil, "後ろがコロンなので、アドレスとして検出されない"},
+// コードの記号(C++ の std::string、Rust の fmt::Error など)や、時刻・MAC アドレスは、
+// IPv6 として検出されない(仕様 4.3、受け入れ基準)。
+func TestIPv6CodeSymbolsAreNotAddresses(t *testing.T) {
+	for _, line := range []string{
+		"std::string", "std::bad_alloc", "std::vector<int>", "std::io::Error", "fmt::Error", "anyhow::Error: failed",
+		"core::fmt::Debug", "boost::asio::ip", "namespace::add", "Foo::a()", "log::debug!", "PHP Foo::BAR",
+		"Ruby: Net::HTTPError", "A::B", "BAD::CAFE", "Face::cafe", "dead::beef()", "feed::Bad", "a::b::c",
+		"12:34:56", "aa:bb:cc:dd:ee:ff", "2026-10-11T03:25:56.789Z", "http://example.com:8080/", "key:value",
+	} {
+		if got := ipLabels(t, line, ScopeAll); len(got) != 0 {
+			t.Errorf("Find(%q) = %q, want none", line, got)
+		}
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := ipLabels(t, tt.line, ScopeAll); !slices.Equal(got, tt.want) {
-				t.Errorf("Find(%q) = %q, want %q (%s)", tt.line, got, tt.want, tt.why)
-			}
-		})
+}
+
+// 割り当て済みの範囲(仕様 4.3 の表、決定事項 14)。
+func TestAssignedIPv6(t *testing.T) {
+	assigned := []string{
+		"2001:db8::1", "2000::", "3fff:ffff::1", "fc00::1", "fdff::1", "fe80::1", "febf::1", "fe80::1%eth0",
+		"ff02::1", "ff00::", "::1", "::", "::ffff:10.0.0.1", "::ffff:0.0.0.0", "64:ff9b::1", "64:ff9b::10.0.0.1",
+	}
+	for _, s := range assigned {
+		if !assignedIPv6(netip.MustParseAddr(s)) {
+			t.Errorf("assignedIPv6(%s) = false, want true", s)
+		}
+	}
+	unassigned := []string{
+		"::2", "::10.0.0.1", "1::", "d::", "::e", "dead::beef", "100::1", "4000::1", "fbff::1", "fec0::1",
+		"64:ff9a::1", "64:ff9c::1", "64:ff9b:1::1", "::1:ffff:0:1", "1fff::1",
+	}
+	for _, s := range unassigned {
+		if assignedIPv6(netip.MustParseAddr(s)) {
+			t.Errorf("assignedIPv6(%s) = true, want false", s)
+		}
 	}
 }
 
@@ -465,48 +503,99 @@ func TestIPv4FinderMatchesUnfilteredRegexp(t *testing.T) {
 
 // refIPv6 は、IPv6 検出器の別実装。16 進数・':'・'.' の連なりを正規表現で拾い、
 // 前処理(':' の数、長さ)を使わずに、netip.ParseAddr で確認する。
+// 整理の規則(仕様 4.3)と、割り当て済みの範囲(決定事項 14)は、プレフィックスの一覧で書く。
 var (
 	refIPv6Run  = regexp.MustCompile(`[0-9A-Fa-f:.]+`)
 	refIPv6Zone = regexp.MustCompile(`^%[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*`)
+	refAssigned = []netip.Prefix{
+		netip.MustParsePrefix("2000::/3"), netip.MustParsePrefix("fc00::/7"), netip.MustParsePrefix("fe80::/10"),
+		netip.MustParsePrefix("ff00::/8"), netip.MustParsePrefix("::1/128"), netip.MustParsePrefix("::/128"),
+		netip.MustParsePrefix("::ffff:0:0/96"), netip.MustParsePrefix("64:ff9b::/96"),
+	}
 )
+
+func refLetterOrUnderscore(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_'
+}
+
+// refStrip は、[s,e) の先頭・末尾の単独の ':'(「::」の一部でないもの)を 1 つずつ外す。
+func refStrip(line []byte, s, e int) (int, int) {
+	if e-s >= 2 && line[s] == ':' && line[s+1] != ':' {
+		s++
+	}
+	if e-s >= 2 && line[e-1] == ':' && line[e-2] != ':' {
+		e--
+	}
+	return s, e
+}
 
 func refIPv6(line []byte) []Match {
 	var out []Match
 	for _, loc := range refIPv6Run.FindAllIndex(line, -1) {
 		s, e := loc[0], loc[1]
-		trimmedEnd := false
 		for s < e && line[s] == '.' {
 			s++
 		}
 		for e > s && line[e-1] == '.' {
 			e--
-			trimmedEnd = true
+		}
+		s, e = refStrip(line, s, e)
+		for s > 0 && s < e && refLetterOrUnderscore(line[s-1]) {
+			k := bytes.IndexByte(line[s:e], ':')
+			if k < 0 {
+				s = e
+				break
+			}
+			s += k + 1
+			s, e = refStrip(line, s, e)
+		}
+		for e < len(line) && e > s && refLetterOrUnderscore(line[e]) {
+			k := bytes.LastIndexByte(line[s:e], ':')
+			if k < 0 {
+				e = s
+				break
+			}
+			e = s + k
+			s, e = refStrip(line, s, e)
 		}
 		if bytes.Count(line[s:e], []byte(":")) < 2 {
 			continue
 		}
-		if !trimmedEnd {
-			if z := refIPv6Zone.FindIndex(line[loc[1]:]); z != nil {
-				if addr, err := netip.ParseAddr(string(line[s : loc[1]+z[1]])); err == nil && addr.Is6() {
-					out = append(out, Match{Start: s, End: loc[1] + z[1], Kind: KindIPv6, Class: classify(addr)})
-					continue
+		end := e
+		if e == loc[1] {
+			if z := refIPv6Zone.FindIndex(line[e:]); z != nil {
+				if addr, err := netip.ParseAddr(string(line[s : e+z[1]])); err == nil && addr.Is6() {
+					end = e + z[1]
 				}
 			}
 		}
-		if addr, err := netip.ParseAddr(string(line[s:e])); err == nil && addr.Is6() {
-			out = append(out, Match{Start: s, End: e, Kind: KindIPv6, Class: classify(addr)})
+		addr, err := netip.ParseAddr(string(line[s:end]))
+		if err != nil || !addr.Is6() {
+			continue
 		}
+		plain := addr.WithZone("")
+		ok := false
+		for _, p := range refAssigned {
+			if p.Contains(plain) {
+				ok = true
+			}
+		}
+		if !ok && !plain.Is4In6() {
+			continue
+		}
+		out = append(out, Match{Start: s, End: end, Kind: KindIPv6, Class: classify(addr)})
 	}
 	return out
 }
 
 func TestIPv6FinderMatchesRegexpReference(t *testing.T) {
 	alphabet := []string{
-		":", ":", "::", ":::", "1", "a", "F", "0", "ffff", "db8", "2001", "fe80", "12345", "g", ".", "..", "%", "%eth0", "%1", "%",
-		"10.0.0.1", "1.2.3.4", "::1", "::ffff:", "ffff:", " ", "/", "[", "]", "-", "_", "あ", "\xff", "std", "Error",
+		":", ":", "::", ":::", "1", "a", "F", "0", "ffff", "db8", "2001", "fe80", "fd00", "12345", "g", "x", "_", ".", "..",
+		"%", "%eth0", "%1", "%", "10.0.0.1", "1.2.3.4", "::1", "::ffff:", "ffff:", " ", "/", "[", "]", "-", "あ", "\xff",
+		"std", "Error", "src", "tcp6", "ip6",
 	}
 	rng := rand.New(rand.NewPCG(13, 14))
-	for iter := 0; iter < 40000; iter++ {
+	for iter := 0; iter < 60000; iter++ {
 		var sb strings.Builder
 		for i, n := 0, rng.IntN(14); i < n; i++ {
 			sb.WriteString(alphabet[rng.IntN(len(alphabet))])
