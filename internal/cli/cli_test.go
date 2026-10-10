@@ -465,6 +465,46 @@ func TestOutputMustNotBeAnInput(t *testing.T) {
 	}
 }
 
+// 標準入力が、出力先と同じファイルからのリダイレクト(`mask -o app.log < app.log`)でも、エラー(入力を消さない)。
+func TestOutputMustNotBeTheRedirectedStdin(t *testing.T) {
+	dir := t.TempDir()
+	in := writeFile(t, dir, "app.log", "a@x.com\n")
+	answer := writeFile(t, dir, "answer.txt", "<email_1>\n")
+	for _, args := range [][]string{
+		{"mask", "-o", in},
+		{"mask", "-", "-o", in},
+		{"restore", "--source", "-", "-o", in, answer},
+	} {
+		f, err := os.Open(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out, errb bytes.Buffer
+		code := Run(args, f, &out, &errb, func(string) string { return "" })
+		f.Close()
+		if code != 1 || out.Len() != 0 || errb.Len() == 0 {
+			t.Errorf("%v: code %d, stdout %q, stderr %q", args, code, out.String(), errb.String())
+		}
+		if got := readFile(t, in); got != "a@x.com\n" {
+			t.Fatalf("%v: the input file was changed: %q", args, got)
+		}
+	}
+	// 別のファイルへの出力は、そのまま行う
+	f, err := os.Open(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	other := filepath.Join(dir, "out.log")
+	var out, errb bytes.Buffer
+	if code := Run([]string{"mask", "-o", other}, f, &out, &errb, func(string) string { return "" }); code != 0 {
+		t.Fatalf("other output: code %d, stderr %q", code, errb.String())
+	}
+	if got := readFile(t, other); got != "<email_1>\n" {
+		t.Errorf("other output: %q", got)
+	}
+}
+
 // 入力が開けない場合は、出力を始める前に、エラーにする(出力ファイルを作らない)。
 func TestMissingInputFailsBeforeAnyOutput(t *testing.T) {
 	dir := t.TempDir()
@@ -604,6 +644,14 @@ func TestTypesCommand(t *testing.T) {
 	}
 	if !strings.HasPrefix(v.stdout, r.stdout) {
 		t.Error("--verbose output does not extend the plain output")
+	}
+}
+
+// types は、引数を取らない。
+func TestTypesCommandRejectsArguments(t *testing.T) {
+	r := run(t, "", nil, "types", "bogus")
+	if r.code != 1 || r.stdout != "" || !strings.Contains(r.stderr, "bogus") {
+		t.Errorf("%+v", r)
 	}
 }
 

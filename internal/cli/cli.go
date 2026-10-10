@@ -111,16 +111,14 @@ func (e *env) openInputs(paths []string) (*openedInputs, error) {
 
 // openOutput は、出力先を開く。path が空、または `-` なら、標準出力。
 // 出力先が、入力のどれかと同じファイルなら、開かずにエラーにする(入力を消さないため。Q26)。
+// 入力の `-` は、標準入力がファイル(`< app.log` のリダイレクト)なら、そのファイルと比べる。
 func (e *env) openOutput(path string, inputs []string) (w io.Writer, closeFn func() error, err error) {
 	if path == "" || path == stdinPath {
 		return e.stdout, func() error { return nil }, nil
 	}
 	if st, err := os.Stat(path); err == nil {
 		for _, in := range inputs {
-			if in == stdinPath {
-				continue
-			}
-			if ist, err := os.Stat(in); err == nil && os.SameFile(st, ist) {
+			if ist, err := e.statInput(in); err == nil && os.SameFile(st, ist) {
 				return nil, nil, fmt.Errorf("the output file %q is also an input file", path)
 			}
 		}
@@ -130,4 +128,16 @@ func (e *env) openOutput(path string, inputs []string) (w io.Writer, closeFn fun
 		return nil, nil, err
 	}
 	return f, f.Close, nil
+}
+
+// statInput は、入力 in のファイル情報を返す。`-` は標準入力で、ファイルでなければエラー。
+func (e *env) statInput(in string) (os.FileInfo, error) {
+	if in != stdinPath {
+		return os.Stat(in)
+	}
+	f, ok := e.stdin.(*os.File)
+	if !ok {
+		return nil, errors.New("stdin is not a file")
+	}
+	return f.Stat()
 }

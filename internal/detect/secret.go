@@ -34,7 +34,7 @@ var fixedRe = regexp.MustCompile(`^(?:` +
 	`(?:AKIA|ASIA)[A-Z0-9]{16}` + // AWS アクセスキー ID
 	`|gh[pousr]_[A-Za-z0-9]{36,}` + // GitHub
 	`|github_pat_[A-Za-z0-9_]{22,}` + // GitHub(fine-grained)
-	`|xox[bparso]-[A-Za-z0-9-]{10,}` + // Slack
+	`|xox[bpars]-[A-Za-z0-9-]{10,}` + // Slack
 	`|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{24,}` + // Stripe
 	`|AIza[A-Za-z0-9_-]{35}` + // Google API キー
 	`|sk-[A-Za-z0-9_-]{20,}` + // sk- 形式
@@ -333,6 +333,10 @@ func bareValueEnd(line []byte, vs int) int {
 func (secretFinder) keyed(line []byte, dst []Match) []Match {
 	n := len(line)
 	ne, nc := -1, -1 // 次の '='、':' の位置(-1: 未計算、n: これ以上ない)
+	// 直前に求めた引用符なしの値の範囲 [bareStart, bareEnd)。この中から始まる値は、同じ位置で終わる
+	// (値の開始位置の手前は '=' ':' 空白・タブのどれかで '\' ではないため、`\\` の組の区切り方が一致する)。
+	// `token=token=…` のような行で、値ごとに行末まで走査し直さないため。
+	bareStart, bareEnd := -1, -1
 	for pos := 0; pos < n; {
 		if ne != n && ne < pos {
 			if j := bytes.IndexByte(line[pos:], '='); j >= 0 {
@@ -434,7 +438,12 @@ func (secretFinder) keyed(line []byte, dst []Match) []Match {
 		case quotedKey || line[vs] == '{' || line[vs] == '[':
 			continue
 		default:
-			e = bareValueEnd(line, vs)
+			if bareStart <= vs && vs < bareEnd {
+				e = bareEnd
+			} else {
+				e = bareValueEnd(line, vs)
+				bareStart, bareEnd = vs, e
+			}
 		}
 		if e > s {
 			dst = append(dst, Match{Start: s, End: e, Kind: KindSecret})

@@ -21,9 +21,13 @@ var typeEntries = []typeEntry{
 func runTypes(e *env, args []string) int {
 	fs := newFlagSet("types")
 	verbose := fs.Bool("verbose", false, "also list the secret formats")
-	_, code, done := e.parseFlags("types", usageTypes, fs, args)
+	positional, code, done := e.parseFlags("types", usageTypes, fs, args)
 	if done {
 		return code
+	}
+	if len(positional) > 0 {
+		fmt.Fprintf(e.stderr, "logscrub: types takes no arguments (got %q)\nRun \"logscrub types --help\" for usage.\n", positional[0])
+		return exitError
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%-8s%-9s%s\n", "type", "default", "description")

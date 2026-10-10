@@ -108,6 +108,7 @@ func TestSecretFixedFormats(t *testing.T) {
 		{"github pat 21", "github_pat_" + rep("a", 21), nil},
 		{"slack 9", "xoxb-" + rep("1", 9), nil},
 		{"slack unknown letter", "xoxz-" + rep("1", 10), nil},
+		{"slack o is not in the spec", "xoxo-" + rep("1", 10), nil},
 		{"stripe 23", "sk_live_" + rep("a", 23), nil},
 		{"stripe unknown mode", "sk_prod_" + rep("a", 24), nil},
 		{"stripe underscore in key", "sk_live_" + rep("a", 12) + "_" + rep("a", 12), nil},
@@ -500,7 +501,7 @@ var (
 		`(?:AKIA|ASIA)[A-Z0-9]{16}`,
 		`gh[pousr]_[A-Za-z0-9]{36,}`,
 		`github_pat_[A-Za-z0-9_]{22,}`,
-		`xox[bparso]-[A-Za-z0-9-]{10,}`,
+		`xox[bpars]-[A-Za-z0-9-]{10,}`,
 		`(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{24,}`,
 		`AIza[A-Za-z0-9_-]{35}`,
 		`sk-[A-Za-z0-9_-]{20,}`,
@@ -801,6 +802,7 @@ func TestSecretFinderLongLines(t *testing.T) {
 		"basic long":             "Basic " + rep("A", 1<<20),
 		"escapes":                `password="` + rep(`\`, 1<<20),
 		"token68 without scheme": rep("a.b-c_d", 1<<18),
+		"repeated keys":          rep("token=", 1<<17),
 	} {
 		got := (secretFinder{}).find([]byte(line), nil)
 		_ = got
