@@ -261,12 +261,33 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 - ドメインが英字だけのラベルで終わらない場合は、そこまでの最後の英字だけのラベル(2 文字以上)で終える。`user@a.bc.com-x` は `user@a.bc` が一致し、`.com-x` は残る(`user@example.com-` は一致しない)
 - 引用符つきのローカルパート、国際化ドメイン(`user@例え.jp`)、非 ASCII のローカルパートは、Q5 のとおり対象外(`名前@example.com` は検出されない)
 
-### 段階 4: ipv4 / ipv6
+### 段階 4: ipv4 / ipv6 — ✅ 完了(2026-10-11)
 
 - 候補の切り出し → `netip.ParseAddr` → 区別(global / private / 特殊)の判定 → `--ip-scope` の適用
 - 前後の文字の条件、ポート付き・`[...]`・CIDR、IPv4 埋め込み(埋め込まれた IPv4 で区別を判定)
 - 前処理: IPv4 は `.` と数字、IPv6 は `:` を含む行だけ
-- 前提となる確認: Q6、Q7、Q8
+- 前提となる確認: Q6、Q7、Q8(確定済み)
+
+**実装メモ・気づいた点**
+
+- 実装: `internal/detect/ip.go`(`classify`、`ipv4Finder`、`ipv6Finder`)。`--ip-scope` と特殊アドレスの除外は、段階 2 の `Detector` が行う(検出器は区別を `Class` に入れて返すだけ)
+- 区別(`classify`): 特殊 = `IsUnspecified` / `IsMulticast` / `255.255.255.255`、private = `IsLoopback` / `IsPrivate` / `IsLinkLocalUnicast` / `100.64.0.0/10`、それ以外 = global。仕様の「上記以外は global」のとおり、予約済みの範囲(`240.0.0.0/4`、`198.18.0.0/15`、`0.0.0.0/8` のうち `0.0.0.0` 以外、`2001:db8::/32` など)も global になる
+- IPv4-mapped(`::ffff:a.b.c.d`)は、`Unmap` して IPv4 として区別する(Q8)。埋め込み先が特殊なら、IPv6 全体を置換しない。`::a.b.c.d`、`64:ff9b::/96` は IPv6 のアドレスとして判定する
+- **IPv4**: 正規表現 `[0-9]{1,3}(\.[0-9]{1,3}){3}` で候補を拾い、前後の文字の条件と `netip.ParseAddr`(0〜255、先頭 0 の除外 = Q7)で確認する
+  - 前処理(`ipv4WindowStart`): 数字に挟まれた `.` が 3 つ連続する箇所の手前から、正規表現を当てる。タイムスタンプなどの `.` では当てない。前処理は必要条件だけを見るので、結果は変わらない(前処理なしの正規表現版 `refIPv4` と、乱数 4 万通りで一致)
+  - 前処理なしでは約 83MB/s、前処理ありでは約 2.25GB/s。**手書きの走査への置き換え(Q2)は不要だった**
+- **IPv6**: `:` を手がかりに、16 進数・`:`・`.` の連なりを伸ばし(ここが窓の切り出し)、`:` を 2 つ以上含むものを `netip.ParseAddr` で確認する。連なりの前後の `.` は含めない。直後が `%` + ゾーンなら、ゾーンまで範囲に含める(Q6)
+  - 連なりの切り出しは文字クラスだけで、正規表現と書き分ける意味が小さいため、最初から手書きで実装した(Q2 の「まず正規表現で測る」順序には従っていない)。正規表現による別実装 `refIPv6` をテストに置き、乱数 4 万通りで一致を確認している
+  - `ParseAddr` を呼ぶ前に、`::` を含む / `:` が 7 つ / IPv4 埋め込みで 6 つ、の形でないもの(時刻 `12:34:56`、MAC アドレス)と、45 文字を超えるものを飛ばす
+- ゾーンの文字は、`[A-Za-z0-9_-]` と、その間の `.`(`%br-lan.100`)。文末の `.` は含めない。`%` の後にゾーンがなければ、アドレス部分だけ
+- 段階 3 のテスト `TestDetectorDoesNotTreatUserinfoAtIPAsEmail` を直した。`DefaultKinds` で「何も検出されない」ことを期待していたが、IP 検出器が加わったので `10.0.0.1` が検出される。テストの目的(email として扱わない)に合わせて、email だけを有効にして確認する形にした。既定の種別での結果は `TestUserinfoWithIPv4` で確認する
+
+**仕様どおりに実装した結果、見落としや誤検出につながる動作(仕様の見直しがあれば、`TestIPv6SpecLiteralBehaviors` を直す)**
+
+- IPv6 の「前後が 16 進数・コロンでないこと」を、そのまま適用すると、16 進数の文字が隣り合う場合に、その文字も候補に入る。C++ や Rust の記号が、IPv6 として検出される
+  - `std::string` → `d::` が `ipv6_global` になる(`st<ipv6_global_1>string`)
+  - `std::bad_alloc` → `d::bad`、`fmt::Error` → `::E`
+- 後ろがコロンのとき(`from 2001:db8::1: refused`)は、連なりに `:` が含まれ、形式として不正になるため、検出されない(見落とし)。IPv4 は、後ろの `:` が許されるので検出される
 
 ### 段階 5: secret
 
@@ -541,7 +562,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 | 1. 入出力の土台 | ✅ 完了 | 2026-10-11。`go test ./...`、`go vet ./...`(`-race` も)通過 |
 | 2. 検出の枠組み | ✅ 完了 | 2026-10-11。`Find` が保護範囲の件数を返す(行番号の集計は `Engine`、段階 7) |
 | 3. email | ✅ 完了 | 2026-10-11。正規表現のまま(Q2: 置き換え不要)。`BenchmarkFind` 約 2.7GB/s |
-| 4. ipv4 / ipv6 | 未着手 | |
+| 4. ipv4 / ipv6 | ✅ 完了 | 2026-10-11。IPv4 は前処理つきの正規表現(Q2: 置き換え不要)。`BenchmarkFind` 約 900MB/s |
 | 5. secret | 未着手 | |
 | 6. uuid | 未着手 | |
 | 7. mask | 未着手 | |
@@ -559,3 +580,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 | 2026-10-11 | 3 | `BenchmarkEmailFinder`(email の検出器だけ。正規表現。**本番**) | 約 3.7 GB/s、1 パスあたり約 4700 回の割り当て(正規表現の一致ごと) |
 | 2026-10-11 | 3 | `BenchmarkEmailAnchorScan`(手書きの走査。置き換え候補。テスト側) | 約 21 GB/s、割り当て 0 |
 | 2026-10-11 | 3 | 参考: 正規表現を行全体に当てた場合(`@` を含む行だけ。前処理の窓なし) | 約 0.23 GB/s(窓を付けた本番の約 1/15) |
+| 2026-10-11 | 4 | `BenchmarkFind`(email + ipv4 + ipv6。置換済みの形の走査と重なりの解決を含む。secret・uuid は未実装) | 約 0.9 GB/s |
+| 2026-10-11 | 4 | `BenchmarkIPv4Finder`(前処理つきの正規表現。**本番**) | 約 2.25 GB/s、1 パスあたり約 9,500 回の割り当て(`ParseAddr` の文字列変換、一致ごと) |
+| 2026-10-11 | 4 | `BenchmarkIPv4Unfiltered`(前処理なしの正規表現。参照) | 約 0.083 GB/s(前処理つきの約 1/27) |
+| 2026-10-11 | 4 | `BenchmarkIPv6Finder`(`:` を手がかりにした走査。**本番**) | 約 4.7 GB/s |

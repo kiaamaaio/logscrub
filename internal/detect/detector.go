@@ -93,11 +93,17 @@ func New(o Options) (*Detector, error) {
 }
 
 // builtinFinders は、種別ごとの検出器を返す。o は normalize 済みでなければならない。
-// 検出器は、段階が進むごとに加わる(email は段階 3)。
+// 検出器は、段階が進むごとに加わる(email は段階 3、ipv4 / ipv6 は段階 4)。
 func builtinFinders(o Options) []finder {
 	var fs []finder
 	if o.Kinds.Has(KindEmail) {
 		fs = append(fs, emailFinder{hashLen: o.HashLen})
+	}
+	if o.Kinds.Has(KindIPv4) {
+		fs = append(fs, ipv4Finder{})
+	}
+	if o.Kinds.Has(KindIPv6) {
+		fs = append(fs, ipv6Finder{})
 	}
 	return fs
 }

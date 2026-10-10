@@ -175,8 +175,9 @@ func TestDetectorFindsEmail(t *testing.T) {
 }
 
 // 受け入れ基準: https://user:pass@10.0.0.1/ の pass@10.0.0.1 は、メールアドレスとして扱わない。
+// (既定の種別すべてでの結果は、IP 検出器と合わせて TestUserinfoWithIPv4 で確認する。)
 func TestDetectorDoesNotTreatUserinfoAtIPAsEmail(t *testing.T) {
-	d := newEmailDetector(t, Options{Kinds: DefaultKinds})
+	d := newEmailDetector(t, Options{})
 	check(t, d, "https://user:pass@10.0.0.1/", nil, 0)
 }
 
