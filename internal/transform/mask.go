@@ -23,6 +23,7 @@ type Replacer interface {
 type Masker struct {
 	format label.Format
 	ids    [label.NumTypes]map[string]int // 種別名ごとの、値 → 連番
+	values [label.NumTypes][]string       // 種別名ごとの、連番 - 1 → 値(restore の逆引き)
 }
 
 // NewMasker は、書式 f でラベルを作る Masker を返す。ゼロ値の書式は、既定(`<{type}_{n}>`)。
@@ -49,9 +50,21 @@ func (k *Masker) Append(dst []byte, line []byte, m detect.Match) []byte {
 	n, ok := ids[string(v)]
 	if !ok {
 		n = len(ids) + 1
-		ids[string(v)] = n
+		val := string(v)
+		ids[val] = n
+		k.values[ti] = append(k.values[ti], val)
 	}
 	return k.format.Append(dst, label.Types[ti], n)
+}
+
+// Value は、種別名 typ(label.Types のいずれか)の連番 n に振った値を返す。
+// まだその番号を振っていなければ、ok は false。restore が、対応表として使う。
+func (k *Masker) Value(typ string, n int) (value string, ok bool) {
+	ti := label.TypeIndex(typ)
+	if ti < 0 || n < 1 || n > len(k.values[ti]) {
+		return "", false
+	}
+	return k.values[ti][n-1], true
 }
 
 func (k *Masker) total() int {

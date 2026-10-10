@@ -259,6 +259,8 @@ logscrub restore --source FILE [--source FILE ...] [検出オプション] [ANSW
 - 対応が見つからないラベルは、そのまま残す。その件数を stderr に出す(件数とラベル名のみ。元の値は出さない)。
   - 例: `logscrub: 2 labels could not be restored: <email_3>, <secret_2> (check that --source and options match the mask run)`
   - この場合も終了コードは 0(警告扱い)。
+  - 件数は、種類数(同じラベルが回答に何度出ても 1 件)で数え、回答に現れた順に並べる。ラベルとみなすのは、現在の書式で、既知の種別名と、先頭が 0 でない 1 以上の整数からなるもの(`<email_0>`、`<email_01>`、`<unknown_1>` は、ラベルとみなさず、そのまま残す)
+- `--source` の処理でも、6 章の「置換済みの形のため置換せずに残した文字列」の通知を、`mask` と同じ形で出す(元の入力にラベルと同じ形の文字列があり、正しく戻らない可能性があることの目安になる)。
 - `--source -`(stdin)は、ANSWER_FILE を指定した場合のみ使える。両方を stdin から読もうとした場合はエラー終了する。
 - `hash` モードの出力は戻せない(対象外)。
 

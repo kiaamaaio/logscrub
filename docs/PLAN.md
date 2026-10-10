@@ -398,12 +398,24 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 - ファズテスト: 修正後に、hash(`local` と `full`)が 91 秒、mask が 61 秒、違反が見つからなかった(段階 7 の分と合わせて、合計 1,000 万回以上)
 - 性能: `BenchmarkEngineHash` は、`BenchmarkEngineMask` と同程度(HMAC の計算が増えるが、連番の map がなくなる)
 
-### 段階 9: restore
+### 段階 9: restore — ✅ 完了(2026-10-11)
 
 - `--source` を mask と同じ `Engine` に通して対応を作り直す(出力は捨てる)→ 回答中のラベルを `Format.Scan` で探して戻す
 - 戻せなかったラベル名の一覧を返す(stderr への出力は段階 10)
 - 往復テスト: `restore(mask(x)) == x`(testdata の全入力 × 複数のオプションの組)。追記後も戻ること
-- 前提となる確認: Q22、Q23、Q24
+- 前提となる確認: Q22、Q23、Q24(確定済み)
+
+**実装メモ・気づいた点**
+
+- 実装: `internal/transform/restore.go`(`Restore`、`RestoreResult`)と、`Masker.Value`(連番 → 値の逆引き)。`Masker` は、新しい値を振るたびに、値の文字列を種別ごとのスライスにも持つ(`ids` の map のキーと、文字列の中身は共有)
+- **`Restore`**: sources を、mask と同じ `Engine` と `Masker` に通して(出力は `io.Discard`)連番を振り直し、answer を 1 行ずつ(`stream.Reader`。改行コード・末尾改行を保つ)読んで、`Format.Scan` で見つけたラベルを、`Masker.Value` の値に置き換えて書く。戻した値は、再度ラベルとして読まない
+- **戻り値**: PLAN の案の `(missing []string, err)` でなく、`RestoreResult`(`Missing`: 戻せなかったラベル = 種類数、回答に現れた順、重複なし。ラベルの文字列だけ / `Restored`: 戻した出現回数 / `Source`: `--source` の処理の `Stats`)と `error`
+- **PLAN との違い 1(回答の読み方)**: PLAN 4.3 は、回答を先に読み、必要なラベルがすべて見つかった時点で `--source` の残りを読まずに終えてよい、としていたが、採用しなかった。Q31 により、restore でも `--source` の全体を調べて、「ラベルと同じ形の文字列」(正しく戻らない可能性)を通知するため(`RestoreResult.Source.Kept` / `KeptLines`)。回答は、全体をメモリに読まず、1 行ずつ処理する
+- **PLAN との違い 2(仕様の追記)**: Q23 の確定内容(種類数・回答に現れた順・ラベルとみなす範囲)と、`--source` の処理での Q31 の通知を、SPEC 5.3 に書き足した
+- 受け入れ基準(ライブラリのテスト): 往復で 1 バイトも変わらない(受け入れ基準の例、`testdata/app.log` から、ラベルと同じ形の行を除いたもの × 9 つのオプションの組、合成ログ 3MB)、`--source` 複数指定でも往復、追記後も追記前のラベルが戻る、オプションが違うとラベルが残り `Missing` に記録される、restore がファイルを作らない、エラー(読み・書き)の伝播。CLI の項目(`--source -` のエラー、stderr への出力、終了コード 0)は、段階 10 で確認する
+- 限界(`TestRestoreLimitationWithLabelLikeSource`): 元の入力に、ラベルと同じ形の文字列があると、正しく戻らない(仕様 5.3 の限界)。この場合は、`Source.Kept` が通知の材料になる。テストは、将来この限界が解消されたら失敗する(README の限界を直す合図)
+- ファズテスト(`FuzzRestoreRoundTrip`): ラベルと同じ形の文字列を含まない任意の入力で、`restore(mask(x)) == x` が成り立つ。120 秒で違反なし
+- 性能: `BenchmarkRestore`(8MB の合成ログ。元の入力の処理 + 回答 8MB の走査)は、約 185MB/s
 
 ### 段階 10: CLI(`cli`、`cmd/logscrub`)
 
@@ -655,7 +667,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 | 6. uuid | ✅ 完了 | 2026-10-11。正規表現 + ハイフンの位置の前処理(正規表現の別実装と乱数で一致)。`BenchmarkFind` 約 250MB/s |
 | 7. mask | ✅ 完了 | 2026-10-11。`BenchmarkEngineMask` 約 200MB/s(検出 + 書き換え。入出力の実ファイルを除く) |
 | 8. hash | ✅ 完了 | 2026-10-11。`BenchmarkEngineHash` 約 210MB/s。email の除外を、hash 出力形・ラベルに広げた(SPEC 5.2) |
-| 9. restore | 未着手 | |
+| 9. restore | ✅ 完了 | 2026-10-11。`BenchmarkRestore` 約 185MB/s |
 | 10. CLI | 未着手 | Q31 の stderr 出力 |
 | 11. 性能・README | 未着手 | |
 
@@ -679,5 +691,6 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 | 2026-10-11 | 6 | `BenchmarkFind`(全 5 種別の検出器がそろった。置換済みの形の走査と重なりの解決を含む) | 約 0.25 GB/s(1 バイトあたり約 4.0ns) |
 | 2026-10-11 | 6 | `BenchmarkUUIDFinder`(uuid の検出器だけ) | 約 7.1 GB/s、割り当て 0 |
 | 2026-10-11 | 7 | `BenchmarkEngineMask`(合成ログ 8MB を既定の種別で mask。検出と書き換えと連番。入出力の実ファイルを除く) | 約 0.20 GB/s、1 パスあたり約 38,000 回の割り当て(約 13MB) |
+| 2026-10-11 | 9 | `BenchmarkRestore`(8MB の合成ログの mask 結果を、元の入力から restore。元の入力の処理 + 回答の走査) | 約 0.19 GB/s(元の入力の大きさあたり)、1 パスあたり約 38,000 回の割り当て(約 24MB) |
 | 2026-10-11 | 8 | `BenchmarkEngineHash`(同じ合成ログを hash モード(`full`、12 桁)で変換。HMAC-SHA256) | 約 0.21 GB/s、1 パスあたり約 19,000 回の割り当て(約 11MB) |
 | 2026-10-11 | 5 | 改訂後の `BenchmarkFind` / `BenchmarkSecretFinder` | 約 0.25 GB/s / 約 0.39 GB/s(`Bearer` の走査をなくしたぶん、わずかに速い) |
