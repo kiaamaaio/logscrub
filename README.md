@@ -253,7 +253,7 @@ $ ./scripts/go build -o bin/logscrub ./cmd/logscrub
 | `internal/stream` | 行単位の入出力(改行コードの保持) |
 | `internal/synthlog` | 性能測定用の合成ログの生成器 |
 
-仕様は [docs/SPEC.md](docs/SPEC.md)、実装計画と進捗・判断の記録は [docs/PLAN.md](docs/PLAN.md) にあります。
+仕様は [docs/SPEC.md](docs/SPEC.md)、開発環境・構成・設計の注意点は [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)、版ごとの実装計画と進捗・判断の記録は [docs/plans/](docs/plans/) にあります。
 
 ## ライセンス
 

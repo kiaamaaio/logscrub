@@ -12,7 +12,7 @@ import (
 )
 
 // BenchmarkEngineMask は、合成ログ(8MB、1MB の JSON 行を含む)を、既定の種別で mask する時間を測る。
-// 入出力の書き換えを含む、変換処理全体の速度(入出力の実ファイルは含まない)。PLAN のベンチマーク記録用。
+// 入出力の書き換えを含む、変換処理全体の速度(入出力の実ファイルは含まない)。実装計画(docs/plans/)のベンチマーク記録用。
 func BenchmarkEngineMask(b *testing.B) {
 	var sb strings.Builder
 	if _, err := synthlog.Generate(&sb, synthlog.Config{Size: 8 << 20, Seed: 1, LongLineEvery: 4 << 20}); err != nil {

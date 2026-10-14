@@ -533,7 +533,7 @@ func refNormKey(k string) string {
 	return strings.NewReplacer("-", "_", ".", "_").Replace(strings.ToLower(k))
 }
 
-// refSecrets は、仕様と PLAN(決定事項 15 を含む)の規則を、正規表現で書いた参照実装。
+// refSecrets は、仕様と plans/v1.0.0.md(決定事項 15 を含む)の規則を、正規表現で書いた参照実装。
 // 検出器と同じく、候補の範囲を、開始位置の順(同じなら終了位置の順)で返す。
 func refSecrets(line []byte) [][2]int {
 	var out [][2]int

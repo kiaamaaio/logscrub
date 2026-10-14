@@ -1,7 +1,7 @@
 // Package detect は、行の中から置換対象(メールアドレス、IP アドレス、トークン類、UUID)を見つける。
 //
 // 種別ごとの検出器が候補を出し、Detector が、除外と範囲の重なりの解決を行って、
-// 置換する範囲を決める(PLAN 4.1、4.2)。
+// 置換する範囲を決める(DEVELOPMENT.md 3.1、3.2)。
 package detect
 
 import (

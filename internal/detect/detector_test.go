@@ -71,7 +71,7 @@ func check(t *testing.T, d *Detector, line string, want []Match, wantKept int) {
 	}
 }
 
-// ---- 範囲の重なりの解決(仕様 4 章「範囲が重なった場合」、PLAN 4.1) ----
+// ---- 範囲の重なりの解決(仕様 4 章「範囲が重なった場合」、DEVELOPMENT.md 3.1) ----
 
 func TestResolveLongerWins(t *testing.T) {
 	d := newTestDetector(t, Options{},
@@ -231,7 +231,7 @@ func TestOnlyEnabledKindsAreRun(t *testing.T) {
 	}
 }
 
-// ---- 置換済みの値の除外(仕様 4 章「置換済みの値は検出しない」、PLAN 4.2、Q1) ----
+// ---- 置換済みの値の除外(仕様 4 章「置換済みの値は検出しない」、DEVELOPMENT.md 3.2、Q1) ----
 
 // password=<secret_1> の値部分 <secret_1> は、候補と保護範囲が同じ範囲なので、保護範囲が勝つ。
 func TestPlaceholderBeatsEqualCandidate(t *testing.T) {

@@ -14,7 +14,7 @@ import (
 	"github.com/kiaamaaio/logscrub/internal/synthlog"
 )
 
-// 性能とメモリの測定(仕様 7 章、PLAN の段階 11、Q29)。時間がかかるので、-perf を付けたときだけ実行する。
+// 性能とメモリの測定(仕様 7 章、plans/v1.0.0.md の段階 11、Q29)。時間がかかるので、-perf を付けたときだけ実行する。
 //
 //	./scripts/go test -run Perf -v ./cmd/logscrub -perf [-perf-size 100]
 //

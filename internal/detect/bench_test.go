@@ -34,7 +34,7 @@ func benchCorpus(b *testing.B) ([][]byte, int) {
 }
 
 // BenchmarkFind は、既定の種別で合成ログの全行を検出する時間を測る。
-// 段階が進むたびに(email、IP、secret、uuid の検出器が加わるたびに)結果を PLAN.md の進捗に記録する。
+// 段階が進むたびに(email、IP、secret、uuid の検出器が加わるたびに)結果を 実装計画(docs/plans/)の進捗に記録する。
 func BenchmarkFind(b *testing.B) {
 	lines, size := benchCorpus(b)
 	d, err := New(Options{})

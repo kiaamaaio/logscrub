@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Go の操作を Docker コンテナ内で実行するラッパー(docs/PLAN.md 0 章)。
+# Go の操作を Docker コンテナ内で実行するラッパー(docs/DEVELOPMENT.md 1 章)。
 # 引数はそのまま go に渡す。例: ./scripts/go test ./...
 set -euo pipefail
 

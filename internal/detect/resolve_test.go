@@ -33,7 +33,7 @@ func refPriority(c refCand) int {
 	panic("unknown kind")
 }
 
-// refResolve は、仕様と PLAN 4.1 の規則を、そのまま書いた参照実装。
+// refResolve は、仕様と DEVELOPMENT.md 3.1 の規則を、そのまま書いた参照実装。
 // 「長さの降順 → 優先順位 → 開始位置の昇順」に並べ、すでに採用した範囲と重ならないものを採用する。
 func refResolve(cands []refCand) (out []Match, kept int) {
 	sorted := slices.Clone(cands)

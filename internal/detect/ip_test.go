@@ -609,7 +609,7 @@ func TestIPv6FinderMatchesRegexpReference(t *testing.T) {
 	}
 }
 
-// 実装(前処理つき)と、前処理なしの正規表現の速度。PLAN の Q2 の記録用。
+// 実装(前処理つき)と、前処理なしの正規表現の速度。plans/v1.0.0.md の Q2 の記録用。
 func BenchmarkIPv4Unfiltered(b *testing.B) {
 	lines, size := benchCorpus(b)
 	b.SetBytes(int64(size))
