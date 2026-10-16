@@ -14,7 +14,7 @@ import (
 	"github.com/kiaamaaio/logscrub/internal/synthlog"
 )
 
-// 性能とメモリの測定(仕様 7 章、PLAN の段階 11、Q29)。時間がかかるので、-perf を付けたときだけ実行する。
+// 性能とメモリの測定(仕様 7 章、plans/v1.0.0.md の段階 11、Q29)。時間がかかるので、-perf を付けたときだけ実行する。
 //
 //	./scripts/go test -run Perf -v ./cmd/logscrub -perf [-perf-size 100]
 //
@@ -39,6 +39,11 @@ func buildBinary(t *testing.T) string {
 
 // genLog は、合成ログを、一時ファイルに作る(リポジトリの外)。
 func genLog(t *testing.T, dir, name string, mb int, pool int) string {
+	return genLogWith(t, dir, name, mb, pool, false)
+}
+
+// genLogWith は、genLog に、AWS の値を含めるか(synthlog.Config.AWS。plans/v1.1.0.md の Q39)を加えたもの。
+func genLogWith(t *testing.T, dir, name string, mb int, pool int, aws bool) string {
 	t.Helper()
 	p := filepath.Join(dir, name)
 	f, err := os.Create(p)
@@ -50,6 +55,7 @@ func genLog(t *testing.T, dir, name string, mb int, pool int) string {
 		Seed:          1,
 		LongLineEvery: synthlog.DefaultLongLineEvery,
 		ValuePool:     pool,
+		AWS:           aws,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -115,18 +121,22 @@ func TestPerfThroughput(t *testing.T) {
 	bin := buildBinary(t)
 	dir := t.TempDir()
 	log := genLog(t, dir, "big.log", *perfSize, 0)
+	awsLog := genLogWith(t, dir, "big-aws.log", *perfSize, 0, true)
 	for _, tc := range []struct {
 		name string
+		log  string
 		pipe bool
 		args []string
 	}{
-		{"mask, stdin from a file", false, nil},
-		{"mask, stdin from a pipe", true, nil},
-		{"mask with uuid", false, []string{"--types", "default,uuid"}},
+		{"mask, stdin from a file", log, false, nil},
+		{"mask, stdin from a pipe", log, true, nil},
+		{"mask with uuid", log, false, []string{"--types", "default,uuid"}},
+		{"aws log, default types", awsLog, false, nil},
+		{"aws log, default,aws", awsLog, false, []string{"--types", "default,aws"}},
 	} {
 		best := measurement{seconds: 1e9}
 		for i := 0; i < 3; i++ {
-			m := runMask(t, bin, log, tc.pipe, tc.args...)
+			m := runMask(t, bin, tc.log, tc.pipe, tc.args...)
 			if m.seconds < best.seconds {
 				best = m
 			}

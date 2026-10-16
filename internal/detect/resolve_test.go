@@ -29,11 +29,15 @@ func refPriority(c refCand) int {
 		return 3
 	case KindUUID:
 		return 4
+	case KindAWSAccount:
+		return 5
+	case KindAWSS3Bucket:
+		return 6
 	}
 	panic("unknown kind")
 }
 
-// refResolve は、仕様と PLAN 4.1 の規則を、そのまま書いた参照実装。
+// refResolve は、仕様と DEVELOPMENT.md 3.1 の規則を、そのまま書いた参照実装。
 // 「長さの降順 → 優先順位 → 開始位置の昇順」に並べ、すでに採用した範囲と重ならないものを採用する。
 func refResolve(cands []refCand) (out []Match, kept int) {
 	sorted := slices.Clone(cands)
@@ -80,8 +84,8 @@ func refResolve(cands []refCand) (out []Match, kept int) {
 // 実装は、重なる候補の塊ごとに解決する(長い行で候補の数の 2 乗にならないため)。
 // その結果が、全体に対する単純な貪欲法と同じであることを確かめる。
 func TestResolveMatchesReferenceImplementation(t *testing.T) {
-	kinds := []Kind{KindEmail, KindIPv4, KindIPv6, KindSecret, KindUUID}
-	labels := []string{"<email_1>", "<secret_22>", "<ipv4_private_3>", "<uuid_4>"}
+	kinds := []Kind{KindEmail, KindIPv4, KindIPv6, KindSecret, KindUUID, KindAWSAccount, KindAWSS3Bucket}
+	labels := []string{"<email_1>", "<secret_22>", "<ipv4_private_3>", "<uuid_4>", "<aws_account_5>", "<aws_s3_bucket_6>"}
 	rng := rand.New(rand.NewPCG(1, 2))
 
 	for iter := 0; iter < 3000; iter++ {

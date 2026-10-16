@@ -87,7 +87,8 @@ func New(o Options) (*Detector, error) {
 }
 
 // builtinFinders は、種別ごとの検出器を返す。o は normalize 済みでなければならない。
-// 検出器は、段階が進むごとに加わった(email は段階 3、ipv4 / ipv6 は段階 4、secret は段階 5、uuid は段階 6)。
+// 検出器は、段階が進むごとに加わった(email は段階 3、ipv4 / ipv6 は段階 4、secret は段階 5、uuid は段階 6。
+// v1.1 の aws_account は段階 4、aws_s3_bucket は段階 5)。
 func builtinFinders(o Options) []finder {
 	var fs []finder
 	if o.Kinds.Has(KindEmail) {
@@ -104,6 +105,12 @@ func builtinFinders(o Options) []finder {
 	}
 	if o.Kinds.Has(KindUUID) {
 		fs = append(fs, uuidFinder{versions: o.UUIDVersions})
+	}
+	if o.Kinds.Has(KindAWSAccount) {
+		fs = append(fs, awsAccountFinder{})
+	}
+	if o.Kinds.Has(KindAWSS3Bucket) {
+		fs = append(fs, awsS3BucketFinder{})
 	}
 	return fs
 }
@@ -158,7 +165,7 @@ func newDetector(o Options, finders []finder) (*Detector, error) {
 // Find は、line の中の置換する範囲を、開始位置の順に dst に追記して返す(重なりはない)。
 // 2 つ目の戻り値は、置換済みの形(ラベル・hash 出力形)のため、置換せずに残した範囲の数(Q31)。
 //
-// 手順(PLAN 4.1):
+// 手順(DEVELOPMENT.md 3.1):
 //  1. 有効な種別の検出器が、候補を出す
 //  2. 特殊アドレスと、--ip-scope の範囲外の IP アドレスを外す(Q11: 重なりの解決の前に外す。
 //     他の種別が、その範囲を置換できるようにするため)

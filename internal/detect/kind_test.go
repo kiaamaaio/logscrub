@@ -9,6 +9,7 @@ import (
 
 func TestParseTypes(t *testing.T) {
 	def := KindSet(0).With(KindEmail).With(KindIPv4).With(KindIPv6).With(KindSecret)
+	aws := KindSet(0).With(KindAWSAccount).With(KindAWSS3Bucket)
 	tests := []struct {
 		spec string
 		want KindSet
@@ -25,6 +26,17 @@ func TestParseTypes(t *testing.T) {
 		{"email,email", KindSet(0).With(KindEmail)},
 		{"email,default", def},
 		{"email,uuid", KindSet(0).With(KindEmail).With(KindUUID)},
+		{"aws_account", KindSet(0).With(KindAWSAccount)},
+		{"aws_s3_bucket", KindSet(0).With(KindAWSS3Bucket)},
+		{"aws", aws},
+		{"cloud", aws},
+		{"aws,cloud", aws},
+		{"default,aws", def | aws},
+		{"aws,default", def | aws},
+		{"default,cloud", def | aws},
+		{"aws_account,default", def.With(KindAWSAccount)},
+		{"default,uuid,aws", def.With(KindUUID) | aws},
+		{"email,aws_s3_bucket", KindSet(0).With(KindEmail).With(KindAWSS3Bucket)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.spec, func(t *testing.T) {
@@ -46,6 +58,7 @@ func TestParseTypesRejectsUnknown(t *testing.T) {
 		"", "foo", "email,foo", "foo,email", "Email", "EMAIL", " email", "email ", "email, uuid",
 		"email,", ",email", "email,,uuid", "all", "ip", "ipv", "phone_jp", "postal_jp", "credit_card", "my_number", "base64", "custom",
 		"ipv4_global", "default,", "defaults",
+		"AWS", "Aws", "aws_", "aws_*", "aws_host", "aws_account_id", "s3", "aws-account", "clouds", "gcp", " aws", "aws,",
 	} {
 		t.Run(spec, func(t *testing.T) {
 			if _, err := ParseTypes(spec); err == nil {
@@ -60,7 +73,7 @@ func TestParseTypesErrorNamesTheUnknownTypeAndTheValidOnes(t *testing.T) {
 	if err == nil {
 		t.Fatal("want error")
 	}
-	for _, want := range []string{"phone_jp", "default", "email", "ipv4", "ipv6", "secret", "uuid"} {
+	for _, want := range []string{"phone_jp", "default", "aws", "cloud", "email", "ipv4", "ipv6", "secret", "uuid", "aws_account", "aws_s3_bucket"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}
@@ -73,13 +86,105 @@ func TestDefaultKinds(t *testing.T) {
 			t.Errorf("DefaultKinds lacks %v", k)
 		}
 	}
-	if DefaultKinds.Has(KindUUID) {
-		t.Error("DefaultKinds has uuid; uuid is disabled by default")
+	for _, k := range []Kind{KindUUID, KindAWSAccount, KindAWSS3Bucket} {
+		if DefaultKinds.Has(k) {
+			t.Errorf("DefaultKinds has %v; it is disabled by default", k)
+		}
+	}
+}
+
+// 種別の表の性質(仕様 4 章): 種別名は重複せず、クラウドの種別は `<クラウド>_` で始まり、
+// 既定で有効の種別はクラウドの種別でない。並びは、共通の種別のあとに、クラウドごとにまとめる。
+func TestTypesTable(t *testing.T) {
+	want := []string{"email", "ipv4", "ipv6", "secret", "uuid", "aws_account", "aws_s3_bucket"}
+	var got []string
+	seen := map[string]bool{}
+	for i, ti := range Types {
+		got = append(got, ti.Name())
+		if seen[ti.Name()] {
+			t.Errorf("duplicate type %q", ti.Name())
+		}
+		seen[ti.Name()] = true
+		if ti.Cloud != "" && !strings.HasPrefix(ti.Name(), ti.Cloud+"_") {
+			t.Errorf("%q does not start with its cloud %q", ti.Name(), ti.Cloud)
+		}
+		if ti.Cloud == "" && strings.Contains(ti.Name(), "_") {
+			t.Errorf("%q looks like a cloud type but has no cloud", ti.Name())
+		}
+		if ti.Cloud != "" && ti.Default {
+			t.Errorf("cloud type %q is enabled by default", ti.Name())
+		}
+		if i > 0 && Types[i-1].Cloud != "" && ti.Cloud != Types[i-1].Cloud {
+			for _, prev := range Types[:i] {
+				if prev.Cloud == ti.Cloud {
+					t.Errorf("types of cloud %q are not grouped together", ti.Cloud)
+				}
+			}
+		}
+		if ti.Kind.String() != ti.Name() || int(ti.Kind) >= 32 {
+			t.Errorf("Kind %d: name %q", ti.Kind, ti.Name())
+		}
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("Types = %q, want %q", got, want)
+	}
+}
+
+// まとまりの中身は、表から求めたものと一致する(仕様 4 章「対象種別の指定」)。
+//   - aws: `aws_` で始まるすべての種別。cloud: すべてのクラウドの種別
+func TestGroups(t *testing.T) {
+	var names []string
+	byName := map[string]KindSet{}
+	for _, g := range Groups {
+		names = append(names, g.Name)
+		byName[g.Name] = g.Kinds
+		for _, ti := range Types {
+			if g.Name == ti.Name() {
+				t.Errorf("group %q has the same name as a type", g.Name)
+			}
+		}
+	}
+	if strings.Join(names, ",") != "default,aws,cloud" {
+		t.Errorf("groups = %q", names)
+	}
+	var aws, cloud KindSet
+	for _, ti := range Types {
+		if strings.HasPrefix(ti.Name(), "aws_") {
+			aws = aws.With(ti.Kind)
+		}
+		if ti.Cloud != "" {
+			cloud = cloud.With(ti.Kind)
+		}
+	}
+	if aws != KindSet(0).With(KindAWSAccount).With(KindAWSS3Bucket) {
+		t.Errorf("aws_ types = %b", aws)
+	}
+	if byName["default"] != DefaultKinds || byName["aws"] != aws || byName["cloud"] != cloud {
+		t.Errorf("groups = %v, want default %b, aws %b, cloud %b", Groups, DefaultKinds, aws, cloud)
+	}
+}
+
+// KindSet は、すべての種別を、互いに区別して持てる。
+func TestKindSetHoldsAllKinds(t *testing.T) {
+	var all KindSet
+	for _, ti := range Types {
+		if all.Has(ti.Kind) {
+			t.Errorf("%v collides with another kind", ti.Kind)
+		}
+		all = all.With(ti.Kind)
+	}
+	for _, ti := range Types {
+		if !all.Has(ti.Kind) || KindSet(0).With(ti.Kind).Has(ti.Kind+1) {
+			t.Errorf("%v is not held", ti.Kind)
+		}
 	}
 }
 
 func TestKindString(t *testing.T) {
-	want := map[Kind]string{KindEmail: "email", KindIPv4: "ipv4", KindIPv6: "ipv6", KindSecret: "secret", KindUUID: "uuid"}
+	want := map[Kind]string{
+		KindEmail: "email", KindIPv4: "ipv4", KindIPv6: "ipv6", KindSecret: "secret", KindUUID: "uuid",
+		KindAWSAccount: "aws_account", KindAWSS3Bucket: "aws_s3_bucket",
+	}
 	for k, s := range want {
 		if k.String() != s {
 			t.Errorf("Kind(%d).String() = %q, want %q", k, k.String(), s)
@@ -95,6 +200,8 @@ func TestLabelType(t *testing.T) {
 		{Match{Kind: KindEmail}, "email"},
 		{Match{Kind: KindSecret}, "secret"},
 		{Match{Kind: KindUUID}, "uuid"},
+		{Match{Kind: KindAWSAccount}, "aws_account"},
+		{Match{Kind: KindAWSS3Bucket}, "aws_s3_bucket"},
 		{Match{Kind: KindIPv4, Class: ClassGlobal}, "ipv4_global"},
 		{Match{Kind: KindIPv4, Class: ClassPrivate}, "ipv4_private"},
 		{Match{Kind: KindIPv6, Class: ClassGlobal}, "ipv6_global"},
@@ -114,7 +221,8 @@ func TestLabelType(t *testing.T) {
 // LabelType が返す値は、すべて label.Types にあり、label.Types はすべて LabelType で作れる。
 func TestLabelTypesMatchLabelPackage(t *testing.T) {
 	produced := map[string]bool{}
-	for _, k := range []Kind{KindEmail, KindIPv4, KindIPv6, KindSecret, KindUUID} {
+	for _, ti := range Types {
+		k := ti.Kind
 		for _, c := range []Class{ClassNone, ClassGlobal, ClassPrivate} {
 			if s := (Match{Kind: k, Class: c}).LabelType(); s != "" {
 				produced[s] = true

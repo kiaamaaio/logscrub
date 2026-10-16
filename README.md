@@ -1,6 +1,6 @@
 # logscrub
 
-ログやテキストに含まれる **メールアドレス・IP アドレス・トークン類・UUID** を、
+ログやテキストに含まれる **メールアドレス・IP アドレス・トークン類・UUID・AWS の値(アカウント ID、S3 のバケット名)** を、
 種別が分かるラベル(`<email_1>`)またはハッシュ値に置き換える CLI です。
 ログ調査の内容を AI に安全に渡すことを、主な用途としています。
 
@@ -63,6 +63,7 @@ hash_a746604745a4@example.com
 ```console
 $ logscrub mask --types email app.log               # メールアドレスだけ
 $ logscrub mask --types default,uuid app.log        # 既定の種別に UUID を加える
+$ logscrub mask --types default,aws app.log         # 既定の種別に AWS の値(アカウント ID、バケット名)を加える
 $ logscrub mask --uuid-versions 4,7 app.log         # UUID の v4 と v7 だけ(uuid も有効になる)
 $ logscrub mask --ip-scope global app.log           # グローバルな IP だけ(内部アドレスは残す)
 $ logscrub mask --allow support@example.com app.log # この値は置換しない(複数回指定できる)
@@ -82,7 +83,7 @@ $ logscrub types --verbose                          # 対応する種別と、se
 | オプション | 説明 |
 |---|---|
 | `--mode mask\|hash` | `mask`(既定): ラベル。`hash`: ハッシュ(元に戻せない) |
-| `--types LIST` | 対象の種別(カンマ区切り)。指定した種別**だけ**が対象。`default` を含めると既定の種別が加わる |
+| `--types LIST` | 対象の種別、または種別のまとまり(カンマ区切り)。指定した種別**だけ**が対象。`default` を含めると既定の種別が加わる([検出対象](#検出対象)) |
 | `--uuid-versions 4,7` | 対象にする UUID のバージョン(1〜8)。これだけで `uuid` が対象に加わる |
 | `--ip-scope all\|global\|private` | 置換する IP アドレスの範囲(既定 `all`) |
 | `--allow VALUE` | 置換しない値(完全一致、複数回指定可) |
@@ -119,16 +120,39 @@ stderr に出します(終了コードは 0)。
 | `ipv4` / `ipv6` | IP アドレス。グローバルとプライベートを、ラベルで区別する(`<ipv4_global_1>`、`<ipv4_private_1>`) | 有効 |
 | `secret` | トークン類(下の表) | 有効 |
 | `uuid` | UUID(バージョン 1〜8) | 無効 |
+| `aws_account` | AWS アカウント ID(ARN・ECR・SQS の中のもの。[AWS の値](#aws-の値)) | 無効 |
+| `aws_s3_bucket` | S3 のバケット名(`s3://`・S3 の URL・ARN の中のもの。[AWS の値](#aws-の値)) | 無効 |
+
+`--types` には、種別名のほかに、次のまとまりを書けます。
+
+| まとまり | 含まれる種別 |
+|---|---|
+| `default` | 既定で有効の種別(`email`、`ipv4`、`ipv6`、`secret`) |
+| `aws` | `aws_` で始まる種別(`aws_account`、`aws_s3_bucket`) |
+| `cloud` | すべてのクラウドの種別(今は `aws` と同じ) |
+
+例: `--types default,aws` は既定の種別と AWS の種別、`--types aws` は AWS の種別だけが対象です。
+`logscrub types` で、種別とまとまりの一覧を確認できます。
 
 IP アドレスのうち、`0.0.0.0`、`255.255.255.255`、`::`、マルチキャストは、隠す意味がないので置換しません。
 プライベートは、RFC1918、ループバック、リンクローカル、`100.64.0.0/10`、IPv6 の ULA です。
 IPv6 は、割り当て済みの範囲(`2000::/3`、`fc00::/7`、`fe80::/10`、`::1`、IPv4-mapped、NAT64)だけを検出します。
+
+EC2 のホスト名に `-` 区切りで埋め込まれた IPv4 も、`ipv4` として置換します(既定で有効)。
+IP アドレスだけを隠しても、ホスト名から元の値が読めてしまうためです。数値の部分だけを置換します。
+
+| 形 | 例 | 置換後 |
+|---|---|---|
+| パブリック DNS | `ec2-54-250-1-2.ap-northeast-1.compute.amazonaws.com`、`ec2-54-250-1-2.compute-1.amazonaws.com` | `ec2-<ipv4_global_1>.ap-northeast-1.compute.amazonaws.com` |
+| プライベート DNS | `ip-10-0-1-23.ap-northeast-1.compute.internal`、`ip-10-0-1-23.ec2.internal` | `ip-<ipv4_private_1>.ap-northeast-1.compute.internal` |
+| ドメインのない IP 名 | `ip-10-0-1-23`(シェルのプロンプト、Kubernetes のノード名など) | `ip-<ipv4_private_1>` |
 
 ### `secret` の対応形式
 
 | 区分 | 形式 |
 |---|---|
 | AWS アクセスキー ID | `AKIA` / `ASIA` + 英大文字・数字 16 文字 |
+| AWS の署名(SigV4) | `X-Amz-Signature=` / `Signature=`(語は大文字・小文字を区別しない)の後ろの、小文字の 16 進数ちょうど 64 文字。署名付き URL と、`Authorization: AWS4-HMAC-SHA256 …, Signature=…` の署名。語と `=` は残す |
 | GitHub | `ghp_` `gho_` `ghu_` `ghs_` `ghr_` + 英数字 36 文字以上、`github_pat_` + 英数字・`_` 22 文字以上 |
 | Slack | `xoxb-` `xoxp-` `xoxa-` `xoxr-` `xoxs-` + 英数字・`-` 10 文字以上 |
 | Stripe | `sk_live_` `sk_test_` `rk_live_` `rk_test_` + 英数字 24 文字以上 |
@@ -142,6 +166,28 @@ IPv6 は、割り当て済みの範囲(`2000::/3`、`fc00::/7`、`fe80::/10`、`
 キー名の末尾の単位で行います(`X-Auth-Token`、`DB_PASSWORD`、`accessToken` は対象。`max_tokens`、
 `token_count`、`passwordless`、`PWD` は対象外)。値の部分だけを置換し、キー名・区切り・引用符は残します。
 JSON などの文法を壊さないよう、キー名が引用符で囲まれている場合は、文字列の値だけを置換します。
+
+### AWS の値
+
+AWS アカウント ID と S3 のバケット名は、秘密情報ではありませんが、組織を特定できます。
+**既定では無効**で、`--types default,aws` のように指定した場合だけ置換します。
+どちらも、**決まった形の中に現れたものだけ**を検出し、値の部分だけを置換します。同じ値は、どの形でも同じラベルになります。
+
+| 種別 | 形 | 例(置換後) |
+|---|---|---|
+| `aws_account` | ARN | `arn:aws:iam::<aws_account_1>:role/deployer` |
+| `aws_account` | ECR のレジストリ | `<aws_account_1>.dkr.ecr.ap-northeast-1.amazonaws.com/app:latest` |
+| `aws_account` | SQS のキュー URL | `https://sqs.ap-northeast-1.amazonaws.com/<aws_account_1>/orders` |
+| `aws_s3_bucket` | `s3://`(`s3a://`、`s3n://`) | `s3://<aws_s3_bucket_1>/logs/a.gz` |
+| `aws_s3_bucket` | バーチャルホスト形式 | `https://<aws_s3_bucket_1>.s3.ap-northeast-1.amazonaws.com/a.txt` |
+| `aws_s3_bucket` | パス形式 | `https://s3.ap-northeast-1.amazonaws.com/<aws_s3_bucket_1>/a.txt` |
+| `aws_s3_bucket` | ARN | `arn:aws:s3:::<aws_s3_bucket_1>/logs/*` |
+
+- ARN のパーティションは `aws`、`aws-cn`、`aws-us-gov`、`aws-iso`、`aws-iso-b`、`aws-iso-e`、`aws-iso-f`、`aws-eusc`。
+  ホスト名のドメインは `amazonaws.com`、`amazonaws.com.cn`、`amazonaws.eu` です(ISO リージョンのドメインは対象外)。
+- ARN のアカウント ID の欄が空のもの(`arn:aws:s3:::bucket`)や `aws` のもの(`arn:aws:iam::aws:policy/…`)は、置換しません。
+- バケット名は、今の命名規則(英小文字・数字・`.`・`-` の 3〜63 文字など)に合うものだけを置換します。
+- ARN・ホスト名・`s3://` などの決まった部分は、大文字・小文字を区別します(小文字の形だけが対象)。
 
 ## 性質
 
@@ -174,6 +220,9 @@ JSON などの文法を壊さないよう、キー名が引用符で囲まれて
 - 割り当てのない範囲の IPv6(`::10.0.0.1` など)は、IPv6 としては検出されません(IPv4 部分は検出されます)。
   後ろが英字・`_` とつながった IPv6(`2001:db8::1xyz`)は、アドレスとして扱いません。
 - `2001::x` のように、割り当て済みの範囲の形をしたコードの記号は、IPv6 として検出されることがあります。
+- ホスト名に埋め込まれた IPv4 は、`54-250-1-2` と `54.250.1.2` を別の値として扱います(同じアドレスでも、
+  別のラベルになります。`restore` で 1 バイトも違わずに戻すためです)。
+- EC2 のパブリックホスト名の IPv6 形式・デュアルスタック形式(`….ip.aws`)は、対象外です。
 
 **secret**
 
@@ -182,6 +231,16 @@ JSON などの文法を壊さないよう、キー名が引用符で囲まれて
 - JSON の数値だけのトークン(`"pin": 123456`)は、文法を壊さないため、置換されません。
 - 文章中の `token: expired` の `expired` のように、キー名の後ろの語が置換されることがあります。
 - `session_id=<UUID>` のように、キー名の値が UUID の場合は、`<uuid_N>` でなく `<secret_N>` になります。
+
+**AWS の値**
+
+- 決まった形の外に現れた値は検出しません(例: `account_id=123456789012`、CloudTrail の `"accountId"`、
+  `bucket=my-bucket`、`"bucketName": "my-bucket"`)。同じ値が決まった形の中と外の両方にあると、外の値から元の値が読めます。
+- 旧形式のバケット名(2018 年 3 月 1 日より前に us-east-1 で作られた、英大文字・`_` を含むもの、64 文字以上のもの)は検出しません。
+- アカウントのリージョン別の名前空間のバケット名(`<名前>-<アカウント ID>-<リージョン>-an`)は、アカウント ID を含みます。
+  `aws_s3_bucket` を無効にして `aws_account` だけを有効にした場合、バケット名の中のアカウント ID は置換されません。
+- ARN のリソース名(ロール名、ユーザー名など)や、`AROA…`・`AIDA…` などの一意 ID は置換しません。
+- AWS の外からアクセスできるサービスのホスト名(ELB、API Gateway、CloudFront、RDS など)は、まだ対象外です(v1.2 で予定)。
 
 **UUID**
 
@@ -218,19 +277,20 @@ JSON などの文法を壊さないよう、キー名が引用符で囲まれて
 
 | 実行 | 速度 | 最大メモリ |
 |---|---|---|
-| `logscrub mask < big.log > /dev/null` | 約 195 MB/s | 30 MB |
-| `cat big.log \| logscrub mask > /dev/null` | 約 176 MB/s | 30 MB |
-| 同上(`--types default,uuid`) | 約 182 MB/s | 34 MB |
+| `logscrub mask < big.log > /dev/null` | 約 188 MB/s | 30 MB |
+| `cat big.log \| logscrub mask > /dev/null` | 約 168 MB/s | 32 MB |
+| 同上(`--types default,uuid`) | 約 177 MB/s | 34 MB |
+| AWS の値を含む合成ログを `--types default,aws` で | 約 157 MB/s | 38 MB |
 
 - **メモリ**: 対応表(検出した値の種類数に比例)が主です。値の種類数が一定(1,000 種類)なら、入力が
-  20MB でも 100MB でも、最大 16.8MB で変わりません。ほぼすべての値が異なる 100MB のログでは、31.6MB でした。
+  20MB でも 100MB でも、最大 14MB ほどで変わりません。ほぼすべての値が異なる 100MB のログでは、31.8MB でした。
 - **測定条件**: 合成ログ(1 行 200 バイト前後、約 30% の行に検出対象があり、1MB の JSON を 1 行で数行含む)、
   既定の種別、mask モード。AMD Ryzen 9 9950X、WSL2 上の Docker コンテナ(`golang:1.27.2`、2 CPU)内で測定し、
   3 回のうちの最速の値です。実際のログでは、検出対象の割合や行の長さで変わります。
 - **再現**: `./scripts/go test -run Perf -v ./cmd/logscrub -perf`(`-perf-size 100` で大きさを指定)。
 
 速度のために、正規表現を当てる前に、行の中に手がかり(`@`、`.` `:` と数字の並び、トークンの接頭辞、
-`=` `:`、ハイフンの並びなど)があるかを確かめて、ほとんどの行では正規表現を使いません。
+`=` `:`、ハイフンの並び、`arn:`・`.amazonaws.` など)があるかを確かめて、ほとんどの行では正規表現を使いません。
 
 ## 開発
 
@@ -251,9 +311,20 @@ $ ./scripts/go build -o bin/logscrub ./cmd/logscrub
 | `internal/transform` | mask / hash / restore と、行の書き換え(Engine)、統計。`testdata/` に、サンプルログと、手で確認した期待値 |
 | `internal/label` | ラベルの書式と、hash 出力形の走査 |
 | `internal/stream` | 行単位の入出力(改行コードの保持) |
-| `internal/synthlog` | 性能測定用の合成ログの生成器 |
+| `internal/synthlog` | 性能測定用の合成ログの生成器(AWS の値を含める設定あり) |
 
-仕様は [docs/SPEC.md](docs/SPEC.md)、実装計画と進捗・判断の記録は [docs/PLAN.md](docs/PLAN.md) にあります。
+仕様は [docs/SPEC.md](docs/SPEC.md)、開発環境・構成・設計の注意点は [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)、版ごとの実装計画と進捗・判断の記録は [docs/plans/](docs/plans/) にあります。
+
+## 変更点
+
+### v1.1.0
+
+- **既定の動作が変わります**(どちらも、今まで隠せていなかった値を隠す方向の変更です)。
+  - `secret` に、AWS の署名(SigV4。署名付き URL の `X-Amz-Signature=` と、`Authorization: AWS4-HMAC-SHA256 …, Signature=`)を加えました。
+  - EC2 のホスト名に埋め込まれた IPv4(`ec2-54-250-1-2.…`、`ip-10-0-1-23`)を、`ipv4` として置換するようになりました。
+- AWS の値の種別 `aws_account`、`aws_s3_bucket` を加えました(既定では無効。[AWS の値](#aws-の値))。
+- `--types` に、種別のまとまり `aws`、`cloud` を書けるようになりました。
+- `logscrub types` の出力に、クラウドごとの見出しと、まとまりの一覧を加えました(列の幅も変わりました)。
 
 ## ライセンス
 

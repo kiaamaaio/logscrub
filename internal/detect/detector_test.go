@@ -46,7 +46,9 @@ func fakeIP(k Kind, class Class, start, end int) *fakeFinder {
 func newTestDetector(t *testing.T, o Options, fs ...finder) *Detector {
 	t.Helper()
 	if o.Kinds == 0 {
-		o.Kinds = KindSet(0).With(KindEmail).With(KindIPv4).With(KindIPv6).With(KindSecret).With(KindUUID)
+		for _, ti := range Types {
+			o.Kinds = o.Kinds.With(ti.Kind)
+		}
 	}
 	d, err := newDetector(o, fs)
 	if err != nil {
@@ -71,7 +73,7 @@ func check(t *testing.T, d *Detector, line string, want []Match, wantKept int) {
 	}
 }
 
-// ---- 範囲の重なりの解決(仕様 4 章「範囲が重なった場合」、PLAN 4.1) ----
+// ---- 範囲の重なりの解決(仕様 4 章「範囲が重なった場合」、DEVELOPMENT.md 3.1) ----
 
 func TestResolveLongerWins(t *testing.T) {
 	d := newTestDetector(t, Options{},
@@ -100,8 +102,8 @@ func TestResolveIPv4MappedIPv6(t *testing.T) {
 }
 
 func TestResolveSameLengthUsesKindPriority(t *testing.T) {
-	// 優先順位: email → ipv4 / ipv6 → secret → uuid
-	order := []Kind{KindEmail, KindIPv4, KindSecret, KindUUID}
+	// 優先順位: email → ipv4 / ipv6 → secret → uuid → aws_account → aws_s3_bucket
+	order := []Kind{KindEmail, KindIPv4, KindSecret, KindUUID, KindAWSAccount, KindAWSS3Bucket}
 	for i := 0; i < len(order); i++ {
 		for j := i + 1; j < len(order); j++ {
 			hi, lo := order[i], order[j]
@@ -231,7 +233,7 @@ func TestOnlyEnabledKindsAreRun(t *testing.T) {
 	}
 }
 
-// ---- 置換済みの値の除外(仕様 4 章「置換済みの値は検出しない」、PLAN 4.2、Q1) ----
+// ---- 置換済みの値の除外(仕様 4 章「置換済みの値は検出しない」、DEVELOPMENT.md 3.2、Q1) ----
 
 // password=<secret_1> の値部分 <secret_1> は、候補と保護範囲が同じ範囲なので、保護範囲が勝つ。
 func TestPlaceholderBeatsEqualCandidate(t *testing.T) {

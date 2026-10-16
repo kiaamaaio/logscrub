@@ -1,0 +1,12 @@
+2026-10-15T09:00:01.120Z INFO  [ec2-user@ip-<ipv4_private_1> ~]$ aws sts get-caller-identity
+2026-10-15T09:00:01.480Z INFO  {"UserId": "AROAEXAMPLEID:deployer", "Account": "123456789012", "Arn": "arn:aws:sts::<aws_account_1>:assumed-role/deployer/session"}
+2026-10-15T09:00:02.010Z INFO  app.deploy: pulling <aws_account_1>.dkr.ecr.ap-northeast-1.amazonaws.com/app:latest on ip-<ipv4_private_1>.ap-northeast-1.compute.internal
+2026-10-15T09:00:02.300Z INFO  app.deploy: public dns ec2-<ipv4_global_1>.ap-northeast-1.compute.amazonaws.com (<ipv4_global_2>)
+2026-10-15T09:00:03.000Z DEBUG app.s3: GET https://<aws_s3_bucket_1>.s3.ap-northeast-1.amazonaws.com/logs/a.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=<secret_1>%2F20261015%2Fap-northeast-1%2Fs3%2Faws4_request&X-Amz-Date=20261015T090003Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=<secret_2>
+2026-10-15T09:00:03.400Z DEBUG app.s3: Authorization: AWS4-HMAC-SHA256 Credential=<secret_1>/20261015/ap-northeast-1/s3/aws4_request, SignedHeaders=host;range;x-amz-date, Signature=<secret_3>
+2026-10-15T09:00:04.000Z INFO  app.batch: copy s3://<aws_s3_bucket_1>/logs/a.gz to s3a://<aws_s3_bucket_2>/archive/ (https://s3.ap-northeast-1.amazonaws.com/<aws_s3_bucket_1>/logs/a.gz)
+2026-10-15T09:00:04.500Z INFO  app.queue: send to https://sqs.ap-northeast-1.amazonaws.com/<aws_account_1>/orders (role arn:aws:iam::<aws_account_2>:role/worker)
+2026-10-15T09:00:05.000Z INFO  app.policy: {"Effect": "Allow", "Resource": ["arn:aws:s3:::<aws_s3_bucket_1>/*", "arn:aws:s3:::<aws_s3_bucket_2>"], "Principal": {"AWS": "arn:aws:iam::<aws_account_1>:root"}}
+2026-10-15T09:00:05.300Z INFO  app.policy: attached arn:aws:iam::aws:policy/ReadOnlyAccess and arn:aws:ec2:*:<aws_account_1>:vpc/*
+2026-10-15T09:00:06.000Z WARN  app.check: not replaced: account 123456789012, bucket=my-bucket, s3://My_Legacy_Bucket/, ship-10-0-1-23, ec2-54-250-1-2.example.com, x-amz-content-sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+2026-10-15T09:00:06.500Z INFO  app.done: finished on ip-<ipv4_private_1> (cn: arn:aws-cn:iam::<aws_account_1>:role/x, ecr <aws_account_1>.dkr.ecr.cn-north-1.amazonaws.com.cn/app)

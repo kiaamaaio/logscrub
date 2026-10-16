@@ -109,23 +109,52 @@ func FuzzMaskStable(f *testing.F) {
 	} {
 		f.Add(s)
 	}
-	opts := detect.Options{Kinds: detect.DefaultKinds.With(detect.KindUUID)}
-	det, err := detect.New(opts)
-	if err != nil {
-		f.Fatal(err)
+	for _, s := range awsFuzzSeeds {
+		f.Add(s)
 	}
+	optsList, dets := fuzzOptions(f)
 	f.Fuzz(func(t *testing.T, in string) {
-		once, _ := mask(t, opts, in)
-		if strings.Count(once, "\n") != strings.Count(in, "\n") {
-			t.Fatalf("the number of lines changed: %q -> %q", in, once)
+		for i, opts := range optsList {
+			once, _ := mask(t, opts, in)
+			if strings.Count(once, "\n") != strings.Count(in, "\n") {
+				t.Fatalf("the number of lines changed: %q -> %q", in, once)
+			}
+			if strings.HasSuffix(in, "\n") != strings.HasSuffix(once, "\n") {
+				t.Fatalf("final newline changed: %q -> %q", in, once)
+			}
+			checkSecondPass(t, dets[i], in, once, func(b []byte) []secondPassSpan {
+				var phs []secondPassSpan
+				label.DefaultFormat.Scan(b, func(s, e int, _ string, _ int) { phs = append(phs, secondPassSpan{s, e}) })
+				return phs
+			})
 		}
-		if strings.HasSuffix(in, "\n") != strings.HasSuffix(once, "\n") {
-			t.Fatalf("final newline changed: %q -> %q", in, once)
-		}
-		checkSecondPass(t, det, in, once, func(b []byte) []secondPassSpan {
-			var phs []secondPassSpan
-			label.DefaultFormat.Scan(b, func(s, e int, _ string, _ int) { phs = append(phs, secondPassSpan{s, e}) })
-			return phs
-		})
 	})
+}
+
+// awsFuzzSeeds は、AWS の値(v1.1)を含む、ファズテストの種。
+var awsFuzzSeeds = []string{
+	"&X-Amz-Signature=fe5f80f77d5fa3beca038a248ff027d0445342fe2855ddc963176630326f1024&\n",
+	"[ec2-user@ip-10-0-1-23 ~]$ ec2-54-250-1-2.compute-1.amazonaws.com 54.250.1.2\n",
+	"arn:aws:iam::123456789012:role/x 123456789012.dkr.ecr.us-east-1.amazonaws.com/a https://sqs.us-east-1.amazonaws.com/123456789012/q\n",
+	"s3://my-bucket/a https://logs.example.com.s3.amazonaws.com/b https://s3.amazonaws.com/my-bucket/c arn:aws:s3:::my-bucket/*\n",
+	"ec2-ipv4_global_a1b2c3d4e5f6.compute-1.amazonaws.com s3://aws_s3_bucket_3f9a1c0b7d2e/ arn:aws:iam::aws_account_3f9a1c0b7d2e:root\n",
+	"logs.s3.backup.s3.amazonaws.com s3://abc_def/ s3://my-bucket.\n",
+}
+
+// fuzzOptions は、ファズテストで試す検出の設定(v1.0 の既定 + uuid と、v1.1 の `--types default,aws`)と、
+// それぞれの Detector を返す。
+func fuzzOptions(f *testing.F) ([]detect.Options, []*detect.Detector) {
+	optsList := []detect.Options{
+		{Kinds: detect.DefaultKinds.With(detect.KindUUID)},
+		{Kinds: detect.DefaultKinds.With(detect.KindAWSAccount).With(detect.KindAWSS3Bucket)},
+	}
+	dets := make([]*detect.Detector, len(optsList))
+	for i, o := range optsList {
+		d, err := detect.New(o)
+		if err != nil {
+			f.Fatal(err)
+		}
+		dets[i] = d
+	}
+	return optsList, dets
 }

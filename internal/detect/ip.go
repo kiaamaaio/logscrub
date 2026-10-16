@@ -39,17 +39,28 @@ var ipv4Re = regexp.MustCompile(`[0-9]{1,3}(?:\.[0-9]{1,3}){3}`)
 
 // ipv4Finder は、IPv4 アドレスの検出器(仕様 4.3)。
 //
-// 前後の文字の条件: 前が数字・ドットでないこと。後ろが数字でなく、「ドット + 数字」でもないこと。
-// ポート付き(10.0.0.1:8080)や CIDR(10.0.0.0/8)は、アドレス部分だけが範囲になる。
+// 次の 2 つの規則の候補をまとめて返す。
 //
-// 前処理(PLAN 4.4): 候補は、数字に挟まれた '.' が 3 つ連続する箇所にしか現れない。
-// そのような箇所(ipv4WindowStart)の手前から、正規表現を当てる。
-// ほぼ全ての行にあるタイムスタンプの '.' では、正規表現を当てない。
+//   - ドット区切り(dotted): 10.0.0.1 など
+//   - ホスト名に埋め込まれた IPv4(hosts): EC2 のホスト名の `ec2-54-250-1-2.…`、`ip-10-0-1-23` など(v1.1)
 type ipv4Finder struct{}
 
 func (ipv4Finder) kind() Kind { return KindIPv4 }
 
-func (ipv4Finder) find(line []byte, dst []Match) []Match {
+func (f ipv4Finder) find(line []byte, dst []Match) []Match {
+	dst = f.dotted(line, dst)
+	return f.hosts(line, dst)
+}
+
+// dotted は、ドット区切りの IPv4 アドレスの候補を追記する。
+//
+// 前後の文字の条件: 前が数字・ドットでないこと。後ろが数字でなく、「ドット + 数字」でもないこと。
+// ポート付き(10.0.0.1:8080)や CIDR(10.0.0.0/8)は、アドレス部分だけが範囲になる。
+//
+// 前処理(DEVELOPMENT.md 3.4): 候補は、数字に挟まれた '.' が 3 つ連続する箇所にしか現れない。
+// そのような箇所(ipv4WindowStart)の手前から、正規表現を当てる。
+// ほぼ全ての行にあるタイムスタンプの '.' では、正規表現を当てない。
+func (ipv4Finder) dotted(line []byte, dst []Match) []Match {
 	pos := 0
 	for pos < len(line) {
 		from := ipv4WindowStart(line, pos)
@@ -75,6 +86,103 @@ func (ipv4Finder) find(line []byte, dst []Match) []Match {
 		dst = append(dst, Match{Start: s, End: e, Kind: KindIPv4, Class: classify(addr)})
 	}
 	return dst
+}
+
+// hostIPv4Re は、ホスト名の中の、`-` 区切りの 4 つの数値(0〜255 の確認と、先頭 0 の除外は netip.ParseAddr)。
+const hostIPv4Re = `([0-9]{1,3}(?:-[0-9]{1,3}){3})`
+
+// hostForm は、IPv4 を埋め込んだホスト名の形の 1 つ(仕様 4.3「ホスト名に埋め込まれた IPv4」)。
+type hostForm struct {
+	// name は、形の先頭の `-` より前の部分(`ec2`、`ip`)。
+	name []byte
+	// re は、形の先頭(`ec2-`、`ip-`)の位置に当てる正規表現。1 つ目のグループが、4 つの数値。
+	// 数値の後ろの部分(ドメイン)があれば、一致の末尾まで含める。
+	re *regexp.Regexp
+	// bare は、ドメインのない形(数値で終わる形)を許すか。
+	bare bool
+}
+
+// hostForms は、IPv4 を埋め込んだホスト名の形(仕様 4.3、Q33、Q40〜Q42)。
+//
+//   - パブリック DNS: `ec2-a-b-c-d.compute-1.amazonaws.com`(us-east-1)、`ec2-a-b-c-d.<リージョン>.compute.<ドメイン>`
+//   - プライベート DNS: `ip-a-b-c-d.ec2.internal`(us-east-1)、`ip-a-b-c-d.<リージョン>.compute.internal`
+//   - ドメインのない IP 名: `ip-a-b-c-d`(後ろが、英数字・`-`・`_`・`.` でないこと)
+var hostForms = []hostForm{
+	{
+		name: []byte("ec2"),
+		re: regexp.MustCompile(`^ec2-` + hostIPv4Re +
+			`\.(?:compute-1\.amazonaws\.com|` + awsRegionRe + `\.compute\.` + awsDomainRe + `)`),
+	},
+	{
+		name: []byte("ip"),
+		re:   regexp.MustCompile(`^ip-` + hostIPv4Re + `(?:\.ec2\.internal|\.` + awsRegionRe + `\.compute\.internal)?`),
+		bare: true,
+	},
+}
+
+// hosts は、ホスト名に埋め込まれた IPv4 の候補を追記する(仕様 4.3)。
+//
+// 範囲は、`-` 区切りの 4 つの数値の部分だけ(`ec2-`・`ip-` とドメインは残す)。値のバイト列は `-` 区切りのまま
+// (`54-250-1-2` と `54.250.1.2` は別の値。Q34)。区別は、`.` 区切りに直したアドレスで決める。
+//
+// 前処理: 形の先頭(`ec2-`、`ip-`)を手がかりにする。`-` を bytes.IndexByte で探し、手前が `ec2` / `ip`、
+// 後ろが数字のときだけ、その位置に正規表現を当てる。`ec2-`・`ip-` を bytes.Index で探すと、
+// 先頭の文字(`e`、`i`)が文中に多く、速い IndexByte の経路を外れて、約 5 倍遅かったため(段階 3 の測定)。
+func (ipv4Finder) hosts(line []byte, dst []Match) []Match {
+	n := len(line)
+	for pos := 0; pos < n; {
+		j := bytes.IndexByte(line[pos:], '-')
+		if j < 0 {
+			break
+		}
+		i := pos + j // '-' の位置
+		pos = i + 1
+		if i+1 >= n || !isDigit(line[i+1]) {
+			continue
+		}
+		for _, h := range hostForms {
+			p := i - len(h.name) // 形の先頭
+			if p < 0 || !bytes.Equal(line[p:i], h.name) || p > 0 && isHostPrefixChar(line[p-1]) {
+				continue
+			}
+			loc := h.re.FindSubmatchIndex(line[p:])
+			if loc == nil {
+				break
+			}
+			s, e, end := p+loc[2], p+loc[3], p+loc[1]
+			if end > e {
+				if !isHostEnd(line, end) {
+					break
+				}
+			} else if !h.bare || end < n && isHostPrefixChar(line[end]) {
+				break
+			}
+			addr, ok := hostIPv4(line[s:e])
+			if !ok {
+				break
+			}
+			dst = append(dst, Match{Start: s, End: e, Kind: KindIPv4, Class: classify(addr)})
+			pos = end
+			break
+		}
+	}
+	return dst
+}
+
+// hostIPv4 は、`-` 区切りの 4 つの数値 b を、`.` 区切りに直して、netip.ParseAddr で確認する。
+func hostIPv4(b []byte) (netip.Addr, bool) {
+	var buf [15]byte // 255-255-255-255 の長さ
+	if len(b) > len(buf) {
+		return netip.Addr{}, false
+	}
+	n := copy(buf[:], b)
+	for i := range n {
+		if buf[i] == '-' {
+			buf[i] = '.'
+		}
+	}
+	addr, err := netip.ParseAddr(string(buf[:n]))
+	return addr, err == nil && addr.Is4()
 }
 
 // ipv4WindowStart は、line[from:] の中で、IPv4 アドレスの候補が始まりうる最初の位置を返す。

@@ -134,6 +134,76 @@ func TestSecretFixedFormats(t *testing.T) {
 	}
 }
 
+// ---- AWS の署名(仕様 4.1「AWS の署名」、Q32) ----
+
+// AWS のドキュメントの例の署名(64 桁の小文字の 16 進数)。
+const (
+	awsSig  = "fe5f80f77d5fa3beca038a248ff027d0445342fe2855ddc963176630326f1024"
+	awsSig2 = "aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404"
+)
+
+func TestSecretAWSSignature(t *testing.T) {
+	presigned := "https://examplebucket.s3.amazonaws.com/test.txt?X-Amz-Algorithm=AWS4-HMAC-SHA256" +
+		"&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20130524%2Fus-east-1%2Fs3%2Faws4_request" +
+		"&X-Amz-Date=20130524T000000Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host&X-Amz-Signature=" + awsSig2
+	authz := "Authorization: AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request, " +
+		"SignedHeaders=host;range;x-amz-date, Signature=" + awsSig
+	tests := []struct {
+		name string
+		line string
+		want []string
+	}{
+		// 署名付き URL: 署名と、X-Amz-Credential の中のアクセスキー ID だけ。日付・リージョンなどは残る。
+		{"presigned url", presigned, []string{"AKIAIOSFODNN7EXAMPLE", awsSig2}},
+		// SigV4 の Authorization: 方式名が Bearer / Basic でないので、キー名ベースの値にはならない。
+		{"authorization header", authz, []string{"AKIAIOSFODNN7EXAMPLE", awsSig}},
+		{"x-amz-signature", "X-Amz-Signature=" + awsSig, []string{awsSig}},
+		{"signature", "Signature=" + awsSig, []string{awsSig}},
+		{"after question mark", "/a?X-Amz-Signature=" + awsSig + "&b=1", []string{awsSig}},
+		{"after ampersand", "&X-Amz-Signature=" + awsSig + "&", []string{awsSig}},
+		{"after comma and space", "x, Signature=" + awsSig, []string{awsSig}},
+		{"lowercase word", "x-amz-signature=" + awsSig, []string{awsSig}},
+		{"uppercase word", "X-AMZ-SIGNATURE=" + awsSig, []string{awsSig}},
+		{"mixed case word", "sIgNaTuRe=" + awsSig, []string{awsSig}},
+		{"in double quotes", `"url":"https://b.s3.amazonaws.com/k?X-Amz-Signature=` + awsSig + `"`, []string{awsSig}},
+		{"followed by period", "Signature=" + awsSig + ".", []string{awsSig}},
+		{"followed by underscore", "Signature=" + awsSig + "_x", []string{awsSig}},
+		{"followed by japanese", "Signature=" + awsSig + "です", []string{awsSig}},
+		{"two signatures", "Signature=" + awsSig + " X-Amz-Signature=" + awsSig2, []string{awsSig, awsSig2}},
+		{"invalid utf8 before", "\xffSignature=" + awsSig, []string{awsSig}},
+
+		// 検出しない: 64 桁の小文字の 16 進数でない
+		{"63 digits", "Signature=" + awsSig[:63], nil},
+		{"65 digits", "Signature=" + awsSig + "0", nil},
+		{"uppercase hex", "Signature=" + strings.ToUpper(awsSig), nil},
+		{"one uppercase hex", "Signature=" + "F" + awsSig[1:], nil},
+		{"non hex letter", "Signature=" + "g" + awsSig[1:], nil},
+		{"followed by letter", "Signature=" + awsSig + "g", nil},
+		{"sigv2 base64", "Signature=" + "nI3mmJwlFz1D2nOzfUHPmOjTkf6dbTO0xsYd4OO7bL8%3D", nil},
+		{"space after equals", "Signature= " + awsSig, nil},
+		{"colon separator", "X-Amz-Signature: " + awsSig, nil},
+		// 検出しない: 語の前が英数字・`-`・`_`、または別の語
+		{"after letter", "xSignature=" + awsSig, nil},
+		{"after hyphen", "Foo-Signature=" + awsSig, nil},
+		{"after underscore", "my_signature=" + awsSig, nil},
+		{"x-amz after letter", "aX-Amz-Signature=" + awsSig, nil},
+		{"x-amz after hyphen", "x-amz-x-amz-signature=" + awsSig, nil},
+		{"signed headers", "X-Amz-SignedHeaders=" + awsSig, nil},
+		{"signatures", "Signatures=" + awsSig, nil},
+		// 本文のハッシュ値は、秘密ではないので対象外
+		{"content sha256", "x-amz-content-sha256=" + awsSig, nil},
+		{"short line", "Signature=", nil},
+		{"only equals", rep("=", 100), nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := secretsIn(tt.line); !slices.Equal(got, tt.want) {
+				t.Errorf("secrets(%q) = %q, want %q", tt.line, got, tt.want)
+			}
+		})
+	}
+}
+
 // ---- Authorization ヘッダ(仕様 4.1、決定事項 15: キー名の値の位置に限る) ----
 
 func TestSecretBearerAndBasic(t *testing.T) {
@@ -427,6 +497,25 @@ func TestDetectorSecretEachFixedFormat(t *testing.T) {
 	}
 }
 
+// 受け入れ基準: 署名付き URL と、SigV4 の Authorization の署名が、既定の種別で secret になる(語と `=` は残る)。
+// Signature はキー名ベースの対象ではないので、キー名ベースの値と重なっても 1 つの範囲になる。
+func TestDetectorSecretAWSSignature(t *testing.T) {
+	d := newSecretDetector(t, Options{Kinds: DefaultKinds})
+	line := "&X-Amz-Signature=" + awsSig + "&"
+	check(t, d, line, []Match{m(KindSecret, 17, 17+64)}, 0)
+	line = "SignedHeaders=host;x-amz-date, Signature=" + awsSig
+	check(t, d, line, []Match{m(KindSecret, len(line)-64, len(line))}, 0)
+	// 値全体がキー名ベースの値になる場合は、長いほう(キー名ベース)が勝つ。
+	line = "token=Signature=" + awsSig
+	check(t, d, line, []Match{m(KindSecret, 6, len(line))}, 0)
+	// 隣のキー名ベースの値(X-Amz-Security-Token は token で終わるキー名)とは、別の範囲になる。
+	line = "?X-Amz-Security-Token=FwoGZXIvYXdzEJr&X-Amz-Signature=" + awsSig
+	check(t, d, line, []Match{m(KindSecret, 22, 37), m(KindSecret, len(line)-64, len(line))}, 0)
+	// 置換済みの形は、64 桁の 16 進数でないので、再度は検出されない。
+	check(t, d, "X-Amz-Signature=<secret_1>&", nil, 1)
+	check(t, d, "Signature=secret_3f9a1c0b7d2e", nil, 1)
+}
+
 // 置換済みの値を、再度検出しない(受け入れ基準)。
 func TestDetectorSecretDoesNotRedetectPlaceholders(t *testing.T) {
 	d := newSecretDetector(t, Options{})
@@ -520,7 +609,9 @@ var (
 	refBareStop = regexp.MustCompile(`^\\(?:["'nrt]|u0026)`)
 	refBareUnit = regexp.MustCompile(`^(?:\\\\|\\u|\\|[^ \t&,;}\])"'\\])`)
 	refScheme   = regexp.MustCompile(`(?i)^(bearer|basic)[ \t]+`)
-	refToken68  = regexp.MustCompile(`^[A-Za-z0-9._~+/-]+=*`)
+	// AWS の署名: 語(大文字・小文字を区別しない)+ `=` + 小文字の 16 進数 64 文字。前後の文字は、呼び出し側で確認する。
+	refSignature = regexp.MustCompile(`^(?i:(?:x-amz-)?signature)=([0-9a-f]{64})`)
+	refToken68   = regexp.MustCompile(`^[A-Za-z0-9._~+/-]+=*`)
 )
 
 func refIsAlnum(c byte) bool {
@@ -533,7 +624,7 @@ func refNormKey(k string) string {
 	return strings.NewReplacer("-", "_", ".", "_").Replace(strings.ToLower(k))
 }
 
-// refSecrets は、仕様と PLAN(決定事項 15 を含む)の規則を、正規表現で書いた参照実装。
+// refSecrets は、仕様と plans/v1.0.0.md(決定事項 15 を含む)の規則を、正規表現で書いた参照実装。
 // 検出器と同じく、候補の範囲を、開始位置の順(同じなら終了位置の順)で返す。
 func refSecrets(line []byte) [][2]int {
 	var out [][2]int
@@ -555,6 +646,17 @@ func refSecrets(line []byte) [][2]int {
 		}
 		out = append(out, [2]int{p, e})
 		p = e
+	}
+	// AWS の署名(前が英数字・`-`・`_` でなく、後ろが英数字でないこと)
+	for p := 0; p < len(line); p++ {
+		if p > 0 && (refIsAlnum(line[p-1]) || line[p-1] == '-' || line[p-1] == '_') {
+			continue
+		}
+		loc := refSignature.FindSubmatchIndex(line[p:])
+		if loc == nil || p+loc[1] < len(line) && refIsAlnum(line[p+loc[1]]) {
+			continue
+		}
+		out = append(out, [2]int{p + loc[2], p + loc[3]})
 	}
 	// キー名ベース(Authorization と、方式名つきの値を含む)
 	for i := 0; i < len(line); i++ {
@@ -676,6 +778,8 @@ func TestSecretFinderMatchesRegexpReference(t *testing.T) {
 		"<secret_1>", "abc", "123", "a b", "あ", "\xff", "Bearer ", "bearer\t", "Basic ", "dXNlcjpwYXNz", "dXNlcjpwYXNz.", "abc==",
 		"AKIA", "IOSFODNN7EXAMPLE", "ASIA", "ghp_", rep("a", 36), "github_pat_", rep("b", 22), "xoxb-", rep("1", 10),
 		"sk_live_", "rk_test_", rep("c", 24), "AIza", rep("d", 35), "sk-", rep("e", 20), "eyJ", ".", "eyJhbGci", "-", "_",
+		"Signature", "signature", "SIGNATURE", "X-Amz-", "x-amz-", "Signature=", "X-Amz-Signature=", awsSig, awsSig,
+		awsSig[:32], awsSig[32:], "0", "f", "F", "?", "%2F",
 	}
 	rng := rand.New(rand.NewPCG(21, 22))
 	f := secretFinder{}
@@ -699,6 +803,52 @@ func TestSecretFinderMatchesRegexpReference(t *testing.T) {
 		if !slices.Equal(got, want) {
 			t.Fatalf("iter %d, line %q\n got  %v\n want %v", iter, line, got, want)
 		}
+	}
+}
+
+// AWS の署名の規則に絞った乱数テスト。語・前後の文字・16 進数の長さの組み合わせで、参照実装と一致すること。
+// 行は「区切り + 語 + `=` + 16 進数(の変形)」の組と、雑多な文字列を、ランダムに並べて作る。
+func TestSecretSignatureMatchesRegexpReference(t *testing.T) {
+	around := []string{"", "", "&", "?", " ", ", ", ".", "-", "_", "a", "Z", "0", "g", "あ", "\xff", "token=", "password=", "%2F"}
+	words := []string{"Signature", "signature", "SIGNATURE", "SigNature", "X-Amz-Signature", "x-amz-signature", "X-AMZ-Signature",
+		"x-amz-x-amz-signature", "Signatures", "Foo-Signature", "X-Amz-SignedHeaders", "ignature", ""}
+	hexes := []string{awsSig, awsSig, awsSig2, awsSig[:63], awsSig + "0", awsSig + "f", strings.ToUpper(awsSig),
+		awsSig[:10] + "F" + awsSig[11:], awsSig[:32], "", "<secret_1>"}
+	rng := rand.New(rand.NewPCG(23, 24))
+	f := secretFinder{}
+	signatures := 0
+	for iter := 0; iter < 60000; iter++ {
+		var sb strings.Builder
+		for i, n := 0, 1+rng.IntN(4); i < n; i++ {
+			sb.WriteString(around[rng.IntN(len(around))])
+			if rng.IntN(4) > 0 {
+				sb.WriteString(words[rng.IntN(len(words))])
+				if rng.IntN(8) > 0 {
+					sb.WriteString("=")
+				}
+				sb.WriteString(hexes[rng.IntN(len(hexes))])
+			}
+			sb.WriteString(around[rng.IntN(len(around))])
+		}
+		line := []byte(sb.String())
+		want := refSecrets(line)
+		var got [][2]int
+		for _, m := range f.find(line, nil) {
+			got = append(got, [2]int{m.Start, m.End})
+		}
+		slices.SortFunc(got, func(a, b [2]int) int {
+			if a[0] != b[0] {
+				return a[0] - b[0]
+			}
+			return a[1] - b[1]
+		})
+		if !slices.Equal(got, want) {
+			t.Fatalf("iter %d, line %q\n got  %v\n want %v", iter, line, got, want)
+		}
+		signatures += len(f.signatures(line, nil))
+	}
+	if signatures < 3000 {
+		t.Errorf("only %d signatures were found; the generator does not exercise the rule", signatures)
 	}
 }
 
@@ -798,6 +948,8 @@ func TestSecretFinderLongLines(t *testing.T) {
 		"key chars only":         rep("a", 1<<20) + "=" + rep("b", 1<<20),
 		"many separators":        rep("a=b:c ", 100000),
 		"hits without formats":   rep("gh sk rk xox eyJ AKIA AIza ", 30000),
+		"many signature words":   rep("Signature=", 1<<17),
+		"many signatures":        rep("Signature="+awsSig+"&", 1<<13),
 		"many bearer":            rep("Bearer a ", 50000),
 		"basic long":             "Basic " + rep("A", 1<<20),
 		"escapes":                `password="` + rep(`\`, 1<<20),
@@ -810,6 +962,9 @@ func TestSecretFinderLongLines(t *testing.T) {
 	}
 	if got := (secretFinder{}).find([]byte(rep("password=a ", 50000)), nil); len(got) != 50000 {
 		t.Errorf("many keys: got %d matches, want 50000", len(got))
+	}
+	if got := (secretFinder{}).find([]byte(rep("Signature="+awsSig+"&", 1<<13)), nil); len(got) != 1<<13 {
+		t.Errorf("many signatures: got %d matches, want %d", len(got), 1<<13)
 	}
 }
 

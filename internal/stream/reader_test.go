@@ -62,7 +62,7 @@ func TestReaderSplitsLines(t *testing.T) {
 		{"mixed", "a\nb\r\nc", []line{{"a", "\n"}, {"b", "\r\n"}, {"c", ""}}},
 		{"blank lines", "a\n\n\nb\n", []line{{"a", "\n"}, {"", "\n"}, {"", "\n"}, {"b", "\n"}}},
 		{"blank crlf lines", "\r\n\r\n", []line{{"", "\r\n"}, {"", "\r\n"}}},
-		// 単独の \r は改行ではなく、行の中身として扱う(PLAN 1 章 stream)。
+		// 単独の \r は改行ではなく、行の中身として扱う(DEVELOPMENT.md 2 章 stream)。
 		{"lone cr inside", "a\rb\n", []line{{"a\rb", "\n"}}},
 		{"lone cr at end", "a\r", []line{{"a\r", ""}}},
 		{"only cr", "\r", []line{{"\r", ""}}},

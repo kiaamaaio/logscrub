@@ -11,6 +11,7 @@ import (
 // 次の 2 つの規則の候補をまとめて返す。重なりは、Detector が解決する。
 //
 //   - 固定形式: AWS、GitHub、Slack、Stripe、Google、`sk-`、JWT(前後が英数字でないこと。Q14)
+//   - AWS の署名(SigV4): `X-Amz-Signature=<値>`、`Signature=<値>` の値の部分(v1.1。Q32)
 //   - キー名ベース: `password=<値>`、`"api_key": "<値>"`、`Authorization: Bearer <値>` などの値の部分
 //     (Q15、Q16。JSON の文法を壊さない。決定事項 15)
 type secretFinder struct{}
@@ -19,6 +20,7 @@ func (secretFinder) kind() Kind { return KindSecret }
 
 func (f secretFinder) find(line []byte, dst []Match) []Match {
 	dst = f.fixed(line, dst)
+	dst = f.signatures(line, dst)
 	return f.keyed(line, dst)
 }
 
@@ -88,6 +90,63 @@ func (secretFinder) fixed(line []byte, dst []Match) []Match {
 		pos = p + loc[1]
 	}
 	return dst
+}
+
+// ---- AWS の署名(SigV4) ----
+
+const (
+	// sigWord、sigAmzPrefix は、署名の語 `Signature`、`X-Amz-Signature` の部分(照合は、大文字・小文字を区別しない)。
+	sigWord      = "signature"
+	sigAmzPrefix = "x-amz-"
+	// sigLen は、署名の値(SHA-256 の HMAC の 16 進数)の長さ。
+	sigLen = 64
+)
+
+// signatures は、AWS の署名(SigV4)の値の範囲を追記する(仕様 4.1「AWS の署名」、Q32)。
+//
+// 語 `X-Amz-Signature` または `Signature`(大文字・小文字を区別しない。前が英数字・`-`・`_` でないこと)+ `=` +
+// 小文字の 16 進数ちょうど 64 文字 + 後ろが英数字でないこと。`AWS4-HMAC-SHA256` などの前後の文脈は見ない。
+// 語は大文字・小文字を区別しないため、固定の接頭辞では探せない。'=' を手がかりにし、手前の 9 バイトを照合する。
+func (secretFinder) signatures(line []byte, dst []Match) []Match {
+	n := len(line)
+	if n < len(sigWord)+1+sigLen {
+		return dst
+	}
+	for pos := len(sigWord); pos+sigLen < n; {
+		j := bytes.IndexByte(line[pos:n-sigLen], '=')
+		if j < 0 {
+			break
+		}
+		i := pos + j // '=' の位置
+		pos = i + 1
+		w := i - len(sigWord) // 語の先頭
+		if !hasPrefixFold(line[w:], sigWord) {
+			continue
+		}
+		if w >= len(sigAmzPrefix) && hasPrefixFold(line[w-len(sigAmzPrefix):], sigAmzPrefix) {
+			w -= len(sigAmzPrefix)
+		}
+		if w > 0 && (isASCIIAlnum(line[w-1]) || line[w-1] == '-' || line[w-1] == '_') {
+			continue
+		}
+		s, e := i+1, i+1+sigLen
+		if !isLowerHex(line[s:e]) || e < n && isASCIIAlnum(line[e]) {
+			continue
+		}
+		dst = append(dst, Match{Start: s, End: e, Kind: KindSecret})
+		pos = e
+	}
+	return dst
+}
+
+// isLowerHex は、b がすべて小文字の 16 進数(0-9、a-f)かを返す。
+func isLowerHex(b []byte) bool {
+	for _, c := range b {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // ---- Authorization ヘッダ(Bearer / Basic) ----

@@ -311,7 +311,7 @@ func TestEmailFinderMatchesAnchorScan(t *testing.T) {
 	}
 }
 
-// 実装(正規表現)と、置き換え候補(手書きの走査)の速度。PLAN の Q2 の判断材料として記録する。
+// 実装(正規表現)と、置き換え候補(手書きの走査)の速度。plans/v1.0.0.md の Q2 の判断材料として記録する。
 // 合成ログの全行を処理する('@' を含まない行は、どちらも IndexByte 1 回で終わる)。
 func BenchmarkEmailFinder(b *testing.B) {
 	lines, size := benchCorpus(b)

@@ -416,19 +416,24 @@ func FuzzRestoreRoundTrip(f *testing.F) {
 	} {
 		f.Add(s)
 	}
-	opts := detect.Options{Kinds: detect.DefaultKinds.With(detect.KindUUID)}
+	for _, s := range awsFuzzSeeds {
+		f.Add(s)
+	}
+	optsList, _ := fuzzOptions(f)
 	f.Fuzz(func(t *testing.T, in string) {
 		found := false
 		label.DefaultFormat.Scan([]byte(in), func(int, int, string, int) { found = true })
 		if found {
 			t.Skip("the input contains a label-like string (limitation in SPEC 5.3)")
 		}
-		masked, restored, res := roundTrip(t, opts, in)
-		if restored != in {
-			t.Fatalf("restore(mask(x)) != x\n x:        %q\n masked:   %q\n restored: %q", in, masked, restored)
-		}
-		if len(res.Missing) != 0 {
-			t.Fatalf("Missing = %q for %q", res.Missing, in)
+		for _, opts := range optsList {
+			masked, restored, res := roundTrip(t, opts, in)
+			if restored != in {
+				t.Fatalf("restore(mask(x)) != x\n x:        %q\n masked:   %q\n restored: %q", in, masked, restored)
+			}
+			if len(res.Missing) != 0 {
+				t.Fatalf("Missing = %q for %q", res.Missing, in)
+			}
 		}
 	})
 }
