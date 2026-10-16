@@ -159,6 +159,155 @@ func TestIPv4FinderReportsSpecialClass(t *testing.T) {
 	}
 }
 
+// ---- ホスト名に埋め込まれた IPv4(仕様 4.3、Q33・Q34・Q40〜Q42) ----
+
+func TestIPv4HostNames(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want []string
+	}{
+		// 受け入れ基準(仕様 9 章「AWS」)
+		{"public dns", "ec2-54-250-1-2.ap-northeast-1.compute.amazonaws.com", []string{"ipv4_global=54-250-1-2"}},
+		{"public dns us-east-1", "ec2-54-250-1-2.compute-1.amazonaws.com", []string{"ipv4_global=54-250-1-2"}},
+		{"private dns", "ip-10-0-1-23.ap-northeast-1.compute.internal", []string{"ipv4_private=10-0-1-23"}},
+		{"private dns us-east-1", "ip-10-0-1-23.ec2.internal", []string{"ipv4_private=10-0-1-23"}},
+		{"bare ip name", "ip-10-0-1-23", []string{"ipv4_private=10-0-1-23"}},
+		// 中国リージョン・aws-eusc のドメイン、新しい形のリージョン(Q40)
+		{"china", "ec2-52-80-1-2.cn-north-1.compute.amazonaws.com.cn", []string{"ipv4_global=52-80-1-2"}},
+		{"eusc", "ec2-52-80-1-2.eusc-de-east-1.compute.amazonaws.eu", []string{"ipv4_global=52-80-1-2"}},
+		{"gov cloud", "ec2-52-80-1-2.us-gov-west-1.compute.amazonaws.com", []string{"ipv4_global=52-80-1-2"}},
+		// 前後の文字
+		{"shell prompt", "[ec2-user@ip-10-0-1-23 ~]$ ls", []string{"ipv4_private=10-0-1-23"}},
+		{"node name in json", `{"node":"ip-10-0-1-23.ap-northeast-1.compute.internal"}`, []string{"ipv4_private=10-0-1-23"}},
+		{"bare in json", `{"node":"ip-10-0-1-23"}`, []string{"ipv4_private=10-0-1-23"}},
+		{"bare with port", "ip-10-0-1-23:8080", []string{"ipv4_private=10-0-1-23"}},
+		{"bare then slash", "node/ip-10-0-1-23/pods", []string{"ipv4_private=10-0-1-23"}},
+		{"in url", "http://ec2-54-250-1-2.compute-1.amazonaws.com:8080/x", []string{"ipv4_global=54-250-1-2"}},
+		{"sentence end", "connected to ip-10-0-1-23.ec2.internal.", []string{"ipv4_private=10-0-1-23"}},
+		{"fqdn trailing dot", "ec2-54-250-1-2.compute-1.amazonaws.com. 300 IN A", []string{"ipv4_global=54-250-1-2"}},
+		{"bare sentence end", "host is ip-10-0-1-23 now", []string{"ipv4_private=10-0-1-23"}},
+		{"japanese around", "ノードip-10-0-1-23です", []string{"ipv4_private=10-0-1-23"}},
+		{"with dotted address", "ip-10-0-1-23 (10.0.1.23)", []string{"ipv4_private=10-0-1-23", "ipv4_private=10.0.1.23"}},
+		{"two hosts", "ip-10-0-1-23 -> ec2-54-250-1-2.compute-1.amazonaws.com",
+			[]string{"ipv4_private=10-0-1-23", "ipv4_global=54-250-1-2"}},
+		{"shared address space", "ip-100-64-0-1", []string{"ipv4_private=100-64-0-1"}},
+
+		// 置換しない(受け入れ基準)
+		{"ship", "ship-10-0-1-23", nil},
+		{"octet over 255", "ip-10-0-1-256", nil},
+		{"five numbers", "ip-10-0-1-23-4", nil},
+		{"ec2 other domain", "ec2-54-250-1-2.example.com", nil},
+		// 置換しない: 数値の形
+		{"leading zero", "ip-10-0-01-23", nil},
+		{"three numbers", "ip-10-0-1", nil},
+		{"four digit number", "ip-10-0-1-2345", nil},
+		{"empty number", "ip-10--1-23", nil},
+		// 置換しない: 前の文字
+		{"after letter", "zip-10-0-1-23", nil},
+		{"after hyphen", "my-ip-10-0-1-23", nil},
+		{"after underscore", "x_ip-10-0-1-23", nil},
+		{"after dot", "a.ip-10-0-1-23", nil},
+		{"ec2 after letter", "xec2-54-250-1-2.compute-1.amazonaws.com", nil},
+		// 置換しない: 後ろの文字・ドメイン(Q41)
+		{"bare then letter", "ip-10-0-1-23a", nil},
+		{"bare then underscore", "ip-10-0-1-23_x", nil},
+		{"bare then other domain", "ip-10-0-1-23.example.com", nil},
+		{"bare then dot", "ip-10-0-1-23.", nil},
+		{"internal then letter", "ip-10-0-1-23.ec2.internalx", nil},
+		{"internal then domain", "ip-10-0-1-23.ec2.internal.example.com", nil},
+		{"compute internal without region", "ip-10-0-1-23.compute.internal", nil},
+		{"ec2 without domain", "ec2-54-250-1-2", nil},
+		{"ec2 without region", "ec2-54-250-1-2.compute.amazonaws.com", nil},
+		{"ec2 then other domain", "ec2-54-250-1-2.ap-northeast-1.compute.amazonaws.com.example.net", nil},
+		{"ec2 then letter", "ec2-54-250-1-2.compute-1.amazonaws.comx", nil},
+		{"ec2 then hyphen", "ec2-54-250-1-2.compute-1.amazonaws.com-x", nil},
+		{"ec2 cn then letter", "ec2-52-80-1-2.cn-north-1.compute.amazonaws.com.cnx", nil},
+		{"ec2 internal domain", "ec2-54-250-1-2.ec2.internal", nil},
+		{"ec2 iso domain", "ec2-54-250-1-2.us-iso-east-1.compute.c2s.ic.gov", nil},
+		{"region with uppercase", "ec2-54-250-1-2.AP-northeast-1.compute.amazonaws.com", nil},
+		// 置換しない: 大文字(Q42)
+		{"uppercase ip", "IP-10-0-1-23", nil},
+		{"uppercase ec2", "EC2-54-250-1-2.compute-1.amazonaws.com", nil},
+		{"uppercase domain", "ip-10-0-1-23.EC2.INTERNAL", nil},
+		// 特殊アドレスは置換しない(受け入れ基準)
+		{"unspecified", "ec2-0-0-0-0.compute-1.amazonaws.com", nil},
+		{"broadcast", "ip-255-255-255-255", nil},
+		{"multicast", "ip-224-0-0-1.ec2.internal", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ipLabels(t, tt.line, ScopeAll); !slices.Equal(got, tt.want) {
+				t.Errorf("Find(%q) = %q, want %q", tt.line, got, tt.want)
+			}
+		})
+	}
+}
+
+// --ip-scope は、通常の IPv4 と同じに扱う(受け入れ基準: ip-10-0-1-23 は --ip-scope global で置換されない)。
+func TestIPv4HostNamesWithScope(t *testing.T) {
+	line := "ip-10-0-1-23 ec2-54-250-1-2.compute-1.amazonaws.com"
+	if got := ipLabels(t, line, ScopeGlobal); !slices.Equal(got, []string{"ipv4_global=54-250-1-2"}) {
+		t.Errorf("global: %q", got)
+	}
+	if got := ipLabels(t, line, ScopePrivate); !slices.Equal(got, []string{"ipv4_private=10-0-1-23"}) {
+		t.Errorf("private: %q", got)
+	}
+}
+
+// 置換済みの形は、再度検出しない。mask のラベルと、hash の出力(`ec2-ipv4_global_<hex>.…`。
+// `-` の後ろの hash の出力が保護範囲として見つかること。plans/v1.1.0.md 2.4)。
+func TestIPv4HostNamesAlreadyReplaced(t *testing.T) {
+	d, err := New(Options{Kinds: DefaultKinds})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{
+		"ec2-<ipv4_global_1>.ap-northeast-1.compute.amazonaws.com",
+		"ip-<ipv4_private_1>.ec2.internal",
+		"[ec2-user@ip-<ipv4_private_1> ~]$",
+		"ec2-ipv4_global_a1b2c3d4e5f6.ap-northeast-1.compute.amazonaws.com",
+		"ip-ipv4_private_a1b2c3d4e5f6.ec2.internal",
+		"ip-ipv4_private_a1b2c3d4e5f6",
+	} {
+		got, kept := d.Find([]byte(line), nil)
+		if len(got) != 0 || kept != 1 {
+			t.Errorf("Find(%q) = %+v kept=%d, want nothing and 1 kept", line, got, kept)
+		}
+	}
+}
+
+// 他の種別との重なり: メールアドレスのドメインがホスト名なら、長いメールアドレスが勝つ(仕様 4 章)。
+func TestIPv4HostNamesWithOtherKinds(t *testing.T) {
+	d, err := New(Options{Kinds: DefaultKinds})
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := "ec2-user@ip-10-0-1-23.ec2.internal"
+	got, _ := d.Find([]byte(line), nil)
+	if len(got) != 1 || got[0].Kind != KindEmail || got[0].Start != 0 || got[0].End != len(line) {
+		t.Errorf("Find(%q) = %+v", line, got)
+	}
+	line = "[ec2-user@ip-10-0-1-23 ~]$"
+	got, _ = d.Find([]byte(line), nil)
+	if len(got) != 1 || got[0].Kind != KindIPv4 || line[got[0].Start:got[0].End] != "10-0-1-23" {
+		t.Errorf("Find(%q) = %+v", line, got)
+	}
+}
+
+func TestHostIPv4(t *testing.T) {
+	for in, want := range map[string]string{"10-0-1-23": "10.0.1.23", "255-255-255-255": "255.255.255.255", "0-0-0-0": "0.0.0.0"} {
+		if a, ok := hostIPv4([]byte(in)); !ok || a.String() != want {
+			t.Errorf("hostIPv4(%q) = %v, %v", in, a, ok)
+		}
+	}
+	for _, in := range []string{"", "10-0-1", "10-0-01-23", "256-0-0-1", "1-2-3-4-5", "1000-0-0-0-0-0", "a-b-c-d"} {
+		if a, ok := hostIPv4([]byte(in)); ok {
+			t.Errorf("hostIPv4(%q) = %v, want error", in, a)
+		}
+	}
+}
+
 // ---- IPv6 の検出 ----
 
 func TestIPv6Detection(t *testing.T) {
@@ -409,6 +558,13 @@ func TestIPFindersOnLongLines(t *testing.T) {
 		_ = (ipv4Finder{}).find([]byte(line), nil)
 		_ = (ipv6Finder{}).find([]byte(line), nil)
 	}
+	// ホスト名の先頭だけが並ぶ行、ホスト名が多数並ぶ行
+	for _, line := range []string{strings.Repeat("ip-", 300000), strings.Repeat("ec2-1-2-3-4.", 100000), strings.Repeat(" ip-1-1-1-1.a", 100000)} {
+		_ = (ipv4Finder{}).find([]byte(line), nil)
+	}
+	if got := (ipv4Finder{}).find([]byte(strings.Repeat("ip-10-0-1-23 ", 50000)), nil); len(got) != 50000 {
+		t.Errorf("many host names: got %d matches, want 50000", len(got))
+	}
 	// 多数のアドレス
 	var many []byte
 	for i := 0; i < 20000; i++ {
@@ -494,10 +650,95 @@ func TestIPv4FinderMatchesUnfilteredRegexp(t *testing.T) {
 		}
 		line := []byte(sb.String())
 		want := refIPv4(line)
-		got := (ipv4Finder{}).find(line, nil)
+		got := (ipv4Finder{}).dotted(line, nil)
 		if !slices.Equal(got, want) {
 			t.Fatalf("iter %d, line %q\n got  %+v\n want %+v", iter, line, got, want)
 		}
+	}
+}
+
+// ホスト名に埋め込まれた IPv4 の参照実装(仕様 4.3、Q40〜Q42)。前処理(bytes.Index)を使わず、
+// 行のすべての位置で、形ごとに別の正規表現を試す。ドメインの選択肢も 1 つずつ試す
+// (実装の、ドメインを長いほうから 1 つに決める方法と、結果が変わらないことの確認)。
+var (
+	refHostNums  = `([0-9]{1,3}-[0-9]{1,3}-[0-9]{1,3}-[0-9]{1,3})`
+	refHostForms = []struct {
+		re   *regexp.Regexp
+		bare bool
+	}{
+		{re: regexp.MustCompile(`^ec2-` + refHostNums + `\.compute-1\.amazonaws\.com`)},
+		{re: regexp.MustCompile(`^ec2-` + refHostNums + `\.[a-z0-9-]+\.compute\.amazonaws\.com`)},
+		{re: regexp.MustCompile(`^ec2-` + refHostNums + `\.[a-z0-9-]+\.compute\.amazonaws\.com\.cn`)},
+		{re: regexp.MustCompile(`^ec2-` + refHostNums + `\.[a-z0-9-]+\.compute\.amazonaws\.eu`)},
+		{re: regexp.MustCompile(`^ip-` + refHostNums + `\.ec2\.internal`)},
+		{re: regexp.MustCompile(`^ip-` + refHostNums + `\.[a-z0-9-]+\.compute\.internal`)},
+		{re: regexp.MustCompile(`^ip-` + refHostNums), bare: true},
+	}
+	refHostBefore  = regexp.MustCompile(`[A-Za-z0-9_.-]$`)
+	refHostEnd     = regexp.MustCompile(`^(?:$|[^A-Za-z0-9_.-]|\.(?:$|[^A-Za-z0-9]))`)
+	refHostBareEnd = regexp.MustCompile(`^(?:$|[^A-Za-z0-9_.-])`)
+)
+
+func refHostIPv4(line []byte) []Match {
+	var out []Match
+	for p := 0; p < len(line); p++ {
+		if p > 0 && refHostBefore.Match(line[p-1:p]) {
+			continue
+		}
+		for _, f := range refHostForms {
+			loc := f.re.FindSubmatchIndex(line[p:])
+			if loc == nil {
+				continue
+			}
+			end := p + loc[1]
+			if f.bare && !refHostBareEnd.Match(line[end:]) || !f.bare && !refHostEnd.Match(line[end:]) {
+				continue
+			}
+			s, e := p+loc[2], p+loc[3]
+			addr, err := netip.ParseAddr(strings.ReplaceAll(string(line[s:e]), "-", "."))
+			if err != nil {
+				continue
+			}
+			out = append(out, Match{Start: s, End: e, Kind: KindIPv4, Class: classify(addr)})
+			break
+		}
+	}
+	return out
+}
+
+// 乱数で作った行で、ホスト名の検出が、参照実装と一致すること。
+// 行は「前の文字 + 先頭(ec2- / ip- など)+ 数値(の変形)+ ドメイン(の変形)+ 後ろの文字」の組を並べて作る。
+func TestIPv4HostNamesMatchRegexpReference(t *testing.T) {
+	around := []string{"", "", " ", "@", "[", "/", ":", "\"", ".", "-", "_", "s", "x", "0", "あ", "\xff"}
+	prefixes := []string{"ec2-", "ip-", "ip-", "EC2-", "IP-", "ship-", "ec2-ip-", ""}
+	nums := []string{"54-250-1-2", "10-0-1-23", "10-0-1-23", "0-0-0-0", "224-0-0-1", "10-0-1-256", "10-0-01-23",
+		"10-0-1-23-4", "1-2-3", "255-255-255-255", "10-0-1-2345", "10.0.1.23"}
+	suffixes := []string{"", "", ".ec2.internal", ".ap-northeast-1.compute.internal", ".compute-1.amazonaws.com",
+		".ap-northeast-1.compute.amazonaws.com", ".cn-north-1.compute.amazonaws.com.cn", ".eusc-de-east-1.compute.amazonaws.eu",
+		".example.com", ".compute.internal", ".EC2.INTERNAL", ".ap-northeast-1.compute.amazonaws.com.example.net",
+		".ec2.internalx", ".", ".compute.amazonaws.com", "..compute.internal", ".a.compute.amazonaws.com.", ".compute-1.amazonaws.comx"}
+	rng := rand.New(rand.NewPCG(41, 42))
+	found := 0
+	for iter := 0; iter < 60000; iter++ {
+		var sb strings.Builder
+		for i, n := 0, 1+rng.IntN(3); i < n; i++ {
+			sb.WriteString(around[rng.IntN(len(around))])
+			sb.WriteString(prefixes[rng.IntN(len(prefixes))])
+			sb.WriteString(nums[rng.IntN(len(nums))])
+			sb.WriteString(suffixes[rng.IntN(len(suffixes))])
+			sb.WriteString(around[rng.IntN(len(around))])
+		}
+		line := []byte(sb.String())
+		want := refHostIPv4(line)
+		got := (ipv4Finder{}).hosts(line, nil)
+		slices.SortFunc(got, func(a, b Match) int { return a.Start - b.Start })
+		if !slices.Equal(got, want) {
+			t.Fatalf("iter %d, line %q\n got  %+v\n want %+v", iter, line, got, want)
+		}
+		found += len(got)
+	}
+	if found < 1500 {
+		t.Errorf("only %d host names were found; the generator does not exercise the rules", found)
 	}
 }
 

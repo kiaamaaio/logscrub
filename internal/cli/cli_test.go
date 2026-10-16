@@ -169,6 +169,40 @@ func TestAWSSignature(t *testing.T) {
 	}
 }
 
+// 受け入れ基準(仕様 9 章「AWS」): EC2 のホスト名に埋め込まれた IPv4 が、既定の種別で置換される。
+// `-` 区切りと `.` 区切りは別の値(別のラベル)。restore で元に戻り、mask・hash の出力を再度流しても変わらない。
+func TestEC2HostNames(t *testing.T) {
+	in := "ec2-54-250-1-2.ap-northeast-1.compute.amazonaws.com connected from ip-10-0-1-23.ec2.internal\n" +
+		"[ec2-user@ip-10-0-1-23 ~]$ ping 10.0.1.23\n" +
+		"ec2-0-0-0-0.compute-1.amazonaws.com ship-10-0-1-23 ip-10-0-1-256 ip-10-0-1-23-4 ec2-54-250-1-2.example.com\n"
+	want := "ec2-<ipv4_global_1>.ap-northeast-1.compute.amazonaws.com connected from ip-<ipv4_private_1>.ec2.internal\n" +
+		"[ec2-user@ip-<ipv4_private_1> ~]$ ping <ipv4_private_2>\n" +
+		"ec2-0-0-0-0.compute-1.amazonaws.com ship-10-0-1-23 ip-10-0-1-256 ip-10-0-1-23-4 ec2-54-250-1-2.example.com\n"
+	r := run(t, in, nil, "mask")
+	if r.code != 0 || r.stdout != want {
+		t.Fatalf("%+v\nwant stdout %q", r, want)
+	}
+	if g := run(t, "ip-10-0-1-23 ec2-54-250-1-2.compute-1.amazonaws.com\n", nil, "mask", "--ip-scope", "global"); g.stdout != "ip-10-0-1-23 ec2-<ipv4_global_1>.compute-1.amazonaws.com\n" {
+		t.Errorf("--ip-scope global: %+v", g)
+	}
+	dir := t.TempDir()
+	src := writeFile(t, dir, "app.log", in)
+	if back := run(t, r.stdout, nil, "restore", "--source", src); back.code != 0 || back.stdout != in {
+		t.Errorf("restore: %+v", back)
+	}
+	if again := run(t, r.stdout, nil, "mask"); again.stdout != r.stdout || again.stderr == "" {
+		t.Errorf("mask is not idempotent: %+v", again)
+	}
+	env := map[string]string{keyEnv: "test-key"}
+	h := run(t, in, env, "mask", "--mode", "hash")
+	if h.code != 0 || !strings.Contains(h.stdout, "ec2-ipv4_global_") || !strings.Contains(h.stdout, "ip-ipv4_private_") {
+		t.Fatalf("hash: %+v", h)
+	}
+	if again := run(t, h.stdout, env, "mask", "--mode", "hash"); again.stdout != h.stdout {
+		t.Errorf("hash is not idempotent:\n%s\n%s", h.stdout, again.stdout)
+	}
+}
+
 // ---- 種別の指定 ----
 
 func TestTypes(t *testing.T) {
