@@ -277,10 +277,10 @@ AWS アカウント ID と S3 のバケット名は、秘密情報ではあり�
 
 | 実行 | 速度 | 最大メモリ |
 |---|---|---|
-| `logscrub mask < big.log > /dev/null` | 約 187 MB/s | 30 MB |
-| `cat big.log \| logscrub mask > /dev/null` | 約 167 MB/s | 32 MB |
-| 同上(`--types default,uuid`) | 約 174 MB/s | 36 MB |
-| AWS の値を含む合成ログを `--types default,aws` で | 約 131 MB/s | 38 MB |
+| `logscrub mask < big.log > /dev/null` | 約 188 MB/s | 30 MB |
+| `cat big.log \| logscrub mask > /dev/null` | 約 168 MB/s | 32 MB |
+| 同上(`--types default,uuid`) | 約 177 MB/s | 34 MB |
+| AWS の値を含む合成ログを `--types default,aws` で | 約 157 MB/s | 38 MB |
 
 - **メモリ**: 対応表(検出した値の種類数に比例)が主です。値の種類数が一定(1,000 種類)なら、入力が
   20MB でも 100MB でも、最大 14MB ほどで変わりません。ほぼすべての値が異なる 100MB のログでは、31.8MB でした。

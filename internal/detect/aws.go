@@ -75,9 +75,11 @@ var (
 
 var (
 	arnPrefix    = []byte("arn:")
-	ecrMarker    = []byte(".dkr.ecr")
-	sqsPrefix    = []byte("sqs.")
+	arnWord      = []byte("arn")
+	ecrMarkers   = [][]byte{[]byte(".dkr.ecr"), []byte(".dkr.ecr-fips")}
+	sqsWord      = []byte("sqs")
 	sqsQueueHost = []byte("queue.amazonaws.com")
+	queueWord    = []byte("queue")
 )
 
 // awsAccountFinder は、AWS アカウント ID の検出器(仕様 4.4)。決まった形の中に現れたものだけを検出する。
@@ -86,16 +88,15 @@ var (
 //   - ECR: `123456789012.dkr.ecr.<リージョン>.<ドメイン>`
 //   - SQS: `sqs.<リージョン>.<ドメイン>/123456789012/`、`<リージョン>.queue.amazonaws.com/…`、`queue.amazonaws.com/…`
 //
-// 範囲は、12 桁の部分だけ。前処理: 各形の手がかり(`arn:`、`.dkr.ecr`、`sqs.`、`queue.amazonaws.com`)を
-// bytes.Index で探し、なければすぐ戻る。正規表現は、手がかりの位置にだけ当てる。
+// 範囲は、12 桁の部分だけ。前処理: ARN は `:`、ECR と SQS は `.amazonaws.`(nextAmazonaws)を手がかりにし、
+// なければすぐ戻る。正規表現は、手がかりから求めた形の先頭にだけ当てる。
 type awsAccountFinder struct{}
 
 func (awsAccountFinder) kind() Kind { return KindAWSAccount }
 
 func (f awsAccountFinder) find(line []byte, dst []Match) []Match {
 	dst = f.arn(line, dst)
-	dst = f.ecr(line, dst)
-	return f.sqs(line, dst)
+	return f.hosts(line, dst)
 }
 
 func accountMatch(start int) Match {
@@ -103,15 +104,19 @@ func accountMatch(start int) Match {
 }
 
 // arn は、ARN のアカウント ID を追記する。`arn:` の前が英数字でないこと。
+//
+// `arn:` を bytes.Index で探すと、先頭の `a` が文中に多く、遅い経路になる。`:` を bytes.IndexByte で探し、
+// 手前が `arn` のときだけ、正規表現を当てる(段階 3 の `ec2-` / `ip-` と同じ工夫)。
 func (awsAccountFinder) arn(line []byte, dst []Match) []Match {
 	for pos := 0; ; {
-		j := bytes.Index(line[pos:], arnPrefix)
+		j := bytes.IndexByte(line[pos:], ':')
 		if j < 0 {
 			return dst
 		}
-		p := pos + j
-		pos = p + 1
-		if p > 0 && isASCIIAlnum(line[p-1]) {
+		i := pos + j // `:` の位置
+		pos = i + 1
+		p := i - len(arnWord) // `arn:` の位置
+		if p < 0 || !bytes.Equal(line[p:i], arnWord) || p > 0 && isASCIIAlnum(line[p-1]) {
 			continue
 		}
 		if loc := arnAccountRe.FindSubmatchIndex(line[p:]); loc != nil {
@@ -120,70 +125,98 @@ func (awsAccountFinder) arn(line []byte, dst []Match) []Match {
 	}
 }
 
-// ecr は、ECR のレジストリのアカウント ID を追記する。12 桁の前が、英数字・`-`・`_`・`.` でないこと。
-// ドメインの後ろは、ホスト名の末尾の条件(isHostEnd。Q41)を満たすこと。
-func (awsAccountFinder) ecr(line []byte, dst []Match) []Match {
+// hosts は、ECR のレジストリと、SQS のキュー URL のアカウント ID を追記する。
+//
+// どちらのホストも、対象のドメイン(`amazonaws.…`)で終わる。`.amazonaws.` を手がかりにし、手前のリージョン
+// (`.` を含まない)を遡って、その手前が `.dkr.ecr` / `.dkr.ecr-fips`(ECR)、`sqs`(SQS)かを調べ、
+// 形の先頭に正規表現を当てる。`queue.amazonaws.com`(SQS の旧形式)は、`.amazonaws.` の手前が `queue` の場合。
+//   - ECR: 12 桁の前が、英数字・`-`・`_`・`.` でないこと。ドメインの後ろは、ホスト名の末尾の条件(isHostEnd。Q41)
+//   - SQS: ホストの前が、英数字・`-`・`_`・`.` でないこと。ドメインの直後が `/` + 12 桁 + `/`
+func (awsAccountFinder) hosts(line []byte, dst []Match) []Match {
 	for pos := 0; ; {
-		j := bytes.Index(line[pos:], ecrMarker)
-		if j < 0 {
+		a := nextAmazonaws(line, pos)
+		if a < 0 {
 			return dst
 		}
-		d := pos + j // `.dkr.ecr` の位置
-		pos = d + 1
-		s := d - 12
-		if s < 0 || !allDigits(line[s:d]) || s > 0 && isHostPrefixChar(line[s-1]) {
+		pos = a + amazonawsNext
+		if q := a - len(queueWord); q >= 0 && bytes.Equal(line[q:a], queueWord) {
+			dst = queueAccount(line, q, dst)
+		}
+		r := a // リージョンの先頭
+		for r > 0 && isRegionChar(line[r-1]) {
+			r--
+		}
+		if r == a || r == 0 || line[r-1] != '.' {
 			continue
 		}
-		if loc := ecrHostRe.FindIndex(line[d:]); loc != nil && isHostEnd(line, d+loc[1]) {
-			dst = append(dst, accountMatch(s))
+		d := r - 1 // リージョンの手前の `.`
+		for _, m := range ecrMarkers {
+			p := d - len(m) // `.dkr.ecr` の位置
+			if p < 0 || !bytes.Equal(line[p:d], m) {
+				continue
+			}
+			s := p - 12
+			if s < 0 || !allDigits(line[s:p]) || s > 0 && isHostPrefixChar(line[s-1]) {
+				continue
+			}
+			if loc := ecrHostRe.FindIndex(line[p:]); loc != nil && isHostEnd(line, p+loc[1]) {
+				dst = append(dst, accountMatch(s))
+			}
+		}
+		if p := d - len(sqsWord); p >= 0 && bytes.Equal(line[p:d], sqsWord) && (p == 0 || !isHostPrefixChar(line[p-1])) {
+			if loc := sqsHostRe.FindSubmatchIndex(line[p:]); loc != nil {
+				dst = append(dst, accountMatch(p+loc[2]))
+			}
 		}
 	}
 }
 
-// sqs は、SQS のキュー URL のアカウント ID を追記する。ホストの前が、英数字・`-`・`_`・`.` でないこと。
-func (awsAccountFinder) sqs(line []byte, dst []Match) []Match {
-	// sqs.<リージョン>.<ドメイン>/<アカウント ID>/
-	for pos := 0; ; {
-		j := bytes.Index(line[pos:], sqsPrefix)
-		if j < 0 {
-			break
+// queueAccount は、line[q:] から始まる `queue.amazonaws.com`(SQS の旧形式のホスト)の後ろのアカウント ID を追記する。
+// ホストは `<リージョン>.queue.amazonaws.com` または `queue.amazonaws.com` で、その前が英数字・`-`・`_`・`.` でないこと。
+func queueAccount(line []byte, q int, dst []Match) []Match {
+	if !bytes.HasPrefix(line[q:], sqsQueueHost) {
+		return dst
+	}
+	h := q // ホストの先頭
+	if q > 0 && line[q-1] == '.' {
+		h = q - 1
+		for h > 0 && isRegionChar(line[h-1]) {
+			h--
 		}
-		p := pos + j
-		pos = p + 1
-		if p > 0 && isHostPrefixChar(line[p-1]) {
-			continue
-		}
-		if loc := sqsHostRe.FindSubmatchIndex(line[p:]); loc != nil {
-			dst = append(dst, accountMatch(p+loc[2]))
+		if h == q-1 {
+			return dst // `.` の前にリージョンがない
 		}
 	}
-	// <リージョン>.queue.amazonaws.com/<アカウント ID>/、queue.amazonaws.com/<アカウント ID>/
-	for pos := 0; ; {
-		j := bytes.Index(line[pos:], sqsQueueHost)
-		if j < 0 {
-			break
-		}
-		q := pos + j
-		pos = q + 1
-		h := q // ホストの先頭
-		if q > 0 && line[q-1] == '.' {
-			h = q - 1
-			for h > 0 && isRegionChar(line[h-1]) {
-				h--
-			}
-			if h == q-1 {
-				continue // `.` の前にリージョンがない
-			}
-		}
-		if h > 0 && isHostPrefixChar(line[h-1]) {
-			continue
-		}
-		e := q + len(sqsQueueHost)
-		if loc := sqsPathRe.FindSubmatchIndex(line[e:]); loc != nil {
-			dst = append(dst, accountMatch(e+loc[2]))
-		}
+	if h > 0 && isHostPrefixChar(line[h-1]) {
+		return dst
+	}
+	e := q + len(sqsQueueHost)
+	if loc := sqsPathRe.FindSubmatchIndex(line[e:]); loc != nil {
+		dst = append(dst, accountMatch(e+loc[2]))
 	}
 	return dst
+}
+
+// amazonawsNext は、nextAmazonaws が返した位置 a から、次を探し始める位置までの距離(a の後ろの `z` の次)。
+const amazonawsNext = 5
+
+// nextAmazonaws は、line[pos:] の中の、次の `.amazonaws.` の位置(先頭の `.`)を返す。なければ -1。
+// 次の呼び出しは、返した位置 + amazonawsNext から始める。
+//
+// `.amazonaws.` を bytes.Index で探すと、先頭の `.` が文中に多く(時刻、ロガー名など)、遅い経路になる。
+// `amazonaws` の中の、文中に少ない `z` を bytes.IndexByte で探してから、前後を照合する。
+func nextAmazonaws(line []byte, pos int) int {
+	for {
+		j := bytes.IndexByte(line[pos:], 'z')
+		if j < 0 {
+			return -1
+		}
+		z := pos + j
+		pos = z + 1
+		if a := z - 4; a >= 0 && bytes.HasPrefix(line[a:], amazonawsMarker) { // `.ama` + `z`
+			return a
+		}
+	}
 }
 
 // isRegionChar は、ホスト名の中のリージョンの文字(英小文字・数字・`-`。Q40)。
@@ -309,8 +342,8 @@ func bucketAt(line []byte, s int) (int, bool) {
 //   - パス形式: `<S3 のエンドポイント>.<ドメイン>/my-bucket/…`
 //   - ARN: `arn:<パーティション>:s3:::my-bucket/…`
 //
-// 範囲は、バケット名の部分だけ。前処理: 各形の手がかり(`://`、`.amazonaws.`、`:s3:::`)を bytes.Index で探し、
-// なければすぐ戻る。
+// 範囲は、バケット名の部分だけ。前処理: 各形の手がかり(`://`、`.amazonaws.`、`:s3:::`)を探し、
+// なければすぐ戻る(`.amazonaws.` は nextAmazonaws で探す)。
 type awsS3BucketFinder struct{}
 
 func (awsS3BucketFinder) kind() Kind { return KindAWSS3Bucket }
@@ -349,19 +382,18 @@ func (awsS3BucketFinder) schemes(line []byte, dst []Match) []Match {
 
 // hosts は、バーチャルホスト形式とパス形式のバケット名を追記する。
 //
-// `.amazonaws.` を手がかりに、その後ろが対象のドメインかを確かめ、手前のラベル(`.` 区切り)を遡る。
+// `.amazonaws.`(nextAmazonaws)を手がかりに、その後ろが対象のドメインかを確かめ、手前のラベル(`.` 区切り)を遡る。
 // エンドポイントは `.` を s3EndpointMaxDots 個までしか含まないので、遡るのは、その数 + 1 個の `.` まで。
 //   - パス形式: ホスト名全体(ドメインを除く)がエンドポイントで、ドメインの直後が `/`。その後ろがバケット名
 //   - バーチャルホスト形式: ホスト名が「バケット名 + `.` + エンドポイント」。エンドポイントは、できるだけ後ろで取る
 //     (バケット名を最も長く取る)。そのバケット名が規則に合わなければ、置換しない(Q43)。ドメインの後ろは isHostEnd(Q41)
 func (awsS3BucketFinder) hosts(line []byte, dst []Match) []Match {
 	for pos := 0; ; {
-		j := bytes.Index(line[pos:], amazonawsMarker)
-		if j < 0 {
+		a := nextAmazonaws(line, pos) // ドメインの手前の `.` の位置
+		if a < 0 {
 			return dst
 		}
-		a := pos + j // ドメインの手前の `.` の位置
-		pos = a + 1
+		pos = a + amazonawsNext
 		vhost, pathEnd := false, -1
 		for _, d := range awsDomains {
 			if !bytes.HasPrefix(line[a+1:], []byte(d)) {

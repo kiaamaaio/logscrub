@@ -245,6 +245,17 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 - 入出力: `bufio.Reader`(64KB)の `ReadSlice` で、改行までがバッファに収まる通常の行はコピーしない。`bufio.Writer` で書く。置換のない行は読んだスライスをそのまま書く
 - 前処理: 各検出器が、自分の手がかりを `bytes.IndexByte` / `bytes.Index` で探し、なければ戻る(行ごとに 1 回の走査で作るヒントの集合は、段階 3 の測定で約 14 倍遅かったため採用しない)
   - email: `@` がある / IPv4: `.` と数字がある / IPv6: `:` がある / uuid: `-` があり、行の長さが 36 以上 / キー名ベース: `=` か `:` がある / 固定形式の secret: 接頭辞リテラルを `bytes.Index` で探す
+  - v1.1 で加えた手がかり:
+    - AWS の署名(secret): `=` を探し、手前の 9 バイトが `signature`(大文字・小文字を区別しない)か、さらに手前が `x-amz-` かを照合する
+    - EC2 のホスト名の IPv4(ipv4): `-` を探し、手前が `ec2` / `ip`、後ろが数字のときだけ、正規表現を当てる
+    - aws_account: ARN は `:` を探し、手前が `arn` か。ECR と SQS は `.amazonaws.` を手がかりにし、手前のリージョンを遡って、その手前が `.dkr.ecr` / `.dkr.ecr-fips` / `sqs` / `queue` かを見る
+    - aws_s3_bucket: `s3://`・`s3a://`・`s3n://` は `://`、バーチャルホスト形式・パス形式は `.amazonaws.`、ARN は `:s3:::`
+    - `.amazonaws.` は、`amazonaws` の中の `z` を `bytes.IndexByte` で探してから前後を照合する(`nextAmazonaws`。aws_account と aws_s3_bucket で共用)
+  - **手がかりの先頭の文字が、文中に多い文字(英小文字の `a` `e` `i` `s`、`.` など)の場合は、`bytes.Index` で探さない。**
+    `bytes.Index` は、先頭の 1 バイトを `bytes.IndexByte` で探して照合する経路で始まり、外れが多いと、遅い汎用の経路に切り替わる。
+    手がかりの中の、文中に少ない 1 バイト(`:` `-` `=` `z` など)を `bytes.IndexByte` で探してから、前後を照合する
+    - v1.1 の実測(8MB の合成ログ、1 パスあたり): `ec2-` / `ip-` の `bytes.Index` は約 5 倍遅く、既定の種別の `BenchmarkFind` が約 15% 落ちた(段階 3)。
+      aws_account は、`arn:`・`.dkr.ecr`・`sqs.`・`queue.amazonaws.com` の `bytes.Index` で約 9.4ms、上の方法で約 1.7ms(段階 6 のあとの改善)
 - 正規表現は「アンカーの周辺だけ」に当てる(例: email は最初の `@` のローカルパートの先頭から、キー名ベースは区切り文字の手前から)。1MB の 1 行でも、手がかりのない区間に正規表現を当てない。段階 3 の測定では、行全体に当てる場合の約 15 倍速かった
 - メモリ割り当て: `Match` のスライス・出力バッファは再利用。map の参照は `m[string(b)]`(Go はこの形で割り当てしない)、新しい値のときだけ文字列を作る
 - 計測: 段階 2 でベンチマーク(`b.SetBytes` で MB/s を出す)と合成ログ生成器を用意し、段階 3 以降は毎回測って実装計画(plans/)の進捗欄に記録する。合成ログの中身(一致を含む行の割合など)は → Q29

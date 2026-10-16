@@ -314,6 +314,38 @@ func BenchmarkAWSAccountFinder(b *testing.B) {
 	}
 }
 
+// nextAmazonaws は、`.amazonaws.` の位置を、左から順に、重なりも含めて返す。
+func TestNextAmazonaws(t *testing.T) {
+	all := func(line string) []int {
+		var out []int
+		for pos := 0; ; {
+			a := nextAmazonaws([]byte(line), pos)
+			if a < 0 {
+				return out
+			}
+			out = append(out, a)
+			pos = a + amazonawsNext
+		}
+	}
+	for _, tt := range []struct {
+		line string
+		want []int
+	}{
+		{"", nil},
+		{"zzz lazy amazonaws", nil},
+		{".amazonaws.", []int{0}},
+		{"x.amazonaws.com", []int{1}},
+		{".amazonaws.amazonaws.", []int{0, 10}},
+		{"zone.amazonaws.com size.amazonaws.eu", []int{4, 23}},
+		{".AMAZONAWS.com .amaZonaws.com .amazonawscom", nil},
+		{".amazonaws", nil},
+	} {
+		if got := all(tt.line); !slices.Equal(got, tt.want) {
+			t.Errorf("nextAmazonaws(%q) = %v, want %v", tt.line, got, tt.want)
+		}
+	}
+}
+
 // ---- aws_s3_bucket(仕様 4.4、9 章「AWS」、Q43〜Q46) ----
 
 var awsS3BucketKinds = KindSet(0).With(KindAWSS3Bucket)
