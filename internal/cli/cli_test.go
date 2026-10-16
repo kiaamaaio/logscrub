@@ -216,6 +216,9 @@ func TestAWSAccount(t *testing.T) {
 		"send https://sqs.ap-northeast-1.amazonaws.com/<aws_account_1>/orders\n" +
 		"arn:aws-cn:s3:::bucket arn:aws:iam::aws:policy/ReadOnlyAccess arn:aws:lambda:ap-northeast-1:<aws_account_2>:function:x\n" +
 		"account 123456789012\n"
+	// まとまり(aws、cloud)は aws_s3_bucket も含むので、arn:aws-cn:s3:::bucket のバケット名も置換される。
+	wantAccountOnly := wantAWS
+	wantAWS = strings.Replace(wantAWS, "arn:aws-cn:s3:::bucket", "arn:aws-cn:s3:::<aws_s3_bucket_1>", 1)
 	wantDefaultAWS := strings.Replace(wantAWS, "10.0.0.1", "<ipv4_private_1>", 1)
 	for _, tt := range []struct {
 		args []string
@@ -224,7 +227,7 @@ func TestAWSAccount(t *testing.T) {
 		{[]string{"mask"}, strings.Replace(in, "10.0.0.1", "<ipv4_private_1>", 1)},
 		{[]string{"mask", "--types", "aws"}, wantAWS},
 		{[]string{"mask", "--types", "cloud"}, wantAWS},
-		{[]string{"mask", "--types", "aws_account"}, wantAWS},
+		{[]string{"mask", "--types", "aws_account"}, wantAccountOnly},
 		{[]string{"mask", "--types", "default,aws"}, wantDefaultAWS},
 	} {
 		r := run(t, in, nil, tt.args...)
@@ -234,7 +237,7 @@ func TestAWSAccount(t *testing.T) {
 	}
 	// --stats: aws_account は uuid のあと
 	r := run(t, in+"123e4567-e89b-42d3-a456-426614174000\n", nil, "mask", "--types", "default,uuid,aws", "--stats")
-	if r.stderr != "logscrub: ipv4_private=1\nlogscrub: uuid=1\nlogscrub: aws_account=4\n" {
+	if r.stderr != "logscrub: ipv4_private=1\nlogscrub: uuid=1\nlogscrub: aws_account=4\nlogscrub: aws_s3_bucket=1\n" {
 		t.Errorf("--stats: %q", r.stderr)
 	}
 	// restore の往復、mask・hash の冪等性
@@ -252,6 +255,55 @@ func TestAWSAccount(t *testing.T) {
 	// 決まった形の中の 4 つは hash の出力になり、単独の 12 桁(対象外)だけが残る。
 	if h.code != 0 || strings.Count(h.stdout, "aws_account_") != 4 || strings.Count(h.stdout, "123456789012") != 1 ||
 		!strings.Contains(h.stdout, "account 123456789012\n") {
+		t.Fatalf("hash: %+v", h)
+	}
+	if again := run(t, h.stdout, env, "mask", "--mode", "hash", "--types", "default,aws"); again.stdout != h.stdout {
+		t.Errorf("hash is not idempotent:\n%s\n%s", h.stdout, again.stdout)
+	}
+}
+
+// 受け入れ基準(仕様 9 章「AWS」): s3://・s3a://・s3n://、バーチャルホスト形式(`.` を含むバケット名を含む)、
+// パス形式、arn:aws:s3::: のバケット名の部分だけが <aws_s3_bucket_N> になり、同じバケットは同じラベルになる。
+// バケット名の規則に合わないものは置換されない。
+func TestAWSS3Bucket(t *testing.T) {
+	in := "cp s3://my-bucket/logs/a.gz s3a://my-bucket/x s3n://other-bucket/y\n" +
+		"GET https://my-bucket.s3.ap-northeast-1.amazonaws.com/a.txt https://logs.example.com.s3.amazonaws.com/b\n" +
+		"GET https://s3.ap-northeast-1.amazonaws.com/my-bucket/a.txt\n" +
+		`{"Resource": "arn:aws:s3:::my-bucket/logs/*", "Principal": "arn:aws:iam::123456789012:root"}` + "\n" +
+		"s3://ab/ s3://" + strings.Repeat("a", 64) + "/ s3://My-Bucket/ s3://abc_def/ s3://.abc/ s3://abc-/ s3://10.0.0.1/\n"
+	want := "cp s3://<aws_s3_bucket_1>/logs/a.gz s3a://<aws_s3_bucket_1>/x s3n://<aws_s3_bucket_2>/y\n" +
+		"GET https://<aws_s3_bucket_1>.s3.ap-northeast-1.amazonaws.com/a.txt https://<aws_s3_bucket_3>.s3.amazonaws.com/b\n" +
+		"GET https://s3.ap-northeast-1.amazonaws.com/<aws_s3_bucket_1>/a.txt\n" +
+		`{"Resource": "arn:aws:s3:::<aws_s3_bucket_1>/logs/*", "Principal": "arn:aws:iam::<aws_account_1>:root"}` + "\n" +
+		"s3://ab/ s3://" + strings.Repeat("a", 64) + "/ s3://My-Bucket/ s3://abc_def/ s3://.abc/ s3://abc-/ s3://<ipv4_private_1>/\n"
+	r := run(t, in, nil, "mask", "--types", "default,aws")
+	if r.code != 0 || r.stdout != want {
+		t.Fatalf("%+v\nwant stdout %q", r, want)
+	}
+	if c := run(t, in, nil, "mask", "--types", "cloud"); c.stdout != run(t, in, nil, "mask", "--types", "aws").stdout ||
+		!strings.Contains(c.stdout, "s3://<aws_s3_bucket_1>/") || strings.Contains(c.stdout, "<ipv4_") {
+		t.Errorf("--types cloud: %+v", c)
+	}
+	if d := run(t, in, nil, "mask"); strings.Contains(d.stdout, "aws_") || !strings.Contains(d.stdout, "s3://my-bucket/") {
+		t.Errorf("default types replaced AWS values: %q", d.stdout)
+	}
+	// --stats: aws_account、aws_s3_bucket の順で、uuid のあと
+	st := run(t, in, nil, "mask", "--types", "default,aws", "--stats")
+	if st.stderr != "logscrub: ipv4_private=1\nlogscrub: aws_account=1\nlogscrub: aws_s3_bucket=7\n" {
+		t.Errorf("--stats: %q", st.stderr)
+	}
+	// restore の往復、mask・hash の冪等性
+	dir := t.TempDir()
+	src := writeFile(t, dir, "app.log", in)
+	if back := run(t, r.stdout, nil, "restore", "--source", src, "--types", "default,aws"); back.code != 0 || back.stdout != in {
+		t.Errorf("restore: %+v", back)
+	}
+	if again := run(t, r.stdout, nil, "mask", "--types", "default,aws"); again.stdout != r.stdout {
+		t.Errorf("mask is not idempotent: %q", again.stdout)
+	}
+	env := map[string]string{keyEnv: "test-key"}
+	h := run(t, in, env, "mask", "--mode", "hash", "--types", "default,aws")
+	if h.code != 0 || strings.Count(h.stdout, "aws_s3_bucket_") != 7 || strings.Contains(h.stdout, "my-bucket") {
 		t.Fatalf("hash: %+v", h)
 	}
 	if again := run(t, h.stdout, env, "mask", "--mode", "hash", "--types", "default,aws"); again.stdout != h.stdout {

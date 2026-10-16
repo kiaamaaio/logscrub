@@ -31,6 +31,14 @@ func TestAWSAccountFinderKind(t *testing.T) {
 	}
 }
 
+// cmpRange は、範囲を、開始位置、終了位置の順に比べる。
+func cmpRange(a, b [2]int) int {
+	if a[0] != b[0] {
+		return a[0] - b[0]
+	}
+	return a[1] - b[1]
+}
+
 // ---- aws_account(仕様 4.4、9 章「AWS」) ----
 
 func TestAWSAccount(t *testing.T) {
@@ -213,7 +221,7 @@ func refAWSAccounts(line []byte) [][2]int {
 	for r := range seen {
 		out = append(out, r)
 	}
-	slices.SortFunc(out, func(a, b [2]int) int { return a[0] - b[0] })
+	slices.SortFunc(out, cmpRange)
 	return out
 }
 
@@ -259,7 +267,7 @@ func TestAWSAccountMatchesRegexpReference(t *testing.T) {
 			}
 			got = append(got, [2]int{m.Start, m.End})
 		}
-		slices.SortFunc(got, func(a, b [2]int) int { return a[0] - b[0] })
+		slices.SortFunc(got, cmpRange)
 		got = slices.Compact(got)
 		if !slices.Equal(got, want) {
 			t.Fatalf("iter %d, line %q\n got  %v\n want %v", iter, line, got, want)
@@ -302,6 +310,336 @@ func BenchmarkAWSAccountFinder(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		for _, line := range lines {
 			dst = (awsAccountFinder{}).find(line, dst[:0])
+		}
+	}
+}
+
+// ---- aws_s3_bucket(仕様 4.4、9 章「AWS」、Q43〜Q46) ----
+
+var awsS3BucketKinds = KindSet(0).With(KindAWSS3Bucket)
+
+func TestAWSS3BucketFinderKind(t *testing.T) {
+	if k := (awsS3BucketFinder{}).kind(); k != KindAWSS3Bucket {
+		t.Errorf("kind = %v", k)
+	}
+}
+
+func TestAWSS3Bucket(t *testing.T) {
+	b := func(name string) []string { return []string{"aws_s3_bucket=" + name} }
+	b63 := strings.Repeat("a", 63)
+	b64 := strings.Repeat("a", 64)
+	tests := []struct {
+		name string
+		line string
+		want []string
+	}{
+		// s3:// 形式
+		{"s3", "s3://my-bucket/logs/a.gz", b("my-bucket")},
+		{"s3a", "s3a://my-bucket/path", b("my-bucket")},
+		{"s3n", "s3n://my-bucket/path", b("my-bucket")},
+		{"s3 bucket only", "s3://my-bucket", b("my-bucket")},
+		{"s3 with dots", "s3://logs.example.com/x", b("logs.example.com")},
+		{"s3 in quotes", `"s3://my-bucket"`, b("my-bucket")},
+		{"s3 after space", "copy s3://my-bucket/a to s3://other-bucket/b", []string{"aws_s3_bucket=my-bucket", "aws_s3_bucket=other-bucket"}},
+		{"s3 sentence end", "see s3://my-bucket.", b("my-bucket")},
+		{"s3 followed by colon", "s3://my-bucket:x", b("my-bucket")},
+		{"s3 after hyphen", "x-s3://my-bucket/", b("my-bucket")},
+		// バーチャルホスト形式
+		{"vhost", "https://my-bucket.s3.ap-northeast-1.amazonaws.com/a.txt", b("my-bucket")},
+		{"vhost global", "https://my-bucket.s3.amazonaws.com/a.txt", b("my-bucket")},
+		{"vhost legacy region", "my-bucket.s3-us-west-2.amazonaws.com", b("my-bucket")},
+		{"vhost dualstack", "my-bucket.s3.dualstack.us-east-1.amazonaws.com/x", b("my-bucket")},
+		{"vhost fips", "my-bucket.s3-fips.us-gov-west-1.amazonaws.com/x", b("my-bucket")},
+		{"vhost fips dualstack", "my-bucket.s3-fips.dualstack.us-east-1.amazonaws.com/x", b("my-bucket")},
+		{"vhost website dash", "my-bucket.s3-website-us-east-1.amazonaws.com", b("my-bucket")},
+		{"vhost website dot", "my-bucket.s3-website.eu-west-1.amazonaws.com", b("my-bucket")},
+		{"vhost accelerate", "my-bucket.s3-accelerate.amazonaws.com/x", b("my-bucket")},
+		{"vhost accelerate dualstack", "my-bucket.s3-accelerate.dualstack.amazonaws.com/x", b("my-bucket")},
+		{"vhost china", "my-bucket.s3.cn-north-1.amazonaws.com.cn/x", b("my-bucket")},
+		{"vhost eusc", "my-bucket.s3.eusc-de-east-1.amazonaws.eu/x", b("my-bucket")},
+		{"vhost bucket with dots", "https://logs.example.com.s3.amazonaws.com/x", b("logs.example.com")},
+		{"vhost fqdn trailing dot", "my-bucket.s3.amazonaws.com. 300 IN CNAME", b("my-bucket")},
+		{"vhost with port", "my-bucket.s3.amazonaws.com:443", b("my-bucket")},
+		// Q43: 区切り方が 2 通りある場合は、バケット名を最も長く取る
+		{"vhost longest bucket", "logs.s3.backup.s3.amazonaws.com", b("logs.s3.backup")},
+		{"vhost longest bucket invalid", "ab.s3.backup.s3-x.s3.amazonaws.com", b("ab.s3.backup.s3-x")},
+		{"vhost longest bucket no retry", "x..y.s3.backup.s3.amazonaws.com", nil},
+		// 最も長いバケット名(64 文字)が規則に合わないので、短い区切り方(61 文字 + `s3.s3`)に戻らず、置換しない
+		{"vhost no retry with shorter valid split", strings.Repeat("a", 61) + ".s3.s3.amazonaws.com", nil},
+		// パス形式
+		{"path", "https://s3.ap-northeast-1.amazonaws.com/my-bucket/a.txt", b("my-bucket")},
+		{"path global", "https://s3.amazonaws.com/my-bucket/a.txt", b("my-bucket")},
+		{"path bucket only", "https://s3.amazonaws.com/my-bucket", b("my-bucket")},
+		{"path legacy region", "s3-us-west-2.amazonaws.com/my-bucket?list-type=2", b("my-bucket")},
+		{"path dualstack", "https://s3.dualstack.us-east-1.amazonaws.com/my-bucket/x", b("my-bucket")},
+		{"path china", "https://s3.cn-north-1.amazonaws.com.cn/my-bucket/x", b("my-bucket")},
+		{"path bucket with dots", "https://s3.amazonaws.com/logs.example.com/x", b("logs.example.com")},
+		{"path sentence end", "at https://s3.amazonaws.com/my-bucket.", b("my-bucket")},
+		// ARN
+		{"arn", "arn:aws:s3:::my-bucket/logs/*", b("my-bucket")},
+		{"arn bucket only", "arn:aws:s3:::my-bucket", b("my-bucket")},
+		{"arn china", "arn:aws-cn:s3:::my-bucket", b("my-bucket")},
+		{"arn iso", "arn:aws-iso-b:s3:::my-bucket", b("my-bucket")},
+		{"arn wildcard", `"Resource": "arn:aws:s3:::my-bucket*"`, b("my-bucket")},
+		{"arn in json", `{"Resource":"arn:aws:s3:::my-bucket"}`, b("my-bucket")},
+		{"arn after hyphen", "x-arn:aws:s3:::my-bucket", b("my-bucket")},
+		// 長さの境界
+		{"3 chars", "s3://abc/", b("abc")},
+		{"63 chars", "s3://" + b63 + "/", b(b63)},
+		{"63 chars vhost", b63 + ".s3.amazonaws.com", b(b63)},
+		{"63 chars and sentence end", "s3://" + b63 + ".", b(b63)},
+		// 複数の形で、同じバケット
+		{"same bucket", "s3://my-bucket/a https://my-bucket.s3.amazonaws.com/a arn:aws:s3:::my-bucket",
+			[]string{"aws_s3_bucket=my-bucket", "aws_s3_bucket=my-bucket", "aws_s3_bucket=my-bucket"}},
+
+		// 置換しない: バケット名の規則(受け入れ基準)
+		{"2 chars", "s3://ab/", nil},
+		{"64 chars", "s3://" + b64 + "/", nil},
+		{"64 chars vhost", b64 + ".s3.amazonaws.com", nil},
+		{"uppercase", "s3://My-Bucket/", nil},
+		{"uppercase inside", "s3://myBucket/", nil},
+		{"underscore", "s3://abc_def/", nil},
+		{"underscore vhost", "abc_def.s3.amazonaws.com", nil},
+		{"underscore path", "s3.amazonaws.com/abc_def/", nil},
+		{"underscore arn", "arn:aws:s3:::abc_def", nil},
+		{"starts with dot", "s3://.abc/", nil},
+		{"starts with hyphen", "s3://-abc/", nil},
+		{"ends with hyphen", "s3://abc-/", nil},
+		{"ends with two dots", "s3://abc../", nil},
+		{"two dots", "s3://a..bc/", nil},
+		{"ip form", "s3://192.168.5.4/", nil},
+		{"ip form out of range", "s3://999.1.1.1/", nil},
+		{"ip form vhost", "192.168.5.4.s3.amazonaws.com", nil},
+		// 数字の組が 4 つでないものは、IP アドレスの形ではない(Q45)
+		{"three numbers", "s3://1.2.3/", b("1.2.3")},
+		{"five numbers", "s3://1.2.3.4.5/", b("1.2.3.4.5")},
+		// 置換しない: 形
+		{"scheme after letter", "xs3://my-bucket/", nil},
+		{"scheme uppercase", "S3://my-bucket/", nil},
+		{"other scheme", "s4://my-bucket/", nil},
+		{"vhost after underscore", "x_my-bucket.s3.amazonaws.com", nil},
+		{"vhost other domain", "my-bucket.s3.example.com", nil},
+		{"vhost then other domain", "my-bucket.s3.amazonaws.com.example.net", nil},
+		{"vhost then letter", "my-bucket.s3.amazonaws.comx", nil},
+		{"vhost uppercase endpoint", "my-bucket.S3.amazonaws.com", nil},
+		{"vhost not an endpoint", "my-bucket.s4.amazonaws.com", nil},
+		{"vhost ec2", "ec2-54-250-1-2.ap-northeast-1.compute.amazonaws.com", nil},
+		{"vhost sqs", "sqs.us-east-1.amazonaws.com/123456789012/q", nil},
+		{"path after letter", "xs3.amazonaws.com/my-bucket/", nil},
+		{"path after dot", "a.s3.amazonaws.com/b/", nil}, // バーチャルホスト形式のバケット `a`(2 文字)は規則に合わない
+		{"arn after letter", "xarn:aws:s3:::my-bucket", nil},
+		{"arn unknown partition", "arn:aws-xx:s3:::my-bucket", nil},
+		// アクセスポイントは対象外
+		{"access point host", "my-ap-123456789012.s3-accesspoint.us-east-1.amazonaws.com", nil},
+		{"access point arn", "arn:aws:s3:us-east-1:123456789012:accesspoint/my-ap", nil},
+		{"object lambda host", "my-ap-123456789012.s3-object-lambda.us-east-1.amazonaws.com", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := awsValues(t, awsS3BucketKinds, tt.line); !slices.Equal(got, tt.want) {
+				t.Errorf("Find(%q) = %q, want %q", tt.line, got, tt.want)
+			}
+		})
+	}
+}
+
+// `s3://10.0.0.1/` のような IP の形は、バケット名でなく、IP アドレスとして置換される。
+func TestAWSS3BucketIPForm(t *testing.T) {
+	kinds := DefaultKinds | awsS3BucketKinds
+	if got := awsValues(t, kinds, "s3://10.0.0.1/x"); !slices.Equal(got, []string{"ipv4_private=10.0.0.1"}) {
+		t.Errorf("got %q", got)
+	}
+}
+
+// 置換済みの形(mask のラベル、hash の出力)は、再度は検出されない。
+func TestAWSS3BucketAlreadyReplaced(t *testing.T) {
+	d, err := New(Options{Kinds: DefaultKinds | awsS3BucketKinds | awsAccountKinds})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{
+		"s3://<aws_s3_bucket_1>/logs",
+		"https://<aws_s3_bucket_1>.s3.amazonaws.com/a",
+		"https://s3.amazonaws.com/<aws_s3_bucket_1>/a",
+		"arn:aws:s3:::<aws_s3_bucket_1>/*",
+		"s3://aws_s3_bucket_3f9a1c0b7d2e/logs",
+		"https://aws_s3_bucket_3f9a1c0b7d2e.s3.amazonaws.com/a",
+		"https://s3.amazonaws.com/aws_s3_bucket_3f9a1c0b7d2e/a",
+		"arn:aws:s3:::aws_s3_bucket_3f9a1c0b7d2e/*",
+	} {
+		got, kept := d.Find([]byte(line), nil)
+		if len(got) != 0 || kept != 1 {
+			t.Errorf("Find(%q) = %+v kept=%d, want nothing and 1 kept", line, got, kept)
+		}
+	}
+}
+
+func TestLooksLikeIPv4(t *testing.T) {
+	for _, s := range []string{"192.168.5.4", "999.1.1.1", "1.2.3.4", "0000.0.0.0"} {
+		if !looksLikeIPv4([]byte(s)) {
+			t.Errorf("%q", s)
+		}
+	}
+	for _, s := range []string{"", "1.2.3", "1.2.3.4.5", "1.2.3.", ".1.2.3", "1..2.3", "1.2.3.a", "a.b.c.d", "1-2-3-4"} {
+		if looksLikeIPv4([]byte(s)) {
+			t.Errorf("%q", s)
+		}
+	}
+}
+
+// ---- aws_s3_bucket の正規表現の参照実装との一致 ----
+
+var (
+	refEndpoints = `(?:s3|s3\.[a-z0-9-]+|s3-[a-z0-9-]+|s3\.dualstack\.[a-z0-9-]+|s3-fips\.[a-z0-9-]+|s3-fips\.dualstack\.[a-z0-9-]+|` +
+		`s3-website-[a-z0-9-]+|s3-website\.[a-z0-9-]+|s3-accelerate|s3-accelerate\.dualstack)`
+	refDomains     = `(?:amazonaws\.com|amazonaws\.com\.cn|amazonaws\.eu)`
+	refHostEndPart = `(?:$|[^A-Za-z0-9_.-]|\.(?:$|[^A-Za-z0-9]))`
+	// バーチャルホスト形式: バケット名の部分(1 つ目のグループ)を、最も長く取る(最長一致。Q43)
+	refS3VHost   = regexp.MustCompile(`^([a-z0-9.-]+)\.` + refEndpoints + `\.` + refDomains + refHostEndPart)
+	refS3Path    = regexp.MustCompile(`^` + refEndpoints + `\.` + refDomains + `/`)
+	refS3Scheme  = regexp.MustCompile(`^s3[an]?://`)
+	refS3ARN     = regexp.MustCompile(`^arn:` + refPartitions + `:s3:::`)
+	refBucketRun = regexp.MustCompile(`^[a-z0-9.-]*`)
+	refBucket    = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
+	refIPForm    = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$`)
+	refAfter     = regexp.MustCompile(`^[A-Za-z0-9_]`)
+)
+
+func refValidBucket(b string) bool {
+	return refBucket.MatchString(b) && !strings.Contains(b, "..") && !refIPForm.MatchString(b)
+}
+
+// refBucketAt は、s から始まるバケット名(`s3://`・パス形式・ARN)の範囲を返す。
+func refBucketAt(line []byte, s int) ([2]int, bool) {
+	e := s + len(refBucketRun.Find(line[s:]))
+	if refAfter.Match(line[e:]) {
+		return [2]int{}, false
+	}
+	if e > s && line[e-1] == '.' {
+		e--
+	}
+	return [2]int{s, e}, refValidBucket(string(line[s:e]))
+}
+
+// refAWSS3Buckets は、前処理を使わず、行のすべての位置で、形ごとの正規表現を試す参照実装。
+func refAWSS3Buckets(line []byte) [][2]int {
+	seen := map[[2]int]bool{}
+	for p := 0; p < len(line); p++ {
+		if p == 0 || !refIsAlnum(line[p-1]) {
+			if loc := refS3Scheme.FindIndex(line[p:]); loc != nil {
+				if r, ok := refBucketAt(line, p+loc[1]); ok {
+					seen[r] = true
+				}
+			}
+			if loc := refS3ARN.FindIndex(line[p:]); loc != nil {
+				if r, ok := refBucketAt(line, p+loc[1]); ok {
+					seen[r] = true
+				}
+			}
+		}
+		if p > 0 && refHostChar.Match(line[p-1:p]) {
+			continue
+		}
+		if loc := refS3Path.FindIndex(line[p:]); loc != nil {
+			if r, ok := refBucketAt(line, p+loc[1]); ok {
+				seen[r] = true
+			}
+		}
+		if loc := refS3VHost.FindSubmatchIndex(line[p:]); loc != nil && refValidBucket(string(line[p+loc[2]:p+loc[3]])) {
+			seen[[2]int{p + loc[2], p + loc[3]}] = true
+		}
+	}
+	var out [][2]int
+	for r := range seen {
+		out = append(out, r)
+	}
+	slices.SortFunc(out, cmpRange)
+	return out
+}
+
+// 乱数で作った行で、aws_s3_bucket の検出が、参照実装と一致すること。
+func TestAWSS3BucketMatchesRegexpReference(t *testing.T) {
+	buckets := []string{"my-bucket", "my-bucket", "logs.example.com", "abc", "ab", strings.Repeat("b", 63), strings.Repeat("c", 64),
+		"My-Bucket", "abc_def", "-abc", "abc-", "a..b", "192.168.5.4", "999.1.1.1", "1.2.3", "s3", "logs.s3.backup", "",
+		"<aws_s3_bucket_1>", "aws_s3_bucket_3f9a1c0b7d2e", "bucket.", "x.s3", strings.Repeat("d", 61) + ".s3"}
+	endpoints := []string{"s3", "s3", "s3.ap-northeast-1", "s3-us-west-2", "s3.dualstack.us-east-1", "s3-fips.us-gov-west-1",
+		"s3-fips.dualstack.us-east-1", "s3-website-us-east-1", "s3-website.eu-west-1", "s3-accelerate", "s3-accelerate.dualstack",
+		"s3-accesspoint.us-east-1", "s3.backup", "S3", "s4", "", "s3.a.b.c"}
+	domains := []string{"amazonaws.com", "amazonaws.com", "amazonaws.com.cn", "amazonaws.eu", "example.com",
+		"amazonaws.com.example.net", "amazonaws.comx"}
+	around := []string{"", "", " ", "/", "\"", ":", ".", "-", "_", "x", "X", "0", "*", "https://", "あ", "\xff"}
+	after := []string{"", "/key", "/", ".", "_x", "Q", ":443", "*", "?x=1", " "}
+	rng := rand.New(rand.NewPCG(61, 62))
+	pick := func(xs []string) string { return xs[rng.IntN(len(xs))] }
+	found := 0
+	for iter := 0; iter < 60000; iter++ {
+		var sb strings.Builder
+		for i, n := 0, 1+rng.IntN(3); i < n; i++ {
+			sb.WriteString(pick(around))
+			switch rng.IntN(4) {
+			case 0:
+				sb.WriteString(pick([]string{"s3://", "s3a://", "s3n://", "S3://", "xs3://", "s4://", "://"}) + pick(buckets) + pick(after))
+			case 1:
+				sb.WriteString(pick(buckets) + "." + pick(endpoints) + "." + pick(domains) + pick(after))
+			case 2:
+				sb.WriteString(pick(endpoints) + "." + pick(domains) + pick([]string{"/", "/", ""}) + pick(buckets) + pick(after))
+			default:
+				sb.WriteString(pick([]string{"arn:aws:s3:::", "arn:aws-cn:s3:::", "xarn:aws:s3:::", "arn:aws-xx:s3:::",
+					"arn:aws:s3:us-east-1:123456789012:"}) + pick(buckets) + pick(after))
+			}
+			sb.WriteString(pick(around))
+		}
+		line := []byte(sb.String())
+		want := refAWSS3Buckets(line)
+		var got [][2]int
+		for _, m := range (awsS3BucketFinder{}).find(line, nil) {
+			if m.Kind != KindAWSS3Bucket || m.Class != ClassNone {
+				t.Fatalf("unexpected match %+v", m)
+			}
+			got = append(got, [2]int{m.Start, m.End})
+		}
+		slices.SortFunc(got, cmpRange)
+		got = slices.Compact(got)
+		if !slices.Equal(got, want) {
+			t.Fatalf("iter %d, line %q\n got  %v\n want %v", iter, line, got, want)
+		}
+		found += len(got)
+	}
+	if found < 3000 {
+		t.Errorf("only %d bucket names were found; the generator does not exercise the rules", found)
+	}
+}
+
+func TestAWSS3BucketFinderOnLongLines(t *testing.T) {
+	for _, line := range []string{
+		strings.Repeat("s3://", 200000),
+		strings.Repeat("://", 300000),
+		strings.Repeat(".amazonaws.com", 70000),
+		strings.Repeat(".amazonaws.com/", 70000),
+		strings.Repeat("a", 1<<20) + ".s3.amazonaws.com",
+		strings.Repeat("a.", 1<<19) + "s3.amazonaws.com",
+		"s3.amazonaws.com/" + strings.Repeat("a", 1<<20),
+		"s3://" + strings.Repeat("a", 1<<20),
+		strings.Repeat(":s3:::", 150000),
+		strings.Repeat("arn:aws:s3:::", 70000),
+		strings.Repeat("s3.s3.", 1<<17) + "amazonaws.com",
+	} {
+		_ = (awsS3BucketFinder{}).find([]byte(line), nil)
+	}
+	if got := (awsS3BucketFinder{}).find([]byte(strings.Repeat("s3://my-bucket/x ", 30000)), nil); len(got) != 30000 {
+		t.Errorf("many buckets: got %d matches, want 30000", len(got))
+	}
+}
+
+func BenchmarkAWSS3BucketFinder(b *testing.B) {
+	lines, size := benchCorpus(b)
+	var dst []Match
+	b.SetBytes(int64(size))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, line := range lines {
+			dst = (awsS3BucketFinder{}).find(line, dst[:0])
 		}
 	}
 }

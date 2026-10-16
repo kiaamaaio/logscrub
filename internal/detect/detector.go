@@ -109,6 +109,9 @@ func builtinFinders(o Options) []finder {
 	if o.Kinds.Has(KindAWSAccount) {
 		fs = append(fs, awsAccountFinder{})
 	}
+	if o.Kinds.Has(KindAWSS3Bucket) {
+		fs = append(fs, awsS3BucketFinder{})
+	}
 	return fs
 }
 

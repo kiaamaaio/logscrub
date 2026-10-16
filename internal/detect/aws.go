@@ -199,3 +199,246 @@ func allDigits(b []byte) bool {
 	}
 	return true
 }
+
+// ---- aws_s3_bucket(仕様 4.4) ----
+
+// s3Endpoints は、S3 のエンドポイント(バーチャルホスト形式・パス形式で共通。仕様 4.4)。
+// {region} は、ホスト名の中のリージョン(awsRegionRe)。後ろに `.` + 対象のドメインが続く。
+var s3Endpoints = []string{
+	"s3", "s3.{region}", "s3-{region}", "s3.dualstack.{region}", "s3-fips.{region}", "s3-fips.dualstack.{region}",
+	"s3-website-{region}", "s3-website.{region}", "s3-accelerate", "s3-accelerate.dualstack",
+}
+
+// s3EndpointRe は、文字列全体が S3 のエンドポイントのどれかかを調べる正規表現。
+var s3EndpointRe = func() *regexp.Regexp {
+	alts := make([]string, len(s3Endpoints))
+	for i, e := range s3Endpoints {
+		alts[i] = strings.ReplaceAll(regexp.QuoteMeta(e), regexp.QuoteMeta("{region}"), awsRegionRe)
+	}
+	return regexp.MustCompile(`^(?:` + strings.Join(alts, "|") + `)$`)
+}()
+
+// s3EndpointMaxDots は、S3 のエンドポイントに含まれる `.` の最大の数(リージョンは `.` を含まない)。
+var s3EndpointMaxDots = func() int {
+	n := 0
+	for _, e := range s3Endpoints {
+		n = max(n, strings.Count(e, "."))
+	}
+	return n
+}()
+
+// s3Schemes は、`s3://` 形式のスキーム(Hadoop・Spark の `s3a`、`s3n` を含む。Q37)。
+var s3Schemes = [][]byte{[]byte("s3"), []byte("s3a"), []byte("s3n")}
+
+// maxBucketLen は、バケット名の最大の長さ。
+const maxBucketLen = 63
+
+var (
+	schemeSep       = []byte("://")
+	amazonawsMarker = []byte(".amazonaws.")
+	s3ARNMarker     = []byte(":s3:::")
+)
+
+// isBucketChar は、バケット名に使える文字(英小文字・数字・`.`・`-`)。
+func isBucketChar(c byte) bool {
+	return c >= 'a' && c <= 'z' || isDigit(c) || c == '.' || c == '-'
+}
+
+// validBucket は、b が、バケット名の規則に合うかを返す(仕様 4.4、Q45)。
+// 英小文字・数字・`.`・`-` からなる 3〜63 文字。先頭と末尾が英小文字・数字。`.` が 2 つ続かない。IP アドレスの形でない。
+func validBucket(b []byte) bool {
+	if len(b) < 3 || len(b) > maxBucketLen {
+		return false
+	}
+	for _, c := range b {
+		if !isBucketChar(c) {
+			return false
+		}
+	}
+	first, last := b[0], b[len(b)-1]
+	if first == '.' || first == '-' || last == '.' || last == '-' {
+		return false
+	}
+	return !bytes.Contains(b, []byte("..")) && !looksLikeIPv4(b)
+}
+
+// looksLikeIPv4 は、b が、数字 1 文字以上の組 4 つを `.` で区切った形かを返す(値の範囲は問わない。Q45)。
+func looksLikeIPv4(b []byte) bool {
+	groups, digits := 1, 0
+	for _, c := range b {
+		switch {
+		case isDigit(c):
+			digits++
+		case c == '.' && digits > 0:
+			groups, digits = groups+1, 0
+		default:
+			return false
+		}
+	}
+	return groups == 4 && digits > 0
+}
+
+// bucketAt は、line[s:] から始まるバケット名(`s3://`・パス形式・ARN の、決まった部分の直後)の末尾を返す。
+//
+// バケット名に使える文字を伸ばせるだけ伸ばし、後ろが英数字(英大文字を含む)・`_` なら、旧形式のバケット名の
+// 一部とみなして、置換しない(Q44)。末尾の `.` 1 つは、文末の句点とみなして外す(Q44)。
+func bucketAt(line []byte, s int) (int, bool) {
+	e := s
+	for e < len(line) && isBucketChar(line[e]) {
+		if e-s > maxBucketLen { // 末尾の `.` を外しても、63 文字を超える
+			return 0, false
+		}
+		e++
+	}
+	if e < len(line) && (isASCIIAlnum(line[e]) || line[e] == '_') {
+		return 0, false
+	}
+	if e > s && line[e-1] == '.' {
+		e--
+	}
+	if !validBucket(line[s:e]) {
+		return 0, false
+	}
+	return e, true
+}
+
+// awsS3BucketFinder は、S3 のバケット名の検出器(仕様 4.4)。決まった形の中に現れたものだけを検出する。
+//
+//   - `s3://`(`s3a://`、`s3n://`)形式: `s3://my-bucket/…`
+//   - バーチャルホスト形式: `my-bucket.<S3 のエンドポイント>.<ドメイン>`
+//   - パス形式: `<S3 のエンドポイント>.<ドメイン>/my-bucket/…`
+//   - ARN: `arn:<パーティション>:s3:::my-bucket/…`
+//
+// 範囲は、バケット名の部分だけ。前処理: 各形の手がかり(`://`、`.amazonaws.`、`:s3:::`)を bytes.Index で探し、
+// なければすぐ戻る。
+type awsS3BucketFinder struct{}
+
+func (awsS3BucketFinder) kind() Kind { return KindAWSS3Bucket }
+
+func (f awsS3BucketFinder) find(line []byte, dst []Match) []Match {
+	dst = f.schemes(line, dst)
+	dst = f.hosts(line, dst)
+	return f.arn(line, dst)
+}
+
+func bucketMatch(s, e int) Match {
+	return Match{Start: s, End: e, Kind: KindAWSS3Bucket}
+}
+
+// schemes は、`s3://`(`s3a://`、`s3n://`)の直後のバケット名を追記する。スキームの前が英数字でないこと。
+func (awsS3BucketFinder) schemes(line []byte, dst []Match) []Match {
+	for pos := 0; ; {
+		j := bytes.Index(line[pos:], schemeSep)
+		if j < 0 {
+			return dst
+		}
+		i := pos + j // `://` の位置
+		pos = i + 1
+		for _, sch := range s3Schemes {
+			p := i - len(sch)
+			if p < 0 || !bytes.Equal(line[p:i], sch) || p > 0 && isASCIIAlnum(line[p-1]) {
+				continue
+			}
+			if e, ok := bucketAt(line, i+len(schemeSep)); ok {
+				dst = append(dst, bucketMatch(i+len(schemeSep), e))
+			}
+			break
+		}
+	}
+}
+
+// hosts は、バーチャルホスト形式とパス形式のバケット名を追記する。
+//
+// `.amazonaws.` を手がかりに、その後ろが対象のドメインかを確かめ、手前のラベル(`.` 区切り)を遡る。
+// エンドポイントは `.` を s3EndpointMaxDots 個までしか含まないので、遡るのは、その数 + 1 個の `.` まで。
+//   - パス形式: ホスト名全体(ドメインを除く)がエンドポイントで、ドメインの直後が `/`。その後ろがバケット名
+//   - バーチャルホスト形式: ホスト名が「バケット名 + `.` + エンドポイント」。エンドポイントは、できるだけ後ろで取る
+//     (バケット名を最も長く取る)。そのバケット名が規則に合わなければ、置換しない(Q43)。ドメインの後ろは isHostEnd(Q41)
+func (awsS3BucketFinder) hosts(line []byte, dst []Match) []Match {
+	for pos := 0; ; {
+		j := bytes.Index(line[pos:], amazonawsMarker)
+		if j < 0 {
+			return dst
+		}
+		a := pos + j // ドメインの手前の `.` の位置
+		pos = a + 1
+		vhost, pathEnd := false, -1
+		for _, d := range awsDomains {
+			if !bytes.HasPrefix(line[a+1:], []byte(d)) {
+				continue
+			}
+			end := a + 1 + len(d)
+			if isHostEnd(line, end) {
+				vhost = true
+			}
+			if end < len(line) && line[end] == '/' {
+				pathEnd = end
+			}
+		}
+		if !vhost && pathEnd < 0 {
+			continue
+		}
+		// a の手前のラベルを遡る。dots は、見つけた `.` の位置(後ろから順)。
+		// runStart は、ホスト名の先頭(遡りきった位置)。`.` が多すぎて遡りきらなかった場合は -1。
+		var dotsBuf [4]int
+		dots := dotsBuf[:0]
+		runStart := a
+		for runStart > 0 && isBucketChar(line[runStart-1]) {
+			if line[runStart-1] == '.' {
+				if len(dots) == s3EndpointMaxDots+1 {
+					runStart = -1
+					break
+				}
+				dots = append(dots, runStart-1)
+			}
+			runStart--
+		}
+		if pathEnd >= 0 && runStart >= 0 && (runStart == 0 || !isHostPrefixChar(line[runStart-1])) &&
+			s3EndpointRe.Match(line[runStart:a]) {
+			if e, ok := bucketAt(line, pathEnd+1); ok {
+				dst = append(dst, bucketMatch(pathEnd+1, e))
+			}
+		}
+		if !vhost {
+			continue
+		}
+		for _, k := range dots {
+			if !s3EndpointRe.Match(line[k+1 : a]) {
+				continue
+			}
+			// バケット名は、k の手前から、ホスト名の先頭まで(最大 maxBucketLen 文字)
+			h := k
+			for h > 0 && isBucketChar(line[h-1]) && k-h <= maxBucketLen {
+				h--
+			}
+			if k-h <= maxBucketLen && (h == 0 || !isHostPrefixChar(line[h-1])) && validBucket(line[h:k]) {
+				dst = append(dst, bucketMatch(h, k))
+			}
+			break
+		}
+	}
+}
+
+// arn は、`arn:<パーティション>:s3:::` の直後のバケット名を追記する。`arn:` の前が英数字でないこと(Q46)。
+func (awsS3BucketFinder) arn(line []byte, dst []Match) []Match {
+	for pos := 0; ; {
+		j := bytes.Index(line[pos:], s3ARNMarker)
+		if j < 0 {
+			return dst
+		}
+		i := pos + j // `:s3:::` の位置
+		pos = i + 1
+		for _, part := range awsPartitions {
+			p := i - len(part) - len(arnPrefix)
+			if p < 0 || !bytes.HasPrefix(line[p:], arnPrefix) || string(line[p+len(arnPrefix):i]) != part ||
+				p > 0 && isASCIIAlnum(line[p-1]) {
+				continue
+			}
+			s := i + len(s3ARNMarker)
+			if e, ok := bucketAt(line, s); ok {
+				dst = append(dst, bucketMatch(s, e))
+			}
+			break
+		}
+	}
+}
