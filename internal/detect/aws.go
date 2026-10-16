@@ -18,6 +18,15 @@ var awsPartitions = []string{"aws", "aws-cn", "aws-us-gov", "aws-iso", "aws-iso-
 // (amazonaws.com.cn を、amazonaws.com + `.cn` と読まないため。Q41)。
 var awsDomains = []string{"amazonaws.com.cn", "amazonaws.com", "amazonaws.eu"}
 
+// awsDomainBytes は、awsDomains のバイト列(照合のたびに変換しないため)。
+var awsDomainBytes = func() [][]byte {
+	bs := make([][]byte, len(awsDomains))
+	for i, d := range awsDomains {
+		bs[i] = []byte(d)
+	}
+	return bs
+}()
+
 // awsRegionRe は、ホスト名の中のリージョン(英小文字・数字・`-` の 1 文字以上。Q40)。
 const awsRegionRe = `[a-z0-9-]+`
 
@@ -162,6 +171,7 @@ func (awsAccountFinder) hosts(line []byte, dst []Match) []Match {
 			if loc := ecrHostRe.FindIndex(line[p:]); loc != nil && isHostEnd(line, p+loc[1]) {
 				dst = append(dst, accountMatch(s))
 			}
+			break
 		}
 		if p := d - len(sqsWord); p >= 0 && bytes.Equal(line[p:d], sqsWord) && (p == 0 || !isHostPrefixChar(line[p-1])) {
 			if loc := sqsHostRe.FindSubmatchIndex(line[p:]); loc != nil {
@@ -395,8 +405,8 @@ func (awsS3BucketFinder) hosts(line []byte, dst []Match) []Match {
 		}
 		pos = a + amazonawsNext
 		vhost, pathEnd := false, -1
-		for _, d := range awsDomains {
-			if !bytes.HasPrefix(line[a+1:], []byte(d)) {
+		for _, d := range awsDomainBytes {
+			if !bytes.HasPrefix(line[a+1:], d) {
 				continue
 			}
 			end := a + 1 + len(d)
@@ -412,6 +422,7 @@ func (awsS3BucketFinder) hosts(line []byte, dst []Match) []Match {
 		}
 		// a の手前のラベルを遡る。dots は、見つけた `.` の位置(後ろから順)。
 		// runStart は、ホスト名の先頭(遡りきった位置)。`.` が多すぎて遡りきらなかった場合は -1。
+		// dotsBuf の大きさは、s3EndpointMaxDots+1(今は 3)以上にしておく(足りなくても append で広がるので、結果は変わらない)。
 		var dotsBuf [4]int
 		dots := dotsBuf[:0]
 		runStart := a

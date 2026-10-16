@@ -407,6 +407,12 @@ func TestAWSS3Bucket(t *testing.T) {
 		{"path china", "https://s3.cn-north-1.amazonaws.com.cn/my-bucket/x", b("my-bucket")},
 		{"path bucket with dots", "https://s3.amazonaws.com/logs.example.com/x", b("logs.example.com")},
 		{"path sentence end", "at https://s3.amazonaws.com/my-bucket.", b("my-bucket")},
+		// オブジェクトキーの中のエンドポイントも、前が `/`(英数字・`-`・`_`・`.` でない)なので、パス形式として読む
+		// (仕様の条件どおり。隠す側にずれるだけなので、そのままにする)
+		{"path inside vhost key", "https://my-bucket.s3.us-east-1.amazonaws.com/s3.us-east-1.amazonaws.com/other",
+			[]string{"aws_s3_bucket=my-bucket", "aws_s3_bucket=other"}},
+		{"path inside path key", "https://s3.amazonaws.com/s3.amazonaws.com/inner-bucket",
+			[]string{"aws_s3_bucket=s3.amazonaws.com", "aws_s3_bucket=inner-bucket"}},
 		// ARN
 		{"arn", "arn:aws:s3:::my-bucket/logs/*", b("my-bucket")},
 		{"arn bucket only", "arn:aws:s3:::my-bucket", b("my-bucket")},
