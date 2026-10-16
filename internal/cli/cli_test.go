@@ -203,6 +203,62 @@ func TestEC2HostNames(t *testing.T) {
 	}
 }
 
+// 受け入れ基準(仕様 9 章「AWS」): ARN・ECR・SQS の、アカウント ID の部分だけが <aws_account_N> になり、
+// 同じアカウント ID は、どの形でも同じラベルになる。既定の種別では置換されない。
+func TestAWSAccount(t *testing.T) {
+	in := "assumed arn:aws:iam::123456789012:role/deployer from 10.0.0.1\n" +
+		"pull 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/app:latest\n" +
+		"send https://sqs.ap-northeast-1.amazonaws.com/123456789012/orders\n" +
+		"arn:aws-cn:s3:::bucket arn:aws:iam::aws:policy/ReadOnlyAccess arn:aws:lambda:ap-northeast-1:210987654321:function:x\n" +
+		"account 123456789012\n"
+	wantAWS := "assumed arn:aws:iam::<aws_account_1>:role/deployer from 10.0.0.1\n" +
+		"pull <aws_account_1>.dkr.ecr.ap-northeast-1.amazonaws.com/app:latest\n" +
+		"send https://sqs.ap-northeast-1.amazonaws.com/<aws_account_1>/orders\n" +
+		"arn:aws-cn:s3:::bucket arn:aws:iam::aws:policy/ReadOnlyAccess arn:aws:lambda:ap-northeast-1:<aws_account_2>:function:x\n" +
+		"account 123456789012\n"
+	wantDefaultAWS := strings.Replace(wantAWS, "10.0.0.1", "<ipv4_private_1>", 1)
+	for _, tt := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"mask"}, strings.Replace(in, "10.0.0.1", "<ipv4_private_1>", 1)},
+		{[]string{"mask", "--types", "aws"}, wantAWS},
+		{[]string{"mask", "--types", "cloud"}, wantAWS},
+		{[]string{"mask", "--types", "aws_account"}, wantAWS},
+		{[]string{"mask", "--types", "default,aws"}, wantDefaultAWS},
+	} {
+		r := run(t, in, nil, tt.args...)
+		if r.code != 0 || r.stdout != tt.want {
+			t.Errorf("%v: %+v\nwant stdout %q", tt.args, r, tt.want)
+		}
+	}
+	// --stats: aws_account は uuid のあと
+	r := run(t, in+"123e4567-e89b-42d3-a456-426614174000\n", nil, "mask", "--types", "default,uuid,aws", "--stats")
+	if r.stderr != "logscrub: ipv4_private=1\nlogscrub: uuid=1\nlogscrub: aws_account=4\n" {
+		t.Errorf("--stats: %q", r.stderr)
+	}
+	// restore の往復、mask・hash の冪等性
+	dir := t.TempDir()
+	src := writeFile(t, dir, "app.log", in)
+	masked := run(t, "", nil, "mask", "--types", "default,aws", src)
+	if back := run(t, masked.stdout, nil, "restore", "--source", src, "--types", "default,aws"); back.code != 0 || back.stdout != in {
+		t.Errorf("restore: %+v", back)
+	}
+	if again := run(t, masked.stdout, nil, "mask", "--types", "default,aws"); again.stdout != masked.stdout {
+		t.Errorf("mask is not idempotent: %q", again.stdout)
+	}
+	env := map[string]string{keyEnv: "test-key"}
+	h := run(t, in, env, "mask", "--mode", "hash", "--types", "default,aws")
+	// 決まった形の中の 4 つは hash の出力になり、単独の 12 桁(対象外)だけが残る。
+	if h.code != 0 || strings.Count(h.stdout, "aws_account_") != 4 || strings.Count(h.stdout, "123456789012") != 1 ||
+		!strings.Contains(h.stdout, "account 123456789012\n") {
+		t.Fatalf("hash: %+v", h)
+	}
+	if again := run(t, h.stdout, env, "mask", "--mode", "hash", "--types", "default,aws"); again.stdout != h.stdout {
+		t.Errorf("hash is not idempotent:\n%s\n%s", h.stdout, again.stdout)
+	}
+}
+
 // ---- 種別の指定 ----
 
 func TestTypes(t *testing.T) {
@@ -219,7 +275,7 @@ func TestTypes(t *testing.T) {
 		{"uuid versions v4", []string{"mask", "--uuid-versions", "4"}, "<email_1> <ipv4_private_1> <uuid_1>\n"},
 		{"uuid versions v7 only", []string{"mask", "--uuid-versions", "7"}, "<email_1> <ipv4_private_1> 123e4567-e89b-42d3-a456-426614174000\n"},
 		{"uuid versions override types", []string{"mask", "--types", "default,uuid", "--uuid-versions", "7"}, "<email_1> <ipv4_private_1> 123e4567-e89b-42d3-a456-426614174000\n"},
-		// AWS の種別は受け付けるが、段階 1 では検出器がないので、何も置換しない(既定の種別も含まない)。
+		// AWS の種別だけを指定すると、既定の種別は含まない(入力に AWS の値がないので、何も置換しない)。
 		{"aws only", []string{"mask", "--types", "aws"}, "a@x.com 10.0.0.1 123e4567-e89b-42d3-a456-426614174000\n"},
 		{"cloud only", []string{"mask", "--types", "cloud"}, "a@x.com 10.0.0.1 123e4567-e89b-42d3-a456-426614174000\n"},
 		{"aws types by name", []string{"mask", "--types", "aws_account,aws_s3_bucket"}, "a@x.com 10.0.0.1 123e4567-e89b-42d3-a456-426614174000\n"},
