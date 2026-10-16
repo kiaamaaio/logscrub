@@ -18,6 +18,8 @@ Run "logscrub <command> --help" for the options of a command.
 // secretFormatsHelp は、secret の対応形式(仕様 4.1)。`types --verbose` と、`mask --help` に出す。
 const secretFormatsHelp = `Supported secret formats:
   AWS access key ID     AKIA or ASIA + 16 uppercase letters or digits
+  AWS signature (SigV4) exactly 64 lowercase hex digits after X-Amz-Signature= or
+                        Signature= (presigned URLs, AWS4-HMAC-SHA256 Authorization)
   GitHub                ghp_ gho_ ghu_ ghs_ ghr_ + 36 or more alphanumerics;
                         github_pat_ + 22 or more alphanumerics or _
   Slack                 xoxb- xoxp- xoxa- xoxr- xoxs- + 10 or more alphanumerics or -

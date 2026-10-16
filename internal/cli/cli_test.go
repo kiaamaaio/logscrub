@@ -144,6 +144,31 @@ func TestMaskLongLine(t *testing.T) {
 	}
 }
 
+// 受け入れ基準(仕様 9 章「AWS」): 署名付き URL の X-Amz-Signature と、SigV4 の Authorization の Signature が、
+// 既定の種別で <secret_N> になる(語と `=` は残る)。64 桁の 16 進数でないものは、署名として置換されない。
+func TestAWSSignature(t *testing.T) {
+	const sig = "fe5f80f77d5fa3beca038a248ff027d0445342fe2855ddc963176630326f1024"
+	in := "GET https://b.s3.amazonaws.com/k?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20130524T000000Z&X-Amz-Signature=" + sig + "&x=1\n" +
+		"Authorization: AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=" + sig + "\n" +
+		"Signature=" + sig[:63] + " Signature=" + sig + "0 Signature=" + strings.ToUpper(sig) + "\n"
+	want := "GET https://b.s3.amazonaws.com/k?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20130524T000000Z&X-Amz-Signature=<secret_1>&x=1\n" +
+		"Authorization: AWS4-HMAC-SHA256 Credential=<secret_2>/20130524/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=<secret_1>\n" +
+		"Signature=" + sig[:63] + " Signature=" + sig + "0 Signature=" + strings.ToUpper(sig) + "\n"
+	r := run(t, in, nil, "mask")
+	if r.code != 0 || r.stdout != want {
+		t.Fatalf("%+v\nwant stdout %q", r, want)
+	}
+	dir := t.TempDir()
+	src := writeFile(t, dir, "app.log", in)
+	back := run(t, r.stdout, nil, "restore", "--source", src)
+	if back.code != 0 || back.stdout != in {
+		t.Errorf("restore: %+v", back)
+	}
+	if again := run(t, r.stdout, nil, "mask"); again.stdout != r.stdout {
+		t.Errorf("mask is not idempotent: %q", again.stdout)
+	}
+}
+
 // ---- 種別の指定 ----
 
 func TestTypes(t *testing.T) {
@@ -615,7 +640,7 @@ func TestHelp(t *testing.T) {
 	}
 	// mask の --help には、secret の対応形式を列挙する(仕様 4.1)
 	r := run(t, "", nil, "mask", "--help")
-	for _, want := range []string{"AKIA", "ghp_", "xoxb-", "sk_live_", "AIza", "sk-", "JWT", "Bearer", "password"} {
+	for _, want := range []string{"AKIA", "X-Amz-Signature=", "Signature=", "ghp_", "xoxb-", "sk_live_", "AIza", "sk-", "JWT", "Bearer", "password"} {
 		if !strings.Contains(r.stdout, want) {
 			t.Errorf("mask --help lacks %q", want)
 		}
@@ -669,7 +694,8 @@ func TestTypesCommand(t *testing.T) {
 		t.Error("types without --verbose lists the secret formats")
 	}
 	v := run(t, "", nil, "types", "--verbose")
-	if v.code != 0 || !strings.Contains(v.stdout, "AKIA") || !strings.Contains(v.stdout, "ghp_") || !strings.Contains(v.stdout, "password") {
+	if v.code != 0 || !strings.Contains(v.stdout, "AKIA") || !strings.Contains(v.stdout, "X-Amz-Signature=") ||
+		!strings.Contains(v.stdout, "ghp_") || !strings.Contains(v.stdout, "password") {
 		t.Errorf("--verbose: %+v", v)
 	}
 	if !strings.HasPrefix(v.stdout, r.stdout) {
