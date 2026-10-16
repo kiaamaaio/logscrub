@@ -51,6 +51,7 @@
 | `uuid` | 4.2 参照 | ❌ |
 | `aws_account` | AWS アカウント ID。決まった形の中に現れたものだけ(4.4 参照。v1.1 で追加) | ❌ |
 | `aws_s3_bucket` | S3 のバケット名。決まった形の中に現れたものだけ(4.4 参照。v1.1 で追加) | ❌ |
+| `aws_host` | AWS のサービスのホスト名のうち、利用者ごとの部分(4.5 参照。v1.2 で追加) | ❌ |
 
 既定で有効にするのは、どこでも使われる技術的な値(メールアドレス、IP アドレス、秘密情報)だけとする。
 特定のクラウドに依存する値(`aws_*` など)は、既定では無効にする(v1.1 で追加)。
@@ -64,8 +65,8 @@
 - `--types` を省略した場合は `default`(既定で有効の種別)が対象。
 - 種別のまとまり(v1.1 で追加)。種別名と同じ場所に書ける。
   - `default`: 既定で有効の種別
-  - `aws`: `aws_` で始まるすべての種別(v1.1 では `aws_account`、`aws_s3_bucket`)
-  - `cloud`: すべてのクラウドの種別(v1.1 では `aws` と同じ。将来、`gcp_*` や `azure_*` を追加したときは、それも含む)
+  - `aws`: `aws_` で始まるすべての種別(`aws_account`、`aws_s3_bucket`、`aws_host`)
+  - `cloud`: すべてのクラウドの種別(今は `aws` と同じ。将来、`gcp_*` や `azure_*` を追加したときは、それも含む)
   - 例: `--types default,aws` → 既定の種別と、AWS の種別が対象
   - 例: `--types aws` → AWS の種別だけが対象(既定の種別は含まない)
 - クラウド固有の種別名は、`<クラウド>_<対象>` の形にする(`aws_account`、将来は `gcp_project` など)。秘密情報(署名など)は、クラウドに関係なく `secret` に含める(4.1 の方針と同じ。利用者がトークンの種類を知らなくても使えるようにするため)
@@ -75,7 +76,7 @@
 ### 範囲が重なった場合
 
 - 複数の種別が重なる範囲に一致した場合は、**長く一致したほうを優先**する。
-- 同じ長さの場合は、種別の優先順位で決める。優先順位は `email` → `ipv4`/`ipv6` → `secret` → `uuid` → `aws_account` → `aws_s3_bucket`。
+- 同じ長さの場合は、種別の優先順位で決める。優先順位は `email` → `ipv4`/`ipv6` → `secret` → `uuid` → `aws_account` → `aws_s3_bucket` → `aws_host`。
 - 一部だけ重なる場合も、このルールで 1 つに決める。
   - 例: `::ffff:10.0.0.1` は、IPv6 全体(長い)と、末尾の IPv4 部分(短い)の両方に一致する。長い IPv6 を優先し、1 つの IPv6 として置換する。
 
@@ -112,6 +113,7 @@
 |---|---|
 | AWS アクセスキー ID | `AKIA` / `ASIA` + 英大文字・数字 16 文字 |
 | AWS の署名(SigV4。v1.1 で追加) | `X-Amz-Signature=` または `Signature=` の後ろの、16 進数(小文字)ちょうど 64 文字。下記「AWS の署名」参照 |
+| URL のパスワード(v1.2 で追加) | `<スキーム>://<ユーザー>:<パスワード>@<ホスト>` のパスワード部分。下記「URL のパスワード」参照 |
 | GitHub | `ghp_` `gho_` `ghu_` `ghs_` `ghr_` + 英数字 36 文字以上、`github_pat_` + 英数字・`_` 22 文字以上 |
 | Slack | `xoxb-` `xoxp-` `xoxa-` `xoxr-` `xoxs-` + 英数字・`-` 10 文字以上 |
 | Stripe | `sk_live_` `sk_test_` `rk_live_` `rk_test_` + 英数字 24 文字以上 |
@@ -143,6 +145,20 @@
   - 例: `{"msg":"password=abc123"}` → `{"msg":"password=<secret_1>"}`(閉じ引用符を残す)
 - 値が空の場合は置換しない。
 - 値が `Bearer ` / `Basic ` で始まる場合(`Authorization: Bearer abc`、`token: Bearer abc`)は、方式名を残し、その後ろの値(RFC 7235 の token68: 英数字と `-` `.` `_` `~` `+` `/`、末尾に `=`)だけを置換する。方式名の後ろに空白が 1 つ以上必要。**方式名の後ろが値として読めない場合(置換済みのラベル `Bearer <secret_1>`、`Basic` の値が base64 でない場合)は、何も置換しない**(方式名の語を値として置換しない。冪等性のため)。キー名が `Authorization` の場合は、方式名がなければ置換しない
+
+URL のパスワード(v1.2 で追加):
+
+- 対象は、URL のユーザー情報に書かれたパスワード。DB の接続文字列(`postgres://app:s3cret@db-host:5432/app`)や、`https://user:pass@10.0.0.1/` のような形
+- 判定:
+  - スキーム: 英字で始まり、英数字・`+`・`.`・`-` が続くもの。前が英数字・`+`・`.`・`-` でないこと。その後ろに `://`
+  - ユーザー: 0 文字以上で、空白・`:`・`/`・`?`・`#`・`@` を含まない(`redis://:pass@host` のように、ユーザーが空の形も対象)
+  - `:` + パスワード: 1 文字以上で、空白・`/`・`?`・`#`・`@` を含まない(`:` は含んでよい。最初の `:` より後ろ、`@` の手前までがパスワード)
+  - `@` の後ろに、ホスト名の文字(英数字・`.`・`-`・`[`)が 1 文字以上続くこと
+- 置換するのは、パスワードの部分だけ。スキーム・ユーザー・`:`・`@`・ホスト名は残す
+  - 例: `postgres://app:s3cret@mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432/app` → `postgres://app:<secret_1>@mydb.cluster-…`(`aws_host` も有効なら `postgres://app:<secret_1>@<aws_host_1>.ap-northeast-1.rds.amazonaws.com:5432/app`)
+- この形のときは、`@` の前後をメールアドレスとして検出しない(4 章「範囲が重なった場合」の例外)。v1.1 までは、`s3cret@mydb….amazonaws.com` 全体がメールアドレスとして置換され、ホスト名の情報が消えていた。また、ホストが IP アドレスの場合は、パスワードがそのまま残っていた
+  - ユーザーだけの形(`https://taro@example.com/`)は、この形に当たらない。メールアドレスの扱いは変わらない
+- ホスト名の部分は、通常どおり、他の種別(`ipv4`・`ipv6`・`aws_host` など)として検出される
 
 AWS の署名(SigV4。v1.1 で追加):
 
@@ -238,7 +254,7 @@ EC2 のホスト名は、IP アドレスを `-` 区切りで含む。IP アド�
 - 区別(`global` / `private` / 特殊アドレス)と `--ip-scope` は、通常の IPv4 と同じに扱う
 - 同じ値の判定は、通常どおりバイト列で行う。`54-250-1-2` と `54.250.1.2` は別の値として扱い、別のラベルになる(`restore` で 1 バイトも違わずに戻すため)
 - `hash` の出力は、`ec2-ipv4_global_a1b2c3d4e5f6.ap-northeast-1.compute.amazonaws.com` のようになる(数字 4 つの形ではなくなるため、再度は検出されない)
-- 対象外: パブリックホスト名の IPv6 形式・デュアルスタック形式(`f5lnz-0khrm-….ap-southeast-2.ip.aws`)。IP アドレスを base36 で符号化した形で、v1.2 の `aws_host` で扱いを検討する
+- 対象外: パブリックホスト名の IPv6 形式・デュアルスタック形式(`f5lnz-0khrm-….ap-southeast-2.ip.aws`)。IP アドレスを base36 で符号化した形で、`ipv4` / `ipv6` としては扱わない。`aws_host` で置換する(4.5 参照。v1.2 で追加)
 
 ラベルと出力:
 
@@ -286,6 +302,7 @@ AWS アカウント ID と S3 のバケット名は、秘密情報ではない�
 | ARN | `arn:aws:iam::123456789012:role/deployer` | `arn:aws:iam::<aws_account_1>:role/deployer` |
 | ECR のレジストリ | `123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/app:latest` | `<aws_account_1>.dkr.ecr.ap-northeast-1.amazonaws.com/app:latest` |
 | SQS のキュー URL | `https://sqs.ap-northeast-1.amazonaws.com/123456789012/orders` | `https://sqs.ap-northeast-1.amazonaws.com/<aws_account_1>/orders` |
+| S3 Control のホスト(v1.2 で追加) | `123456789012.s3-control.ap-northeast-1.amazonaws.com` | `<aws_account_1>.s3-control.ap-northeast-1.amazonaws.com` |
 
 - ARN: `arn:` の前が英数字でないこと。`arn:<パーティション>:<サービス>:<リージョン>:<アカウント ID>:` の形で、アカウント ID の欄が 10 進数ちょうど 12 桁のときだけ置換する
   - サービスは英小文字・数字・`-` の 1 文字以上。リージョンは英小文字・数字・`-` の 0 文字以上(IAM などは空)
@@ -293,6 +310,7 @@ AWS アカウント ID と S3 のバケット名は、秘密情報ではない�
   - アカウント ID の欄が空のもの(`arn:aws:s3:::bucket`)や、`aws` のもの(AWS 管理ポリシーの `arn:aws:iam::aws:policy/…`)は、置換しない
 - ECR: 10 進数ちょうど 12 桁 + `.dkr.ecr.` または `.dkr.ecr-fips.` + リージョン + 対象のドメイン。12 桁の前が英数字・`-`・`_`・`.` でないこと
 - SQS: ホストが `sqs.<リージョン>.<対象のドメイン>`、`<リージョン>.queue.amazonaws.com`、`queue.amazonaws.com` のいずれかで、その直後が `/` + 10 進数ちょうど 12 桁 + `/` であること。ホストの前が英数字・`-`・`_`・`.` でないこと
+- S3 Control(v1.2 で追加): 10 進数ちょうど 12 桁 + `.s3-control.`・`.s3-control.dualstack.`・`.s3-control-fips.`・`.s3-control-fips.dualstack.` のいずれか + リージョン + 対象のドメイン。12 桁の前と、ドメインの後ろの条件は ECR と同じ
 
 `aws_s3_bucket`(S3 のバケット名):
 
@@ -322,9 +340,64 @@ AWS アカウント ID と S3 のバケット名は、秘密情報ではない�
 - アカウントのリージョン別の名前空間のバケット名(`<名前>-<アカウント ID>-<リージョン>-an`)は、アカウント ID を含む。`aws_s3_bucket` を無効にして `aws_account` だけを有効にした場合、バケット名の中のアカウント ID は置換されない
 - ARN のリソース名(ロール名、ユーザー名など)や、`AROA…`・`AIDA…` などの一意 ID は置換しない
 
-v1.2 で予定しているもの:
+### 4.5 `aws_host`(AWS のサービスのホスト名。v1.2 で追加)
 
-- `aws_host`: 設定によって AWS の外からアクセスできるサービスのホスト名(ELB、API Gateway、Lambda 関数 URL、CloudFront、EKS、RDS、Redshift、OpenSearch など)。決まった末尾のドメインより前の部分を、まとめて置換する(例: `<aws_host_1>.ap-northeast-1.rds.amazonaws.com`)。EC2 のホスト名(4.3)と S3 のバケット(上記)は、`aws_host` の対象から外す
+AWS のサービスのホスト名には、利用者ごとの部分(DB の名前、ロードバランサの名前、ランダムな ID など)が入る。設定によっては AWS の外からアクセスできるため、組織と接続先を特定できる値として扱う。
+**下の表の「末尾の形」に一致するホスト名だけ**を検出し、ホスト名の先頭から末尾の形の直前まで(利用者ごとの部分)を、まとめて置換する。サービス名とリージョンは残す(調査で「どのサービスへの接続か」が分かるようにするため。決定事項 18)。
+
+- 例: `mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com` → `<aws_host_1>.ap-northeast-1.rds.amazonaws.com`
+- 既定では無効。まとまり `aws`・`cloud` に含まれる
+
+| サービス | 末尾の形 | 例 |
+|---|---|---|
+| ELB(ALB・CLB) | `.<リージョン>.elb.<ドメイン>` | `my-alb-1234567890.ap-northeast-1.elb.amazonaws.com` |
+| ELB(NLB) | `.elb.<リージョン>.<ドメイン>` | `my-nlb-0123456789abcdef.elb.ap-northeast-1.amazonaws.com` |
+| API Gateway | `.execute-api.<リージョン>.<ドメイン>` | `a1b2c3d4e5.execute-api.ap-northeast-1.amazonaws.com` |
+| Lambda 関数 URL | `.lambda-url.<リージョン>.on.aws` | `abcdefghij0123456789klmnop.lambda-url.ap-northeast-1.on.aws` |
+| CloudFront | `.cloudfront.net` | `d111111abcdef8.cloudfront.net` |
+| Global Accelerator | `.awsglobalaccelerator.com` | `a1234567890abcdef.awsglobalaccelerator.com` |
+| EKS の API サーバ | `.<リージョン>.eks.<ドメイン>` | `0123456789ABCDEF0123456789ABCDEF.gr7.ap-northeast-1.eks.amazonaws.com` |
+| RDS・Aurora・RDS Proxy | `.<リージョン>.rds.<ドメイン>` | `mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com` |
+| Redshift | `.<リージョン>.redshift.<ドメイン>`、`.<リージョン>.redshift-serverless.<ドメイン>` | `my-cluster.c9akciq32.ap-northeast-1.redshift.amazonaws.com` |
+| OpenSearch | `.<リージョン>.es.<ドメイン>`、`.<リージョン>.aoss.<ドメイン>` | `search-my-domain-abcdefghij.ap-northeast-1.es.amazonaws.com` |
+| MSK | `.kafka.<リージョン>.<ドメイン>` | `b-1-public.my-cluster.abc123.c2.kafka.ap-northeast-1.amazonaws.com` |
+| Amazon MQ | `.mq.<リージョン>.<ドメイン>` | `b-1234abcd-12ab-34cd-56ef-1234567890ab-1.mq.ap-northeast-1.amazonaws.com` |
+| Transfer Family | `.server.transfer.<リージョン>.<ドメイン>` | `s-0123456789abcdef0.server.transfer.ap-northeast-1.amazonaws.com` |
+| AppSync | `.appsync-api.<リージョン>.<ドメイン>`、`.appsync-realtime-api.<リージョン>.<ドメイン>` | `abcdefghijklmnopqrstuvwxyz.appsync-api.ap-northeast-1.amazonaws.com` |
+| Cognito のドメイン | `.auth.<リージョン>.amazoncognito.com` | `my-app.auth.ap-northeast-1.amazoncognito.com` |
+| IoT Core | `.iot.<リージョン>.<ドメイン>` | `a1b2c3d4e5f6g7-ats.iot.ap-northeast-1.amazonaws.com` |
+| App Runner | `.<リージョン>.awsapprunner.com` | `abcdefghij.ap-northeast-1.awsapprunner.com` |
+| Amplify Hosting | `.amplifyapp.com` | `main.d1a2b3c4d5e6f7.amplifyapp.com` |
+| Elastic Beanstalk | `.<リージョン>.elasticbeanstalk.com`、`.elasticbeanstalk.com` | `my-env.ap-northeast-1.elasticbeanstalk.com` |
+| EC2 のパブリックホスト名(IPv6・デュアルスタック) | `.<リージョン>.ip.aws` | `f5lnz-0khrm-nt2u3-gyqqt-nbdl5.ap-southeast-2.ip.aws` |
+
+判定:
+
+- `<ドメイン>` は 4.4 の対象のドメイン(`amazonaws.com`、`amazonaws.com.cn`、`amazonaws.eu`)。`<リージョン>` は、4.4 のホスト名の中のリージョンと同じ(英小文字・数字・`-` の 1 文字以上。Q40)
+- 末尾の形の決まった部分は、小文字の形だけを対象にする(Q42)。末尾の形の後ろの条件は、4.4 のホスト名の末尾と同じ(Q41)
+- 利用者ごとの部分: 英字(大文字・小文字)・数字・`-`・`.` からなる 1 文字以上で、先頭と末尾が英数字、`.` が 2 つ続かないこと。その前が、英数字・`-`・`_`・`.` でないこと
+  - 英大文字を許すのは、EKS の ID のように、AWS が大文字で付ける値があるため(DNS の名前は大文字・小文字を区別しない)
+- 1 つのホスト名に、複数の末尾の形が当てはまる場合(`.<リージョン>.elasticbeanstalk.com` と `.elasticbeanstalk.com`)は、長いほうの形を採る(利用者ごとの部分が短くなるほう)
+- 置換するのは、利用者ごとの部分だけ。`dualstack.`(ELB)、`internal-`(内部向けの ELB)、アベイラビリティゾーンの接頭辞(NLB)なども、利用者ごとの部分に含める
+- 同じ値の判定は、通常どおりバイト列で行う。`dualstack.my-alb-1234567890` と `my-alb-1234567890` は、別の値として扱う
+- `hash` の出力は `aws_host_<hex>.ap-northeast-1.rds.amazonaws.com` のようになる。前が `_` のため利用者ごとの部分として読まれず、再度は検出されない
+
+対象外:
+
+- 4.3 の EC2 のホスト名(`ec2-…`、`ip-…`。`ipv4` として置換する)、4.4 の S3 のホスト名(`aws_s3_bucket`)、ECR・S3 Control のホスト名(`aws_account`)、SQS のホスト名(利用者ごとの部分がない)
+- AWS のサービス自体の API のエンドポイント(`rds.ap-northeast-1.amazonaws.com`、`kafka.ap-northeast-1.amazonaws.com` など)。利用者ごとの部分がないため、表の形に当てはまらない
+- VPC の中からしかアクセスできないサービス(ElastiCache、DocumentDB、Neptune、VPC エンドポイント `vpce-…` など)
+- デュアルスタックのドメイン `api.aws` の形(`<ID>.<リージョン>.api.aws`)。AWS 自体の API のエンドポイント(`sqs.us-east-1.api.aws` など)と区別できないため
+
+範囲が重なった場合:
+
+- `admin@mydb.c9akciq32.ap-northeast-1.rds.amazonaws.com` のように、ホスト名がメールアドレスの一部として読める場合は、長いメールアドレスが優先される(4 章「範囲が重なった場合」)。ホスト名は、メールアドレスのラベルの中に含まれて隠れる
+
+限界(README に明記する):
+
+- 独自のドメイン(Route 53 の CNAME などで付けた `db.example.com`)は検出しない
+- `dualstack.` などの接頭辞の有無で、同じロードバランサが別のラベルになる
+- 表にないサービスのホスト名は検出しない
 
 ## 5. 変換モードと復元
 
@@ -412,7 +485,7 @@ logscrub types   [--verbose]
 - `mask` で FILE を複数指定した場合は、指定した順に連結して 1 つの入力として処理する(連番も通しで振る)。
 - `restore` の ANSWER_FILE は 1 つだけ指定できる。
 - `--output FILE`(`-o`): 出力先をファイルにする。`-` は標準出力。出力先が、入力ファイル(`FILE`、`--source`、ANSWER_FILE)のどれかと同じファイルの場合は、入力を消さないため、何も書かずにエラー終了する。入力ファイルは、処理を始める前にすべて開き、開けないものがあれば、出力を始める前にエラー終了する。
-- `--stats`: 置換した件数を、種別ごとに **stderr** に出力する(生の値は出さない)。IP アドレスは `ipv4_global` のように区別ごとに数える。形式は、1 行 1 種別の `logscrub: email=3`。件数は、値の種類数でなく、置換した出現回数で、`--allow` で残した値や特殊アドレスは数えない。0 件の種別は出さない。並びは、`email`、`ipv4_global`、`ipv4_private`、`ipv6_global`、`ipv6_private`、`secret`、`uuid`、`aws_account`、`aws_s3_bucket` の順(`aws_*` は v1.1 で追加)。
+- `--stats`: 置換した件数を、種別ごとに **stderr** に出力する(生の値は出さない)。IP アドレスは `ipv4_global` のように区別ごとに数える。形式は、1 行 1 種別の `logscrub: email=3`。件数は、値の種類数でなく、置換した出現回数で、`--allow` で残した値や特殊アドレスは数えない。0 件の種別は出さない。並びは、`email`、`ipv4_global`、`ipv4_private`、`ipv6_global`、`ipv6_private`、`secret`、`uuid`、`aws_account`、`aws_s3_bucket`、`aws_host` の順(`aws_account`・`aws_s3_bucket` は v1.1、`aws_host` は v1.2 で追加)。
 - hash 専用のオプション(`--hash-length`、`--email-hash`、`--key-file`)を、`--mode mask`(既定)で指定すると、エラー終了する。`--hash-length` は 8〜64。
 - `--allow VALUE`: 置換しない値(例: 問い合わせ窓口のアドレス)。完全一致で判定する。複数回指定できる。
 - `--fail-on-detect`: 1 件でも検出した場合、終了コード 2 で終える(出力は通常どおり行う)。
@@ -502,7 +575,7 @@ logscrub/
 範囲の重なり:
 
 - [ ] `::ffff:10.0.0.1` が、IPv4 部分だけでなく全体で 1 つの `<ipv6_private_1>` になる
-- [ ] `https://user:pass@10.0.0.1/` が `https://user:pass@<ipv4_private_1>/` になる(`pass@10.0.0.1` はメールアドレスとして扱わない)
+- [ ] `https://user:pass@10.0.0.1/` が `https://user:<secret_1>@<ipv4_private_1>/` になる(`pass@10.0.0.1` はメールアドレスとして扱わない。パスワードは v1.2 で追加した URL のパスワードとして置換する)
 
 email / hash:
 
@@ -575,6 +648,27 @@ AWS(v1.1 で追加):
 - [ ] `--types default,aws` の mask の出力を、同じオプションで `restore --source` に通すと、元の入力と 1 バイトも違わずに戻る
 - [ ] `--stats` で、`aws_account`・`aws_s3_bucket` の件数が `uuid` のあとに出る
 
+AWS のホスト名(v1.2 で追加):
+
+- [ ] 何も指定しないと、`aws_host` は置換されない。`--types default,aws`・`--types cloud`・`--types aws_host` で置換される
+- [ ] 4.5 の表の各サービスの例が、`<aws_host_N>` + 末尾の形(サービス名・リージョン・ドメインが残る)になる
+- [ ] 同じホスト名は同じラベルに、違うホスト名は別のラベルになる
+- [ ] `.<リージョン>.elasticbeanstalk.com` の形では、リージョンが利用者ごとの部分に含まれない
+- [ ] AWS 自体の API のエンドポイント(`rds.ap-northeast-1.amazonaws.com`、`https://kafka.ap-northeast-1.amazonaws.com/`)、`cloudfront.net` だけのもの、表にない形(`mydb.example.com`、`x.ap-northeast-1.cache.amazonaws.com`)は置換されない
+- [ ] 末尾の形の後ろに英数字や「`.` + 英数字」が続くもの(`x.cloudfront.net.example.org`)、決まった部分が大文字のもの(`X.CLOUDFRONT.NET`)は置換されない
+- [ ] EC2 のホスト名・S3 のホスト名・ECR のホスト名は、`aws_host` ではなく、それぞれ `ipv4`・`aws_s3_bucket`・`aws_account` として置換される
+- [ ] `123456789012.s3-control.ap-northeast-1.amazonaws.com` のアカウント ID が `<aws_account_N>` になる
+- [ ] `--types default,aws` の mask・hash の出力を、同じオプションで再度流しても変わらない。mask の出力を `restore --source` に通すと、元の入力と 1 バイトも違わずに戻る
+- [ ] `--stats` で、`aws_host` の件数が `aws_s3_bucket` のあとに出る
+
+URL のパスワード(v1.2 で追加):
+
+- [ ] `postgres://app:s3cret@db.example.com:5432/app` が、既定の種別で `postgres://app:<secret_1>@db.example.com:5432/app` になる(メールアドレスとして置換されない)
+- [ ] `--types default,aws` で、`postgres://app:s3cret@mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432/app` が `postgres://app:<secret_1>@<aws_host_1>.ap-northeast-1.rds.amazonaws.com:5432/app` になる
+- [ ] `redis://:s3cret@10.0.0.5:6379`(ユーザーが空)と、`:` を含むパスワード(`ftp://u:a:b@host`)のパスワード部分が置換される
+- [ ] `https://taro@example.com/`(ユーザーだけ)は、v1.1 と同じくメールアドレスとして扱われる
+- [ ] 置換後の `postgres://app:<secret_1>@…`、hash の出力 `postgres://app:secret_<hex>@…` を再度流しても変わらない
+
 除外の確認:
 
 - [ ] 電話番号形式(`03-1234-5678`、`09012345678`)や郵便番号形式(`123-4567`)は検出されない
@@ -620,10 +714,12 @@ CLI:
 16. クラウド固有の値を v1.1 で追加する(2026-10-15)。精度を重視し、形式がはっきり決まっているものから対応する。種別名は `<クラウド>_<対象>`(`aws_account`、`aws_s3_bucket`)とし、まとまり(`aws`、`cloud`)で指定できるようにする。既定では無効(特定のクラウドに依存する値のため)。秘密情報(AWS の署名)は、クラウドに関係なく `secret` に含める
 17. EC2 のホスト名に埋め込まれた IPv4 を、`ipv4` として置換する(2026-10-15)。IP アドレスを置換しても、ホスト名から元の値が読めてしまうため。既定の種別に含まれる
 18. v1.2 で `aws_host`(AWS の外からアクセスできるサービスのホスト名)を追加する予定(2026-10-15)。決まった末尾のドメインより前の部分を、まとめて置換する(サービス名とリージョンを残すため)。EC2 のホスト名と S3 のバケットは対象から外す
+19. `aws_host` を v1.2 で追加する(2026-10-17)。対象は、4.5 の表の「末尾の形」が決まっているサービスのホスト名だけ。あわせて、S3 Control のホストのアカウント ID を `aws_account` に加え、EC2 のパブリックホスト名の IPv6・デュアルスタック形式(`….ip.aws`)を `aws_host` で置換する
+20. `secret` に URL のパスワード(`<スキーム>://<ユーザー>:<パスワード>@<ホスト>`)を加え、この形のときは `@` の前後をメールアドレスとして扱わない(2026-10-17)。DB の接続文字列で、ホスト名の情報が消えたり、ホストが IP アドレスのときにパスワードが残ったりしていたため。既定の種別の動作が変わる(隠せていなかった値を隠す方向の変更)
 
 ## 11. 未決事項
 
-なし(v1.1 の細部は、[plans/v1.1.0.md](plans/v1.1.0.md) 5 章の Q32〜Q46 で確定済み)
+なし(v1.1 の細部は [plans/v1.1.0.md](plans/v1.1.0.md) 5 章の Q32〜Q46、v1.2 の細部は [plans/v1.2.0.md](plans/v1.2.0.md) 5 章の Q47〜Q53 で確定済み)
 
 ---
 
