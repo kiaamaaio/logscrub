@@ -4,7 +4,7 @@
 版ごとの実装計画と進捗は [plans/](plans/) にある(この資料の内容は、v1.0.0 の実装計画から移した)。
 
 - 仕様: [SPEC.md](SPEC.md)(以下「仕様」。節番号は仕様のもの)
-- 文中の Q 番号(Q1〜Q31)は、[plans/v1.0.0.md](plans/v1.0.0.md) 5 章「未確定事項」の項目(すべて確定済み)
+- 文中の Q 番号は、Q1〜Q31 が [plans/v1.0.0.md](plans/v1.0.0.md)、Q32〜Q46 が [plans/v1.1.0.md](plans/v1.1.0.md) の 5 章「未確定事項」の項目(すべて確定済み)
 
 ---
 
@@ -48,8 +48,9 @@ logscrub/
 │   ├── detect/                  # 種別ごとの検出、重なりの解決、置換対象外の除外
 │   ├── transform/               # mask.go, hash.go, restore.go, engine.go(行の書き換え)
 │   ├── stream/                  # 行単位の入出力(改行コード・末尾改行の保持)
-│   └── synthlog/                # 【追加】性能測定用の合成ログの生成器(Q29)
-└── (各パッケージの testdata/)   # 往復テスト・E2E 用の入力と期待出力(実際は internal/transform/testdata/)
+│   └── synthlog/                # 【追加】性能測定用の合成ログの生成器(Q29。v1.1 で AWS の値を含める設定を追加。Q39)
+└── (各パッケージの testdata/)   # 往復テスト・E2E 用の入力と期待出力(実際は internal/transform/testdata/。
+                                 #   app.log と、v1.1 の AWS の値の aws.log、それぞれの mask の期待値)
 ```
 
 ### 仕様 8 章から変える点と理由
@@ -85,8 +86,10 @@ func Copy(w io.Writer, inputs ...io.Reader) error
 **label**
 
 ```go
-// 置換後の種別名。IP は区別を含む。並びは連番・--stats の出力順にも使う。
-var Types = []string{"email", "ipv4_global", "ipv4_private", "ipv6_global", "ipv6_private", "secret", "uuid"}
+// 置換後の種別名。IP は区別を含む。並びは連番・--stats の出力順にも使う(aws_* は v1.1 で追加)。
+var Types = []string{"email", "ipv4_global", "ipv4_private", "ipv6_global", "ipv6_private", "secret", "uuid",
+    "aws_account", "aws_s3_bucket"}
+const NumTypes = 9                                  // len(Types)。統計・連番の表を固定長の配列で持つため
 
 type Format struct { ... }                          // '<{type}_{n}>' を前後・中間のリテラルに分解したもの
 func ParseFormat(s string) (Format, error)          // {type} と {n} を含まなければエラー
@@ -100,7 +103,8 @@ func ScanHashed(line []byte, hexLen int, fn func(start, end int))
 **detect**
 
 ```go
-type Kind uint8   // KindEmail, KindIPv4, KindIPv6, KindSecret, KindUUID(0 は無効)
+type Kind uint8   // KindEmail, KindIPv4, KindIPv6, KindSecret, KindUUID, KindAWSAccount, KindAWSS3Bucket(0 は無効)
+type KindSet uint32 // ビット k が Kind k(v1.1 で uint8 から広げた。v1.2 の aws_host で 8 ビットを超えるため)
 type Class uint8  // ClassNone, ClassGlobal, ClassPrivate, ClassSpecial(IP のみ使用)
 
 type Match struct {
@@ -110,7 +114,17 @@ type Match struct {
 }
 func (m Match) LabelType() string  // "email", "ipv4_private" など
 
-func ParseTypes(spec string) (KindSet, error)  // "default,uuid" → 集合。不明な名前はエラー(完全一致のみ)
+// TypeInfo は、--types に書ける種別 1 つ(種別、既定で有効か、クラウド名)。Types は、その一覧
+// (共通の種別のあとに、クラウドごとにまとめる。logscrub types とエラーメッセージの順)。
+type TypeInfo struct { Kind Kind; Default bool; Cloud string }
+var Types []TypeInfo
+// Group は、種別のまとまり。Groups(default、クラウド名(aws)、cloud)は Types から求める
+// (種別を足したとき、まとまりの定義を書き換えなくて済むように。plans/v1.1.0.md 2.1)。
+type Group struct { Name string; Kinds KindSet }
+var Groups []Group
+var DefaultKinds KindSet                       // Types の Default から求める
+
+func ParseTypes(spec string) (KindSet, error)  // "default,aws" → 集合。Groups と Types から引く。不明な名前はエラー(完全一致のみ)
 
 type Options struct {
     Kinds        KindSet
@@ -138,6 +152,12 @@ type finder interface {
     find(line []byte, dst []Match) []Match           // 候補を追記(重なりはまだ解決しない)
 }
 ```
+
+検出器は、種別ごとのファイルにある(`email.go`、`ip.go`、`secret.go`、`uuid.go`、v1.1 の `aws.go`)。
+v1.1 では、既存の検出器に形を加え(`secret` に AWS の署名、`ipv4` に EC2 のホスト名の IPv4。`ipv4Finder` は、
+ドット区切りの `dotted` と、ホスト名の `hosts` に分かれる)、`aws.go` に `aws_account`・`aws_s3_bucket` の検出器と、
+AWS の形の表(パーティション、ドメイン、リージョン、S3 のエンドポイント、ホスト名の末尾の条件)を置いた。
+将来のクラウドや、v1.2 の `aws_host` のホストの表も、同じ形で書き足す。
 
 前処理(3.4 節)用の `may(line, hint)` と `lineHint` は設けない。各検出器が `find` の先頭で、自分の手がかり
 (email は `'@'` の `bytes.IndexByte` など)を探し、なければすぐ戻る。

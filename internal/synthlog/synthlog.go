@@ -4,6 +4,9 @@
 // トークン類、UUID)を含み、一定の間隔で 1MB の JSON を 1 行で挟む。
 // 検出対象でない行には、検出対象になりうる文字列(`@`、IP アドレス、キー名など)を入れない。
 // 同じ設定なら、出力は常に同じになる。
+//
+// Config.AWS を指定すると、検出対象に AWS の値(署名、EC2 のホスト名、ARN、ECR、SQS、S3)を加える
+// (v1.1 の `--types default,aws` の測定用。plans/v1.1.0.md の Q39)。指定しない場合の出力は、v1.0 と同じ。
 package synthlog
 
 import (
@@ -34,6 +37,9 @@ type Config struct {
 	// この数の候補からだけ選ぶ。出力が大きくなっても、値の種類数が増えない。メモリ使用量が、
 	// 入力の大きさでなく、値の種類数に比例することの測定に使う。0 では、行ごとに、ほぼ異なる値になる。
 	ValuePool int
+	// AWS は、検出対象に AWS の値を加えるか(Q39)。加える場合は、通常の行の検出対象の断片の 40% を、
+	// AWS の値の断片にする。false の場合の出力は、このフィールドがなかったとき(v1.0)と 1 バイトも変わらない。
+	AWS bool
 }
 
 // Stats は、作ったログの内訳。
@@ -46,7 +52,7 @@ type Stats struct {
 
 // Generate は、c に従う合成ログを w に書く。
 func Generate(w io.Writer, c Config) (Stats, error) {
-	g := &generator{rng: rand.New(rand.NewPCG(c.Seed, c.Seed^0x9e3779b97f4a7c15)), seed: c.Seed, pool: c.ValuePool}
+	g := &generator{rng: rand.New(rand.NewPCG(c.Seed, c.Seed^0x9e3779b97f4a7c15)), seed: c.Seed, pool: c.ValuePool, aws: c.AWS}
 	bw := bufio.NewWriterSize(w, 64<<10)
 	var st Stats
 	nextLong := c.LongLineEvery
@@ -78,6 +84,7 @@ type generator struct {
 	rng  *rand.Rand
 	seed uint64
 	pool int
+	aws  bool
 }
 
 var (
@@ -158,8 +165,12 @@ func (g *generator) targetFragment() string {
 	if g.pool > 0 {
 		// 候補の番号 k から、決まった値を作る(同じ k なら、同じ値)。
 		k := g.rng.IntN(g.pool)
-		sub := &generator{rng: rand.New(rand.NewPCG(g.seed^0x5bd1e995, uint64(k)+1))}
+		sub := &generator{rng: rand.New(rand.NewPCG(g.seed^0x5bd1e995, uint64(k)+1)), aws: g.aws}
 		return sub.targetFragment()
+	}
+	// AWS を指定しない場合は、乱数を余分に引かない(v1.0 と同じ出力にするため)。
+	if g.aws && g.rng.IntN(10) < 4 {
+		return g.awsFragment()
 	}
 	switch g.rng.IntN(10) {
 	case 0, 1:
@@ -185,6 +196,33 @@ func (g *generator) targetFragment() string {
 	default:
 		return fmt.Sprintf("req=%08x-%04x-4%03x-%x%03x-%012x", g.rng.Uint32(), g.rng.IntN(0x10000), g.rng.IntN(0x1000),
 			8+g.rng.IntN(4), g.rng.IntN(0x1000), g.rng.Uint64()&0xffffffffffff)
+	}
+}
+
+const hexDigits = "0123456789abcdef"
+const digits = "0123456789"
+
+// awsFragment は、AWS の値を 1 つ含む断片を返す(Config.AWS のとき)。
+func (g *generator) awsFragment() string {
+	region := g.pick([]string{"ap-northeast-1", "us-east-1", "eu-west-1", "us-west-2"})
+	switch g.rng.IntN(8) {
+	case 0:
+		return "url=https://" + g.lower(8) + ".s3." + region + ".amazonaws.com/" + g.lower(6) + "?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=" +
+			g.chars(hexDigits, 64)
+	case 1:
+		return fmt.Sprintf("host=ec2-%d-%d-%d-%d.%s.compute.amazonaws.com", 13+g.rng.IntN(40), g.rng.IntN(256), g.rng.IntN(256), 1+g.rng.IntN(254), region)
+	case 2:
+		return fmt.Sprintf("node=ip-10-%d-%d-%d.%s.compute.internal", g.rng.IntN(256), g.rng.IntN(256), 1+g.rng.IntN(254), region)
+	case 3:
+		return "role=arn:aws:iam::" + g.chars(digits, 12) + ":role/" + g.lower(8)
+	case 4:
+		return "image=" + g.chars(digits, 12) + ".dkr.ecr." + region + ".amazonaws.com/" + g.lower(6) + ":latest"
+	case 5:
+		return "queue=https://sqs." + region + ".amazonaws.com/" + g.chars(digits, 12) + "/" + g.lower(6)
+	case 6:
+		return "src=s3://" + g.lower(4) + "-" + g.lower(6) + "/logs/" + g.lower(6) + ".gz"
+	default:
+		return "obj=https://s3." + region + ".amazonaws.com/" + g.lower(4) + "." + g.lower(6) + "/" + g.lower(6)
 	}
 }
 

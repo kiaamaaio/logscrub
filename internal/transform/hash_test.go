@@ -304,23 +304,24 @@ func FuzzHashStable(f *testing.F) {
 	} {
 		f.Add(s)
 	}
-	opts := detect.Options{Kinds: detect.DefaultKinds.With(detect.KindUUID)}
-	det, err := detect.New(opts)
-	if err != nil {
-		f.Fatal(err)
+	for _, s := range awsFuzzSeeds {
+		f.Add(s)
 	}
+	optsList, dets := fuzzOptions(f)
 	f.Fuzz(func(t *testing.T, in string) {
-		for _, mode := range []EmailHash{EmailHashFull, EmailHashLocal} {
-			once, _ := hashRun(t, opts, testKey, 12, mode, in)
-			if strings.Count(once, "\n") != strings.Count(in, "\n") || strings.HasSuffix(in, "\n") != strings.HasSuffix(once, "\n") {
-				t.Fatalf("mode %d: the line structure changed: %q -> %q", mode, in, once)
+		for i, opts := range optsList {
+			for _, mode := range []EmailHash{EmailHashFull, EmailHashLocal} {
+				once, _ := hashRun(t, opts, testKey, 12, mode, in)
+				if strings.Count(once, "\n") != strings.Count(in, "\n") || strings.HasSuffix(in, "\n") != strings.HasSuffix(once, "\n") {
+					t.Fatalf("mode %d: the line structure changed: %q -> %q", mode, in, once)
+				}
+				checkSecondPass(t, dets[i], in, once, func(b []byte) []secondPassSpan {
+					var phs []secondPassSpan
+					label.DefaultFormat.Scan(b, func(s, e int, _ string, _ int) { phs = append(phs, secondPassSpan{s, e}) })
+					label.ScanHashed(b, 12, func(s, e int) { phs = append(phs, secondPassSpan{s, e}) })
+					return phs
+				})
 			}
-			checkSecondPass(t, det, in, once, func(b []byte) []secondPassSpan {
-				var phs []secondPassSpan
-				label.DefaultFormat.Scan(b, func(s, e int, _ string, _ int) { phs = append(phs, secondPassSpan{s, e}) })
-				label.ScanHashed(b, 12, func(s, e int) { phs = append(phs, secondPassSpan{s, e}) })
-				return phs
-			})
 		}
 	})
 }

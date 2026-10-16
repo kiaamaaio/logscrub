@@ -6,11 +6,11 @@ const usageTop = `Usage:
   logscrub restore --source FILE [--source FILE ...] [ANSWER_FILE] [options]
   logscrub types   [--verbose]
 
-mask replaces email addresses, IP addresses, tokens and UUIDs in text with
-labels such as <email_1> (or with keyed hashes). restore puts the original
-values back into text (for example an AI's answer) that contains such labels.
-The text is read from FILE (stdin when FILE is omitted or "-") and written to
-stdout.
+mask replaces email addresses, IP addresses, tokens, UUIDs and AWS values
+(account IDs, S3 bucket names) in text with labels such as <email_1> (or with
+keyed hashes). restore puts the original values back into text (for example
+an AI's answer) that contains such labels. The text is read from FILE (stdin
+when FILE is omitted or "-") and written to stdout.
 
 Run "logscrub <command> --help" for the options of a command.
 `
@@ -39,9 +39,9 @@ Tokens in any other format are not detected.
 
 const usageMask = `Usage: logscrub mask [FILE ...] [options]
 
-Replace email addresses, IP addresses, tokens and UUIDs in FILE (stdin when
-omitted or "-") with labels or hashes. Several FILEs are read in the given
-order as one input (numbering continues across files).
+Replace email addresses, IP addresses, tokens, UUIDs and AWS values in FILE
+(stdin when omitted or "-") with labels or hashes. Several FILEs are read in
+the given order as one input (numbering continues across files).
 
 Options (they may be written before or after FILE):
   --mode mask|hash          mask: <email_1> style labels (default).
