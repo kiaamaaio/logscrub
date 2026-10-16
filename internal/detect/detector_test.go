@@ -46,7 +46,9 @@ func fakeIP(k Kind, class Class, start, end int) *fakeFinder {
 func newTestDetector(t *testing.T, o Options, fs ...finder) *Detector {
 	t.Helper()
 	if o.Kinds == 0 {
-		o.Kinds = KindSet(0).With(KindEmail).With(KindIPv4).With(KindIPv6).With(KindSecret).With(KindUUID)
+		for _, ti := range Types {
+			o.Kinds = o.Kinds.With(ti.Kind)
+		}
 	}
 	d, err := newDetector(o, fs)
 	if err != nil {
@@ -100,8 +102,8 @@ func TestResolveIPv4MappedIPv6(t *testing.T) {
 }
 
 func TestResolveSameLengthUsesKindPriority(t *testing.T) {
-	// 優先順位: email → ipv4 / ipv6 → secret → uuid
-	order := []Kind{KindEmail, KindIPv4, KindSecret, KindUUID}
+	// 優先順位: email → ipv4 / ipv6 → secret → uuid → aws_account → aws_s3_bucket
+	order := []Kind{KindEmail, KindIPv4, KindSecret, KindUUID, KindAWSAccount, KindAWSS3Bucket}
 	for i := 0; i < len(order); i++ {
 		for j := i + 1; j < len(order); j++ {
 			hi, lo := order[i], order[j]

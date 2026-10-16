@@ -104,7 +104,7 @@ func TestAppendKeepsExistingBytes(t *testing.T) {
 }
 
 func TestTypesAreTheDocumentedSet(t *testing.T) {
-	want := []string{"email", "ipv4_global", "ipv4_private", "ipv6_global", "ipv6_private", "secret", "uuid"}
+	want := []string{"email", "ipv4_global", "ipv4_private", "ipv6_global", "ipv6_private", "secret", "uuid", "aws_account", "aws_s3_bucket"}
 	if !equal(Types, want) {
 		t.Errorf("Types = %q, want %q", Types, want)
 	}
@@ -127,6 +127,10 @@ func TestScanDefaultFormat(t *testing.T) {
 			"email|1|<email_1>", "ipv4_global|2|<ipv4_global_2>", "ipv4_private|3|<ipv4_private_3>",
 			"ipv6_global|4|<ipv6_global_4>", "ipv6_private|5|<ipv6_private_5>", "secret|6|<secret_6>", "uuid|7|<uuid_7>",
 		}},
+		{"aws types", "arn:aws:iam::<aws_account_1>:role/x s3://<aws_s3_bucket_2>/a", []string{
+			"aws_account|1|<aws_account_1>", "aws_s3_bucket|2|<aws_s3_bucket_2>",
+		}},
+		{"bare aws prefix", "<aws_1> <aws_s3_1> <aws_account>", nil},
 		{"adjacent", "<email_1><email_2>", []string{"email|1|<email_1>", "email|2|<email_2>"}},
 		{"surrounded by text", "x<secret_3>y", []string{"secret|3|<secret_3>"}},
 		{"nested opening", "<<email_1>>", []string{"email|1|<email_1>"}},

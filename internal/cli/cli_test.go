@@ -144,6 +144,173 @@ func TestMaskLongLine(t *testing.T) {
 	}
 }
 
+// 受け入れ基準(仕様 9 章「AWS」): 署名付き URL の X-Amz-Signature と、SigV4 の Authorization の Signature が、
+// 既定の種別で <secret_N> になる(語と `=` は残る)。64 桁の 16 進数でないものは、署名として置換されない。
+func TestAWSSignature(t *testing.T) {
+	const sig = "fe5f80f77d5fa3beca038a248ff027d0445342fe2855ddc963176630326f1024"
+	in := "GET https://b.s3.amazonaws.com/k?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20130524T000000Z&X-Amz-Signature=" + sig + "&x=1\n" +
+		"Authorization: AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=" + sig + "\n" +
+		"Signature=" + sig[:63] + " Signature=" + sig + "0 Signature=" + strings.ToUpper(sig) + "\n"
+	want := "GET https://b.s3.amazonaws.com/k?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20130524T000000Z&X-Amz-Signature=<secret_1>&x=1\n" +
+		"Authorization: AWS4-HMAC-SHA256 Credential=<secret_2>/20130524/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=<secret_1>\n" +
+		"Signature=" + sig[:63] + " Signature=" + sig + "0 Signature=" + strings.ToUpper(sig) + "\n"
+	r := run(t, in, nil, "mask")
+	if r.code != 0 || r.stdout != want {
+		t.Fatalf("%+v\nwant stdout %q", r, want)
+	}
+	dir := t.TempDir()
+	src := writeFile(t, dir, "app.log", in)
+	back := run(t, r.stdout, nil, "restore", "--source", src)
+	if back.code != 0 || back.stdout != in {
+		t.Errorf("restore: %+v", back)
+	}
+	if again := run(t, r.stdout, nil, "mask"); again.stdout != r.stdout {
+		t.Errorf("mask is not idempotent: %q", again.stdout)
+	}
+}
+
+// 受け入れ基準(仕様 9 章「AWS」): EC2 のホスト名に埋め込まれた IPv4 が、既定の種別で置換される。
+// `-` 区切りと `.` 区切りは別の値(別のラベル)。restore で元に戻り、mask・hash の出力を再度流しても変わらない。
+func TestEC2HostNames(t *testing.T) {
+	in := "ec2-54-250-1-2.ap-northeast-1.compute.amazonaws.com connected from ip-10-0-1-23.ec2.internal\n" +
+		"[ec2-user@ip-10-0-1-23 ~]$ ping 10.0.1.23\n" +
+		"ec2-0-0-0-0.compute-1.amazonaws.com ship-10-0-1-23 ip-10-0-1-256 ip-10-0-1-23-4 ec2-54-250-1-2.example.com\n"
+	want := "ec2-<ipv4_global_1>.ap-northeast-1.compute.amazonaws.com connected from ip-<ipv4_private_1>.ec2.internal\n" +
+		"[ec2-user@ip-<ipv4_private_1> ~]$ ping <ipv4_private_2>\n" +
+		"ec2-0-0-0-0.compute-1.amazonaws.com ship-10-0-1-23 ip-10-0-1-256 ip-10-0-1-23-4 ec2-54-250-1-2.example.com\n"
+	r := run(t, in, nil, "mask")
+	if r.code != 0 || r.stdout != want {
+		t.Fatalf("%+v\nwant stdout %q", r, want)
+	}
+	if g := run(t, "ip-10-0-1-23 ec2-54-250-1-2.compute-1.amazonaws.com\n", nil, "mask", "--ip-scope", "global"); g.stdout != "ip-10-0-1-23 ec2-<ipv4_global_1>.compute-1.amazonaws.com\n" {
+		t.Errorf("--ip-scope global: %+v", g)
+	}
+	dir := t.TempDir()
+	src := writeFile(t, dir, "app.log", in)
+	if back := run(t, r.stdout, nil, "restore", "--source", src); back.code != 0 || back.stdout != in {
+		t.Errorf("restore: %+v", back)
+	}
+	if again := run(t, r.stdout, nil, "mask"); again.stdout != r.stdout || again.stderr == "" {
+		t.Errorf("mask is not idempotent: %+v", again)
+	}
+	env := map[string]string{keyEnv: "test-key"}
+	h := run(t, in, env, "mask", "--mode", "hash")
+	if h.code != 0 || !strings.Contains(h.stdout, "ec2-ipv4_global_") || !strings.Contains(h.stdout, "ip-ipv4_private_") {
+		t.Fatalf("hash: %+v", h)
+	}
+	if again := run(t, h.stdout, env, "mask", "--mode", "hash"); again.stdout != h.stdout {
+		t.Errorf("hash is not idempotent:\n%s\n%s", h.stdout, again.stdout)
+	}
+}
+
+// 受け入れ基準(仕様 9 章「AWS」): ARN・ECR・SQS の、アカウント ID の部分だけが <aws_account_N> になり、
+// 同じアカウント ID は、どの形でも同じラベルになる。既定の種別では置換されない。
+func TestAWSAccount(t *testing.T) {
+	in := "assumed arn:aws:iam::123456789012:role/deployer from 10.0.0.1\n" +
+		"pull 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/app:latest\n" +
+		"send https://sqs.ap-northeast-1.amazonaws.com/123456789012/orders\n" +
+		"arn:aws-cn:s3:::bucket arn:aws:iam::aws:policy/ReadOnlyAccess arn:aws:lambda:ap-northeast-1:210987654321:function:x\n" +
+		"account 123456789012\n"
+	wantAWS := "assumed arn:aws:iam::<aws_account_1>:role/deployer from 10.0.0.1\n" +
+		"pull <aws_account_1>.dkr.ecr.ap-northeast-1.amazonaws.com/app:latest\n" +
+		"send https://sqs.ap-northeast-1.amazonaws.com/<aws_account_1>/orders\n" +
+		"arn:aws-cn:s3:::bucket arn:aws:iam::aws:policy/ReadOnlyAccess arn:aws:lambda:ap-northeast-1:<aws_account_2>:function:x\n" +
+		"account 123456789012\n"
+	// まとまり(aws、cloud)は aws_s3_bucket も含むので、arn:aws-cn:s3:::bucket のバケット名も置換される。
+	wantAccountOnly := wantAWS
+	wantAWS = strings.Replace(wantAWS, "arn:aws-cn:s3:::bucket", "arn:aws-cn:s3:::<aws_s3_bucket_1>", 1)
+	wantDefaultAWS := strings.Replace(wantAWS, "10.0.0.1", "<ipv4_private_1>", 1)
+	for _, tt := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"mask"}, strings.Replace(in, "10.0.0.1", "<ipv4_private_1>", 1)},
+		{[]string{"mask", "--types", "aws"}, wantAWS},
+		{[]string{"mask", "--types", "cloud"}, wantAWS},
+		{[]string{"mask", "--types", "aws_account"}, wantAccountOnly},
+		{[]string{"mask", "--types", "default,aws"}, wantDefaultAWS},
+	} {
+		r := run(t, in, nil, tt.args...)
+		if r.code != 0 || r.stdout != tt.want {
+			t.Errorf("%v: %+v\nwant stdout %q", tt.args, r, tt.want)
+		}
+	}
+	// --stats: aws_account は uuid のあと
+	r := run(t, in+"123e4567-e89b-42d3-a456-426614174000\n", nil, "mask", "--types", "default,uuid,aws", "--stats")
+	if r.stderr != "logscrub: ipv4_private=1\nlogscrub: uuid=1\nlogscrub: aws_account=4\nlogscrub: aws_s3_bucket=1\n" {
+		t.Errorf("--stats: %q", r.stderr)
+	}
+	// restore の往復、mask・hash の冪等性
+	dir := t.TempDir()
+	src := writeFile(t, dir, "app.log", in)
+	masked := run(t, "", nil, "mask", "--types", "default,aws", src)
+	if back := run(t, masked.stdout, nil, "restore", "--source", src, "--types", "default,aws"); back.code != 0 || back.stdout != in {
+		t.Errorf("restore: %+v", back)
+	}
+	if again := run(t, masked.stdout, nil, "mask", "--types", "default,aws"); again.stdout != masked.stdout {
+		t.Errorf("mask is not idempotent: %q", again.stdout)
+	}
+	env := map[string]string{keyEnv: "test-key"}
+	h := run(t, in, env, "mask", "--mode", "hash", "--types", "default,aws")
+	// 決まった形の中の 4 つは hash の出力になり、単独の 12 桁(対象外)だけが残る。
+	if h.code != 0 || strings.Count(h.stdout, "aws_account_") != 4 || strings.Count(h.stdout, "123456789012") != 1 ||
+		!strings.Contains(h.stdout, "account 123456789012\n") {
+		t.Fatalf("hash: %+v", h)
+	}
+	if again := run(t, h.stdout, env, "mask", "--mode", "hash", "--types", "default,aws"); again.stdout != h.stdout {
+		t.Errorf("hash is not idempotent:\n%s\n%s", h.stdout, again.stdout)
+	}
+}
+
+// 受け入れ基準(仕様 9 章「AWS」): s3://・s3a://・s3n://、バーチャルホスト形式(`.` を含むバケット名を含む)、
+// パス形式、arn:aws:s3::: のバケット名の部分だけが <aws_s3_bucket_N> になり、同じバケットは同じラベルになる。
+// バケット名の規則に合わないものは置換されない。
+func TestAWSS3Bucket(t *testing.T) {
+	in := "cp s3://my-bucket/logs/a.gz s3a://my-bucket/x s3n://other-bucket/y\n" +
+		"GET https://my-bucket.s3.ap-northeast-1.amazonaws.com/a.txt https://logs.example.com.s3.amazonaws.com/b\n" +
+		"GET https://s3.ap-northeast-1.amazonaws.com/my-bucket/a.txt\n" +
+		`{"Resource": "arn:aws:s3:::my-bucket/logs/*", "Principal": "arn:aws:iam::123456789012:root"}` + "\n" +
+		"s3://ab/ s3://" + strings.Repeat("a", 64) + "/ s3://My-Bucket/ s3://abc_def/ s3://.abc/ s3://abc-/ s3://10.0.0.1/\n"
+	want := "cp s3://<aws_s3_bucket_1>/logs/a.gz s3a://<aws_s3_bucket_1>/x s3n://<aws_s3_bucket_2>/y\n" +
+		"GET https://<aws_s3_bucket_1>.s3.ap-northeast-1.amazonaws.com/a.txt https://<aws_s3_bucket_3>.s3.amazonaws.com/b\n" +
+		"GET https://s3.ap-northeast-1.amazonaws.com/<aws_s3_bucket_1>/a.txt\n" +
+		`{"Resource": "arn:aws:s3:::<aws_s3_bucket_1>/logs/*", "Principal": "arn:aws:iam::<aws_account_1>:root"}` + "\n" +
+		"s3://ab/ s3://" + strings.Repeat("a", 64) + "/ s3://My-Bucket/ s3://abc_def/ s3://.abc/ s3://abc-/ s3://<ipv4_private_1>/\n"
+	r := run(t, in, nil, "mask", "--types", "default,aws")
+	if r.code != 0 || r.stdout != want {
+		t.Fatalf("%+v\nwant stdout %q", r, want)
+	}
+	if c := run(t, in, nil, "mask", "--types", "cloud"); c.stdout != run(t, in, nil, "mask", "--types", "aws").stdout ||
+		!strings.Contains(c.stdout, "s3://<aws_s3_bucket_1>/") || strings.Contains(c.stdout, "<ipv4_") {
+		t.Errorf("--types cloud: %+v", c)
+	}
+	if d := run(t, in, nil, "mask"); strings.Contains(d.stdout, "aws_") || !strings.Contains(d.stdout, "s3://my-bucket/") {
+		t.Errorf("default types replaced AWS values: %q", d.stdout)
+	}
+	// --stats: aws_account、aws_s3_bucket の順で、uuid のあと
+	st := run(t, in, nil, "mask", "--types", "default,aws", "--stats")
+	if st.stderr != "logscrub: ipv4_private=1\nlogscrub: aws_account=1\nlogscrub: aws_s3_bucket=7\n" {
+		t.Errorf("--stats: %q", st.stderr)
+	}
+	// restore の往復、mask・hash の冪等性
+	dir := t.TempDir()
+	src := writeFile(t, dir, "app.log", in)
+	if back := run(t, r.stdout, nil, "restore", "--source", src, "--types", "default,aws"); back.code != 0 || back.stdout != in {
+		t.Errorf("restore: %+v", back)
+	}
+	if again := run(t, r.stdout, nil, "mask", "--types", "default,aws"); again.stdout != r.stdout {
+		t.Errorf("mask is not idempotent: %q", again.stdout)
+	}
+	env := map[string]string{keyEnv: "test-key"}
+	h := run(t, in, env, "mask", "--mode", "hash", "--types", "default,aws")
+	if h.code != 0 || strings.Count(h.stdout, "aws_s3_bucket_") != 7 || strings.Contains(h.stdout, "my-bucket") {
+		t.Fatalf("hash: %+v", h)
+	}
+	if again := run(t, h.stdout, env, "mask", "--mode", "hash", "--types", "default,aws"); again.stdout != h.stdout {
+		t.Errorf("hash is not idempotent:\n%s\n%s", h.stdout, again.stdout)
+	}
+}
+
 // ---- 種別の指定 ----
 
 func TestTypes(t *testing.T) {
@@ -160,6 +327,12 @@ func TestTypes(t *testing.T) {
 		{"uuid versions v4", []string{"mask", "--uuid-versions", "4"}, "<email_1> <ipv4_private_1> <uuid_1>\n"},
 		{"uuid versions v7 only", []string{"mask", "--uuid-versions", "7"}, "<email_1> <ipv4_private_1> 123e4567-e89b-42d3-a456-426614174000\n"},
 		{"uuid versions override types", []string{"mask", "--types", "default,uuid", "--uuid-versions", "7"}, "<email_1> <ipv4_private_1> 123e4567-e89b-42d3-a456-426614174000\n"},
+		// AWS の種別だけを指定すると、既定の種別は含まない(入力に AWS の値がないので、何も置換しない)。
+		{"aws only", []string{"mask", "--types", "aws"}, "a@x.com 10.0.0.1 123e4567-e89b-42d3-a456-426614174000\n"},
+		{"cloud only", []string{"mask", "--types", "cloud"}, "a@x.com 10.0.0.1 123e4567-e89b-42d3-a456-426614174000\n"},
+		{"aws types by name", []string{"mask", "--types", "aws_account,aws_s3_bucket"}, "a@x.com 10.0.0.1 123e4567-e89b-42d3-a456-426614174000\n"},
+		{"default and aws", []string{"mask", "--types", "default,aws"}, "<email_1> <ipv4_private_1> 123e4567-e89b-42d3-a456-426614174000\n"},
+		{"default and cloud", []string{"mask", "--types", "default,cloud"}, "<email_1> <ipv4_private_1> 123e4567-e89b-42d3-a456-426614174000\n"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			r := run(t, in, nil, tt.args...)
@@ -184,6 +357,9 @@ func TestInvalidOptionValuesAreErrors(t *testing.T) {
 		{"mask", "--mask-format", "{type}{type}{n}"},
 		{"mask", "--mode", "encrypt"},
 		{"restore", "--source", "x", "--types", "foo"},
+		{"mask", "--types", "AWS"},
+		{"mask", "--types", "default,aws_host"},
+		{"restore", "--source", "x", "--types", "aws_"},
 		{"restore", "--source", "x", "--mask-format", "{n}"},
 	} {
 		r := run(t, "a@x.com\n", nil, args...)
@@ -606,7 +782,13 @@ func TestHelp(t *testing.T) {
 	}
 	// mask の --help には、secret の対応形式を列挙する(仕様 4.1)
 	r := run(t, "", nil, "mask", "--help")
-	for _, want := range []string{"AKIA", "ghp_", "xoxb-", "sk_live_", "AIza", "sk-", "JWT", "Bearer", "password"} {
+	for _, want := range []string{"AKIA", "X-Amz-Signature=", "Signature=", "ghp_", "xoxb-", "sk_live_", "AIza", "sk-", "JWT", "Bearer", "password"} {
+		if !strings.Contains(r.stdout, want) {
+			t.Errorf("mask --help lacks %q", want)
+		}
+	}
+	// --types の説明に、種別とまとまりを出す
+	for _, want := range []string{"uuid", "aws_account", "aws_s3_bucket", "default", "aws,", "cloud"} {
 		if !strings.Contains(r.stdout, want) {
 			t.Errorf("mask --help lacks %q", want)
 		}
@@ -620,26 +802,42 @@ func TestTypesCommand(t *testing.T) {
 	if r.code != 0 || r.stderr != "" {
 		t.Fatalf("%+v", r)
 	}
-	for _, want := range []string{"email", "ipv4", "ipv6", "secret", "uuid", "default"} {
-		if !strings.Contains(r.stdout, want) {
-			t.Errorf("types lacks %q:\n%s", want, r.stdout)
-		}
+	// 1 行 1 種別(種別 ID、既定、説明)。共通の種別のあとに、クラウドごとにまとめる(仕様 6 章)。
+	wantDefault := map[string]string{
+		"email": "on", "ipv4": "on", "ipv6": "on", "secret": "on", "uuid": "off", "aws_account": "off", "aws_s3_bucket": "off",
 	}
-	// uuid だけが、既定で無効
+	var order []string
 	for _, line := range strings.Split(r.stdout, "\n") {
 		fields := strings.Fields(line)
-		if len(fields) >= 2 && fields[0] == "uuid" && fields[1] != "off" {
-			t.Errorf("uuid line: %q", line)
+		if len(fields) < 3 {
+			continue
 		}
-		if len(fields) >= 2 && fields[0] == "email" && fields[1] != "on" {
-			t.Errorf("email line: %q", line)
+		if want, ok := wantDefault[fields[0]]; ok {
+			order = append(order, fields[0])
+			if fields[1] != want {
+				t.Errorf("%s line: %q, want %q", fields[0], line, want)
+			}
 		}
+	}
+	if got := strings.Join(order, ","); got != "email,ipv4,ipv6,secret,uuid,aws_account,aws_s3_bucket" {
+		t.Errorf("type order: %s", got)
+	}
+	if !strings.Contains(r.stdout, "\nAWS:\naws_account ") {
+		t.Errorf("types lacks the AWS heading:\n%s", r.stdout)
+	}
+	// 最後に、まとまりと、それぞれに含まれる種別。
+	if !strings.HasSuffix(r.stdout, "\nGroups for --types:\n"+
+		"  default  email, ipv4, ipv6, secret\n"+
+		"  aws      aws_account, aws_s3_bucket\n"+
+		"  cloud    aws_account, aws_s3_bucket\n") {
+		t.Errorf("types lacks the groups:\n%s", r.stdout)
 	}
 	if strings.Contains(r.stdout, "AKIA") {
 		t.Error("types without --verbose lists the secret formats")
 	}
 	v := run(t, "", nil, "types", "--verbose")
-	if v.code != 0 || !strings.Contains(v.stdout, "AKIA") || !strings.Contains(v.stdout, "ghp_") || !strings.Contains(v.stdout, "password") {
+	if v.code != 0 || !strings.Contains(v.stdout, "AKIA") || !strings.Contains(v.stdout, "X-Amz-Signature=") ||
+		!strings.Contains(v.stdout, "ghp_") || !strings.Contains(v.stdout, "password") {
 		t.Errorf("--verbose: %+v", v)
 	}
 	if !strings.HasPrefix(v.stdout, r.stdout) {

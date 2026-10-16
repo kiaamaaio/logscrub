@@ -2,6 +2,8 @@ package synthlog
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"regexp"
 	"strings"
@@ -156,5 +158,44 @@ func TestGenerateValuePoolIsDeterministicAndValid(t *testing.T) {
 		if len(line) >= 1<<20 && !json.Valid(line) {
 			t.Fatal("a long line is not valid JSON")
 		}
+	}
+}
+
+// Q39: AWS を指定しない合成ログは、v1.0 と 1 バイトも変わらない(v1.0 の測定結果と比べられるように)。
+// 期待値は、AWS の設定を加える前の実装の出力の SHA-256(2026-10-17 に記録)。
+func TestGenerateWithoutAWSIsUnchangedFromV1_0(t *testing.T) {
+	for _, tt := range []struct {
+		c    Config
+		want string
+	}{
+		{Config{Size: 2 << 20, Seed: 7, LongLineEvery: 1 << 20}, "8039df96ce41b69ca0a5fcc11375a56d846695812912a742c18c3999ea4c8e5d"},
+		{Config{Size: 2 << 20, Seed: 3, LongLineEvery: 1 << 20, ValuePool: 40}, "8cc167e5c2d8a88af07354301c434636198a75298293d81c7c5e61b53f25fbb0"},
+	} {
+		out, _ := generate(t, tt.c)
+		sum := sha256.Sum256(out)
+		if got := hex.EncodeToString(sum[:]); got != tt.want {
+			t.Errorf("%+v: sha256 = %s, want %s", tt.c, got, tt.want)
+		}
+	}
+}
+
+// AWS を指定すると、AWS の各形の値を含み、検出対象を含む行の割合は変わらない。
+func TestGenerateWithAWS(t *testing.T) {
+	out, st := generate(t, Config{Size: 4 << 20, Seed: 1, AWS: true})
+	for _, marker := range []string{
+		"X-Amz-Signature=", "host=ec2-", "node=ip-", "arn:aws:iam::", ".dkr.ecr.", "https://sqs.", "s3://", "https://s3.",
+		// 既定の種別の値も、引き続き含む
+		"@example.", "AKIA", "password=",
+	} {
+		if !bytes.Contains(out, []byte(marker)) {
+			t.Errorf("output lacks marker %q", marker)
+		}
+	}
+	if p := 100 * st.TargetLines / st.Lines; p < 25 || p > 35 {
+		t.Errorf("target lines = %d%%, want about 30%%", p)
+	}
+	plain, _ := generate(t, Config{Size: 4 << 20, Seed: 1})
+	if bytes.Equal(out, plain) {
+		t.Error("AWS: true produced the same output as the default")
 	}
 }

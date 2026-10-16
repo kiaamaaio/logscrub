@@ -4,7 +4,7 @@
 版ごとの実装計画と進捗は [plans/](plans/) にある(この資料の内容は、v1.0.0 の実装計画から移した)。
 
 - 仕様: [SPEC.md](SPEC.md)(以下「仕様」。節番号は仕様のもの)
-- 文中の Q 番号(Q1〜Q31)は、[plans/v1.0.0.md](plans/v1.0.0.md) 5 章「未確定事項」の項目(すべて確定済み)
+- 文中の Q 番号は、Q1〜Q31 が [plans/v1.0.0.md](plans/v1.0.0.md)、Q32〜Q46 が [plans/v1.1.0.md](plans/v1.1.0.md) の 5 章「未確定事項」の項目(すべて確定済み)
 
 ---
 
@@ -30,6 +30,11 @@
 - 前提: ホストのユーザーが Docker を使えること
   - ホストの Docker は snap 版(29.8.0、サービス名は `snap.docker.dockerd.service`、再起動は `sudo snap restart docker`)。snap 版はホームディレクトリ配下しかマウントできない
   - 2026-10-11 に `docker` グループを作成し、ソケットが `root:docker` になったことを確認した。上の表の `-u`、`--network none`、`GOTOOLCHAIN=local`、リポジトリと `.` で始まるディレクトリのマウントが動くことも確認済み。`.cache/` への書き込みも、段階 1 で動くことを確認した(ビルドキャッシュが作られ、所有者はホストのユーザー)
+- Claude Code によるコミットの前の確認: `.claude/settings.json` の PreToolUse hook が、Claude が Bash で `git commit` を実行する直前に `scripts/claude-commit-check` を呼ぶ。`./scripts/go test ./...` と `./scripts/go vet ./...` を実行し、どちらかが失敗するとコミットを止める(終了コード 2。失敗の出力は Claude に返る)
+  - 対象は Claude のコミットだけ。人が手でするコミットには効かない
+  - 確認するのは作業ツリーの状態で、ステージした内容だけではない
+  - Docker が使えずテストを実行できない場合も、コミットを止める
+  - スクリプトを起動できない場合(ファイルが無いなど)は、`onFailure: "block"` により Claude の Bash の実行がすべて止まる
 
 ---
 
@@ -48,8 +53,9 @@ logscrub/
 │   ├── detect/                  # 種別ごとの検出、重なりの解決、置換対象外の除外
 │   ├── transform/               # mask.go, hash.go, restore.go, engine.go(行の書き換え)
 │   ├── stream/                  # 行単位の入出力(改行コード・末尾改行の保持)
-│   └── synthlog/                # 【追加】性能測定用の合成ログの生成器(Q29)
-└── (各パッケージの testdata/)   # 往復テスト・E2E 用の入力と期待出力(実際は internal/transform/testdata/)
+│   └── synthlog/                # 【追加】性能測定用の合成ログの生成器(Q29。v1.1 で AWS の値を含める設定を追加。Q39)
+└── (各パッケージの testdata/)   # 往復テスト・E2E 用の入力と期待出力(実際は internal/transform/testdata/。
+                                 #   app.log と、v1.1 の AWS の値の aws.log、それぞれの mask の期待値)
 ```
 
 ### 仕様 8 章から変える点と理由
@@ -85,8 +91,10 @@ func Copy(w io.Writer, inputs ...io.Reader) error
 **label**
 
 ```go
-// 置換後の種別名。IP は区別を含む。並びは連番・--stats の出力順にも使う。
-var Types = []string{"email", "ipv4_global", "ipv4_private", "ipv6_global", "ipv6_private", "secret", "uuid"}
+// 置換後の種別名。IP は区別を含む。並びは連番・--stats の出力順にも使う(aws_* は v1.1 で追加)。
+var Types = []string{"email", "ipv4_global", "ipv4_private", "ipv6_global", "ipv6_private", "secret", "uuid",
+    "aws_account", "aws_s3_bucket"}
+const NumTypes = 9                                  // len(Types)。統計・連番の表を固定長の配列で持つため
 
 type Format struct { ... }                          // '<{type}_{n}>' を前後・中間のリテラルに分解したもの
 func ParseFormat(s string) (Format, error)          // {type} と {n} を含まなければエラー
@@ -100,7 +108,8 @@ func ScanHashed(line []byte, hexLen int, fn func(start, end int))
 **detect**
 
 ```go
-type Kind uint8   // KindEmail, KindIPv4, KindIPv6, KindSecret, KindUUID(0 は無効)
+type Kind uint8   // KindEmail, KindIPv4, KindIPv6, KindSecret, KindUUID, KindAWSAccount, KindAWSS3Bucket(0 は無効)
+type KindSet uint32 // ビット k が Kind k(v1.1 で uint8 から広げた。v1.2 の aws_host で 8 ビットを超えるため)
 type Class uint8  // ClassNone, ClassGlobal, ClassPrivate, ClassSpecial(IP のみ使用)
 
 type Match struct {
@@ -110,7 +119,17 @@ type Match struct {
 }
 func (m Match) LabelType() string  // "email", "ipv4_private" など
 
-func ParseTypes(spec string) (KindSet, error)  // "default,uuid" → 集合。不明な名前はエラー(完全一致のみ)
+// TypeInfo は、--types に書ける種別 1 つ(種別、既定で有効か、クラウド名)。Types は、その一覧
+// (共通の種別のあとに、クラウドごとにまとめる。logscrub types とエラーメッセージの順)。
+type TypeInfo struct { Kind Kind; Default bool; Cloud string }
+var Types []TypeInfo
+// Group は、種別のまとまり。Groups(default、クラウド名(aws)、cloud)は Types から求める
+// (種別を足したとき、まとまりの定義を書き換えなくて済むように。plans/v1.1.0.md 2.1)。
+type Group struct { Name string; Kinds KindSet }
+var Groups []Group
+var DefaultKinds KindSet                       // Types の Default から求める
+
+func ParseTypes(spec string) (KindSet, error)  // "default,aws" → 集合。Groups と Types から引く。不明な名前はエラー(完全一致のみ)
 
 type Options struct {
     Kinds        KindSet
@@ -138,6 +157,12 @@ type finder interface {
     find(line []byte, dst []Match) []Match           // 候補を追記(重なりはまだ解決しない)
 }
 ```
+
+検出器は、種別ごとのファイルにある(`email.go`、`ip.go`、`secret.go`、`uuid.go`、v1.1 の `aws.go`)。
+v1.1 では、既存の検出器に形を加え(`secret` に AWS の署名、`ipv4` に EC2 のホスト名の IPv4。`ipv4Finder` は、
+ドット区切りの `dotted` と、ホスト名の `hosts` に分かれる)、`aws.go` に `aws_account`・`aws_s3_bucket` の検出器と、
+AWS の形の表(パーティション、ドメイン、リージョン、S3 のエンドポイント、ホスト名の末尾の条件)を置いた。
+将来のクラウドや、v1.2 の `aws_host` のホストの表も、同じ形で書き足す。
 
 前処理(3.4 節)用の `may(line, hint)` と `lineHint` は設けない。各検出器が `find` の先頭で、自分の手がかり
 (email は `'@'` の `bytes.IndexByte` など)を探し、なければすぐ戻る。
@@ -225,6 +250,17 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 - 入出力: `bufio.Reader`(64KB)の `ReadSlice` で、改行までがバッファに収まる通常の行はコピーしない。`bufio.Writer` で書く。置換のない行は読んだスライスをそのまま書く
 - 前処理: 各検出器が、自分の手がかりを `bytes.IndexByte` / `bytes.Index` で探し、なければ戻る(行ごとに 1 回の走査で作るヒントの集合は、段階 3 の測定で約 14 倍遅かったため採用しない)
   - email: `@` がある / IPv4: `.` と数字がある / IPv6: `:` がある / uuid: `-` があり、行の長さが 36 以上 / キー名ベース: `=` か `:` がある / 固定形式の secret: 接頭辞リテラルを `bytes.Index` で探す
+  - v1.1 で加えた手がかり:
+    - AWS の署名(secret): `=` を探し、手前の 9 バイトが `signature`(大文字・小文字を区別しない)か、さらに手前が `x-amz-` かを照合する
+    - EC2 のホスト名の IPv4(ipv4): `-` を探し、手前が `ec2` / `ip`、後ろが数字のときだけ、正規表現を当てる
+    - aws_account: ARN は `:` を探し、手前が `arn` か。ECR と SQS は `.amazonaws.` を手がかりにし、手前のリージョンを遡って、その手前が `.dkr.ecr` / `.dkr.ecr-fips` / `sqs` / `queue` かを見る
+    - aws_s3_bucket: `s3://`・`s3a://`・`s3n://` は `://`、バーチャルホスト形式・パス形式は `.amazonaws.`、ARN は `:s3:::`
+    - `.amazonaws.` は、`amazonaws` の中の `z` を `bytes.IndexByte` で探してから前後を照合する(`nextAmazonaws`。aws_account と aws_s3_bucket で共用)
+  - **手がかりの先頭の文字が、文中に多い文字(英小文字の `a` `e` `i` `s`、`.` など)の場合は、`bytes.Index` で探さない。**
+    `bytes.Index` は、先頭の 1 バイトを `bytes.IndexByte` で探して照合する経路で始まり、外れが多いと、遅い汎用の経路に切り替わる。
+    手がかりの中の、文中に少ない 1 バイト(`:` `-` `=` `z` など)を `bytes.IndexByte` で探してから、前後を照合する
+    - v1.1 の実測(8MB の合成ログ、1 パスあたり): `ec2-` / `ip-` の `bytes.Index` は約 5 倍遅く、既定の種別の `BenchmarkFind` が約 15% 落ちた(段階 3)。
+      aws_account は、`arn:`・`.dkr.ecr`・`sqs.`・`queue.amazonaws.com` の `bytes.Index` で約 9.4ms、上の方法で約 1.7ms(段階 6 のあとの改善)
 - 正規表現は「アンカーの周辺だけ」に当てる(例: email は最初の `@` のローカルパートの先頭から、キー名ベースは区切り文字の手前から)。1MB の 1 行でも、手がかりのない区間に正規表現を当てない。段階 3 の測定では、行全体に当てる場合の約 15 倍速かった
 - メモリ割り当て: `Match` のスライス・出力バッファは再利用。map の参照は `m[string(b)]`(Go はこの形で割り当てしない)、新しい値のときだけ文字列を作る
 - 計測: 段階 2 でベンチマーク(`b.SetBytes` で MB/s を出す)と合成ログ生成器を用意し、段階 3 以降は毎回測って実装計画(plans/)の進捗欄に記録する。合成ログの中身(一致を含む行の割合など)は → Q29

@@ -307,6 +307,32 @@ func TestStatsCountsOccurrencesInTypeOrder(t *testing.T) {
 	}
 }
 
+// 受け入れ基準: `--stats` で、aws_account・aws_s3_bucket の件数が uuid のあとに出る(仕様 6 章)。
+// 数える順に関係なく、label.Types の順に並ぶ。
+func TestStatsOrderIncludesAWSTypes(t *testing.T) {
+	var st Stats
+	for _, m := range []detect.Match{
+		{Kind: detect.KindAWSS3Bucket}, {Kind: detect.KindAWSAccount}, {Kind: detect.KindAWSS3Bucket},
+		{Kind: detect.KindUUID}, {Kind: detect.KindSecret}, {Kind: detect.KindEmail},
+		{Kind: detect.KindIPv4, Class: detect.ClassGlobal},
+	} {
+		st.add(m)
+	}
+	want := []TypeCount{{"email", 1}, {"ipv4_global", 1}, {"secret", 1}, {"uuid", 1}, {"aws_account", 1}, {"aws_s3_bucket", 2}}
+	got := st.Types()
+	if len(got) != len(want) {
+		t.Fatalf("Types() = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Types()[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if st.Total() != 7 || st.Count("aws_s3_bucket") != 2 {
+		t.Errorf("Total() = %d, Count(aws_s3_bucket) = %d", st.Total(), st.Count("aws_s3_bucket"))
+	}
+}
+
 func TestStatsKeptLines(t *testing.T) {
 	_, st := mask(t, detect.Options{},
 		"ok\n<email_1> and <email_2>\nx\npassword=<secret_1>\n", "y\n<uuid_1>\n")
