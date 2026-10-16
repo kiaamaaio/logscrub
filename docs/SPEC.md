@@ -158,6 +158,7 @@ URL のパスワード(v1.2 で追加):
   - 例: `postgres://app:s3cret@mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432/app` → `postgres://app:<secret_1>@mydb.cluster-…`(`aws_host` も有効なら `postgres://app:<secret_1>@<aws_host_1>.ap-northeast-1.rds.amazonaws.com:5432/app`)
 - この形のときは、`@` の前後をメールアドレスとして検出しない(4 章「範囲が重なった場合」の例外)。v1.1 までは、`s3cret@mydb….amazonaws.com` 全体がメールアドレスとして置換され、ホスト名の情報が消えていた。また、ホストが IP アドレスの場合は、パスワードがそのまま残っていた
   - ユーザーだけの形(`https://taro@example.com/`)は、この形に当たらない。メールアドレスの扱いは変わらない
+  - `secret` が無効な場合(`--types email` など)も、この形の `@` はメールアドレスとして扱わない(メールアドレスの判定が、他の種別の有効・無効で変わらないようにするため。Q54)。この場合、パスワードは置換されずに残る
 - ホスト名の部分は、通常どおり、他の種別(`ipv4`・`ipv6`・`aws_host` など)として検出される
 
 AWS の署名(SigV4。v1.1 で追加):
@@ -719,7 +720,7 @@ CLI:
 
 ## 11. 未決事項
 
-なし(v1.1 の細部は [plans/v1.1.0.md](plans/v1.1.0.md) 5 章の Q32〜Q46、v1.2 の細部は [plans/v1.2.0.md](plans/v1.2.0.md) 5 章の Q47〜Q53 で確定済み)
+なし(v1.1 の細部は [plans/v1.1.0.md](plans/v1.1.0.md) 5 章の Q32〜Q46、v1.2 の細部は [plans/v1.2.0.md](plans/v1.2.0.md) 5 章の Q47〜Q54 で確定済み)
 
 ---
 
