@@ -30,6 +30,11 @@
 - 前提: ホストのユーザーが Docker を使えること
   - ホストの Docker は snap 版(29.8.0、サービス名は `snap.docker.dockerd.service`、再起動は `sudo snap restart docker`)。snap 版はホームディレクトリ配下しかマウントできない
   - 2026-10-11 に `docker` グループを作成し、ソケットが `root:docker` になったことを確認した。上の表の `-u`、`--network none`、`GOTOOLCHAIN=local`、リポジトリと `.` で始まるディレクトリのマウントが動くことも確認済み。`.cache/` への書き込みも、段階 1 で動くことを確認した(ビルドキャッシュが作られ、所有者はホストのユーザー)
+- Claude Code によるコミットの前の確認: `.claude/settings.json` の PreToolUse hook が、Claude が Bash で `git commit` を実行する直前に `scripts/claude-commit-check` を呼ぶ。`./scripts/go test ./...` と `./scripts/go vet ./...` を実行し、どちらかが失敗するとコミットを止める(終了コード 2。失敗の出力は Claude に返る)
+  - 対象は Claude のコミットだけ。人が手でするコミットには効かない
+  - 確認するのは作業ツリーの状態で、ステージした内容だけではない
+  - Docker が使えずテストを実行できない場合も、コミットを止める
+  - スクリプトを起動できない場合(ファイルが無いなど)は、`onFailure: "block"` により Claude の Bash の実行がすべて止まる
 
 ---
 

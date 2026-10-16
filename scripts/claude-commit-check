@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Claude Code の PreToolUse hook(.claude/settings.json)から呼ばれる。
+# Claude が Bash で git commit を実行する前に test と vet を実行し、
+# どちらかが失敗したら終了コード 2 でコミットを止める(stderr は Claude に返る)。
+# 標準入力は hook の入力(JSON)。git commit を含まないコマンドは何もせず通す。
+set -uo pipefail
+
+input="$(cat)"
+
+# JSON を解析せず、コマンド文字列に「git commit」(git -C <dir> commit も含む)があるかだけを見る
+if ! grep -Eq '(^|[^[:alnum:]_-])git[[:space:]]+(-C[[:space:]]+[^[:space:]]+[[:space:]]+)?commit([[:space:]]|\\|"|$)' <<<"$input"; then
+  exit 0
+fi
+
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if ! out="$("$repo/scripts/go" test ./... 2>&1)"; then
+  printf 'コミットを中止しました: ./scripts/go test ./... が失敗しました。\n%s\n' "$out" >&2
+  exit 2
+fi
+
+if ! out="$("$repo/scripts/go" vet ./... 2>&1)"; then
+  printf 'コミットを中止しました: ./scripts/go vet ./... が失敗しました。\n%s\n' "$out" >&2
+  exit 2
+fi
+
+exit 0

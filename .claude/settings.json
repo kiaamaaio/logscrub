@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/scripts/claude-commit-check",
+            "timeout": 600,
+            "onFailure": "block",
+            "statusMessage": "コミット前の test と vet を実行中..."
+          }
+        ]
+      }
+    ]
+  }
+}
