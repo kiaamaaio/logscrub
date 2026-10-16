@@ -160,6 +160,12 @@ func TestTypes(t *testing.T) {
 		{"uuid versions v4", []string{"mask", "--uuid-versions", "4"}, "<email_1> <ipv4_private_1> <uuid_1>\n"},
 		{"uuid versions v7 only", []string{"mask", "--uuid-versions", "7"}, "<email_1> <ipv4_private_1> 123e4567-e89b-42d3-a456-426614174000\n"},
 		{"uuid versions override types", []string{"mask", "--types", "default,uuid", "--uuid-versions", "7"}, "<email_1> <ipv4_private_1> 123e4567-e89b-42d3-a456-426614174000\n"},
+		// AWS の種別は受け付けるが、段階 1 では検出器がないので、何も置換しない(既定の種別も含まない)。
+		{"aws only", []string{"mask", "--types", "aws"}, "a@x.com 10.0.0.1 123e4567-e89b-42d3-a456-426614174000\n"},
+		{"cloud only", []string{"mask", "--types", "cloud"}, "a@x.com 10.0.0.1 123e4567-e89b-42d3-a456-426614174000\n"},
+		{"aws types by name", []string{"mask", "--types", "aws_account,aws_s3_bucket"}, "a@x.com 10.0.0.1 123e4567-e89b-42d3-a456-426614174000\n"},
+		{"default and aws", []string{"mask", "--types", "default,aws"}, "<email_1> <ipv4_private_1> 123e4567-e89b-42d3-a456-426614174000\n"},
+		{"default and cloud", []string{"mask", "--types", "default,cloud"}, "<email_1> <ipv4_private_1> 123e4567-e89b-42d3-a456-426614174000\n"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			r := run(t, in, nil, tt.args...)
@@ -184,6 +190,9 @@ func TestInvalidOptionValuesAreErrors(t *testing.T) {
 		{"mask", "--mask-format", "{type}{type}{n}"},
 		{"mask", "--mode", "encrypt"},
 		{"restore", "--source", "x", "--types", "foo"},
+		{"mask", "--types", "AWS"},
+		{"mask", "--types", "default,aws_host"},
+		{"restore", "--source", "x", "--types", "aws_"},
 		{"restore", "--source", "x", "--mask-format", "{n}"},
 	} {
 		r := run(t, "a@x.com\n", nil, args...)
@@ -611,6 +620,12 @@ func TestHelp(t *testing.T) {
 			t.Errorf("mask --help lacks %q", want)
 		}
 	}
+	// --types の説明に、種別とまとまりを出す
+	for _, want := range []string{"uuid", "aws_account", "aws_s3_bucket", "default", "aws,", "cloud"} {
+		if !strings.Contains(r.stdout, want) {
+			t.Errorf("mask --help lacks %q", want)
+		}
+	}
 }
 
 // ---- types ----
@@ -620,20 +635,35 @@ func TestTypesCommand(t *testing.T) {
 	if r.code != 0 || r.stderr != "" {
 		t.Fatalf("%+v", r)
 	}
-	for _, want := range []string{"email", "ipv4", "ipv6", "secret", "uuid", "default"} {
-		if !strings.Contains(r.stdout, want) {
-			t.Errorf("types lacks %q:\n%s", want, r.stdout)
-		}
+	// 1 行 1 種別(種別 ID、既定、説明)。共通の種別のあとに、クラウドごとにまとめる(仕様 6 章)。
+	wantDefault := map[string]string{
+		"email": "on", "ipv4": "on", "ipv6": "on", "secret": "on", "uuid": "off", "aws_account": "off", "aws_s3_bucket": "off",
 	}
-	// uuid だけが、既定で無効
+	var order []string
 	for _, line := range strings.Split(r.stdout, "\n") {
 		fields := strings.Fields(line)
-		if len(fields) >= 2 && fields[0] == "uuid" && fields[1] != "off" {
-			t.Errorf("uuid line: %q", line)
+		if len(fields) < 3 {
+			continue
 		}
-		if len(fields) >= 2 && fields[0] == "email" && fields[1] != "on" {
-			t.Errorf("email line: %q", line)
+		if want, ok := wantDefault[fields[0]]; ok {
+			order = append(order, fields[0])
+			if fields[1] != want {
+				t.Errorf("%s line: %q, want %q", fields[0], line, want)
+			}
 		}
+	}
+	if got := strings.Join(order, ","); got != "email,ipv4,ipv6,secret,uuid,aws_account,aws_s3_bucket" {
+		t.Errorf("type order: %s", got)
+	}
+	if !strings.Contains(r.stdout, "\nAWS:\naws_account ") {
+		t.Errorf("types lacks the AWS heading:\n%s", r.stdout)
+	}
+	// 最後に、まとまりと、それぞれに含まれる種別。
+	if !strings.HasSuffix(r.stdout, "\nGroups for --types:\n"+
+		"  default  email, ipv4, ipv6, secret\n"+
+		"  aws      aws_account, aws_s3_bucket\n"+
+		"  cloud    aws_account, aws_s3_bucket\n") {
+		t.Errorf("types lacks the groups:\n%s", r.stdout)
 	}
 	if strings.Contains(r.stdout, "AKIA") {
 		t.Error("types without --verbose lists the secret formats")

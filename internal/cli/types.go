@@ -3,19 +3,24 @@ package cli
 import (
 	"fmt"
 	"strings"
+
+	"github.com/kiaamaaio/logscrub/internal/detect"
 )
 
-// typeEntry は、`logscrub types` の 1 行。
-type typeEntry struct {
-	id, onByDefault, description string
+// typeDescriptions は、`logscrub types` の説明。種別の並び・既定・まとまりは、detect.Types と detect.Groups による。
+var typeDescriptions = map[detect.Kind]string{
+	detect.KindEmail:       "email addresses",
+	detect.KindIPv4:        "IPv4 addresses (labels: ipv4_global, ipv4_private; special addresses are kept)",
+	detect.KindIPv6:        "IPv6 addresses (labels: ipv6_global, ipv6_private; special addresses are kept)",
+	detect.KindSecret:      "tokens and credentials (see --verbose for the formats)",
+	detect.KindUUID:        "UUIDs, versions 1-8 (enable with --types default,uuid or --uuid-versions)",
+	detect.KindAWSAccount:  "AWS account IDs in ARNs, ECR registries and SQS queue URLs",
+	detect.KindAWSS3Bucket: "S3 bucket names in s3:// URLs, S3 endpoints and ARNs",
 }
 
-var typeEntries = []typeEntry{
-	{"email", "on", "email addresses"},
-	{"ipv4", "on", "IPv4 addresses (labels: ipv4_global, ipv4_private; special addresses are kept)"},
-	{"ipv6", "on", "IPv6 addresses (labels: ipv6_global, ipv6_private; special addresses are kept)"},
-	{"secret", "on", "tokens and credentials (see --verbose for the formats)"},
-	{"uuid", "off", "UUIDs, versions 1-8 (enable with --types default,uuid or --uuid-versions)"},
+// cloudTitles は、`logscrub types` で、クラウドの種別の前に出す見出し。
+var cloudTitles = map[string]string{
+	"aws": "AWS",
 }
 
 func runTypes(e *env, args []string) int {
@@ -30,11 +35,29 @@ func runTypes(e *env, args []string) int {
 		return exitError
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%-8s%-9s%s\n", "type", "default", "description")
-	for _, t := range typeEntries {
-		fmt.Fprintf(&sb, "%-8s%-9s%s\n", t.id, t.onByDefault, t.description)
+	fmt.Fprintf(&sb, "%-15s%-9s%s\n", "type", "default", "description")
+	cloud := ""
+	for _, t := range detect.Types {
+		if t.Cloud != cloud {
+			cloud = t.Cloud
+			fmt.Fprintf(&sb, "\n%s:\n", cloudTitles[cloud])
+		}
+		on := "off"
+		if t.Default {
+			on = "on"
+		}
+		fmt.Fprintf(&sb, "%-15s%-9s%s\n", t.Name(), on, typeDescriptions[t.Kind])
 	}
-	sb.WriteString("\n\"default\" in --types stands for email, ipv4, ipv6 and secret.\n")
+	sb.WriteString("\nGroups for --types:\n")
+	for _, g := range detect.Groups {
+		var names []string
+		for _, t := range detect.Types {
+			if g.Kinds.Has(t.Kind) {
+				names = append(names, t.Name())
+			}
+		}
+		fmt.Fprintf(&sb, "  %-9s%s\n", g.Name, strings.Join(names, ", "))
+	}
 	if *verbose {
 		sb.WriteString("\n")
 		sb.WriteString(secretFormatsHelp)

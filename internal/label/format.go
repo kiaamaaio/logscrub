@@ -13,11 +13,11 @@ import (
 
 // Types は、置換後の種別名。IP アドレスは、グローバル/プライベートの区別を含む(仕様 4.3)。
 // 並びは、`--stats` の出力順にも使う。
-var Types = []string{"email", "ipv4_global", "ipv4_private", "ipv6_global", "ipv6_private", "secret", "uuid"}
+var Types = []string{"email", "ipv4_global", "ipv4_private", "ipv6_global", "ipv6_private", "secret", "uuid", "aws_account", "aws_s3_bucket"}
 
 // NumTypes は、len(Types)。統計や連番の表を、固定長の配列で持つための定数
 // (TestTypesAreTheDocumentedSet で、len(Types) と一致することを確認している)。
-const NumTypes = 7
+const NumTypes = 9
 
 var typeBytes = func() [][]byte {
 	bs := make([][]byte, len(Types))
