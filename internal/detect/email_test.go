@@ -126,6 +126,43 @@ func TestEmailFinderDetectsLookalikesOfHashedLocalPart(t *testing.T) {
 	}
 }
 
+// 区切りなしで続くメールアドレスの置換の結果を、再度置換しない(Q69)。
+func TestEmailFinderAdjacentReplacedForms(t *testing.T) {
+	custom, err := label.ParseFormat("{type}_{n}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		format label.Format
+		line   string
+		want   []string
+	}{
+		// ローカルパート全体が置換済みの形の連なり
+		{label.Format{}, "email_d33dcb6233c3email_2ec9724db863@0.AA", nil},
+		{label.Format{}, "email_d33dcb6233c3hash_2ec9724db863secret_000000000000@d.example.com", nil},
+		{custom, "email_1email_2@0.AA", nil},
+		{custom, "email_1email_d33dcb6233c3@0.AA", nil},
+		// 置換済みの形でない部分を含むものは、全体を検出する(Q10)
+		{label.Format{}, "email_d33dcb6233c3john@example.com", []string{"email_d33dcb6233c3john@example.com"}},
+		{label.Format{}, "email_d33dcb6233c3email_2ec9724db86@0.AA", []string{"email_d33dcb6233c3email_2ec9724db86@0.AA"}},
+		{label.Format{}, "email_1email_2@0.AA", []string{"email_1email_2@0.AA"}}, // 書式が違う
+		{custom, "email_1x@0.AA", []string{"email_1x@0.AA"}},
+		// `--email-hash local` の出力が続く形。ドメインを後ろの `hash` に食い込ませない
+		{label.Format{}, "hash_15112e216de1@0.AAhash_387ee2c18c54@0.AA@0.AA", nil},
+		{label.Format{}, "x@a.example.comhash_387ee2c18c54@b.example.com", []string{"x@a.example.com"}},
+		{label.Format{}, "x@a.bhash_387ee2c18c54@b.co", []string{"a.bhash_387ee2c18c54@b.co"}},
+		{label.Format{}, "x@a.comhash_387ee2c18c5@b.co", []string{"x@a.comhash", "_387ee2c18c5@b.co"}}, // 桁数が違う
+	} {
+		var got []string
+		for _, m := range (emailFinder{hashLen: 12, format: tc.format}).find([]byte(tc.line), nil) {
+			got = append(got, tc.line[m.Start:m.End])
+		}
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("%q: got %q, want %q", tc.line, got, tc.want)
+		}
+	}
+}
+
 func TestEmailFinderHashLengthFollowsOption(t *testing.T) {
 	line := "hash_3f9a1c0b7d2e4455@example.com"
 	if got := (emailFinder{hashLen: 16}).find([]byte(line), nil); len(got) != 0 {
@@ -269,7 +306,7 @@ func TestHashedLocalPartRangesAgreeWithScanHashed(t *testing.T) {
 //
 // Q2 のとおり、まず正規表現のままで性能を測り、50MB/s に届かない場合にだけ、
 // この実装に置き換える。置き換えたあとも、元の正規表現版を参照としてテストに残す。
-// label.EmailDomainEnd(hash 出力形の保護範囲と共有する、ドメインの終端の判定)を使う。
+// label.EmailDomainEnd・label.DomainEndBeforeHashed(hash 出力形の保護範囲と共有する、ドメインの終端の判定)を使う。
 func anchorScan(line []byte, dst []Match) []Match {
 	at := bytes.IndexByte(line, '@')
 	lo := 0
@@ -280,7 +317,7 @@ func anchorScan(line []byte, dst []Match) []Match {
 			s--
 		}
 		if s < at {
-			if e := label.EmailDomainEnd(line, at+1); e > 0 {
+			if e := label.DomainEndBeforeHashed(line, at+1, label.EmailDomainEnd(line, at+1), label.DefaultHashLen); e > 0 {
 				if slices.ContainsFunc(refURLPasswords(line), func(r [2]int) bool { return r[1] == at }) {
 					// URL のユーザー情報の `@`(v1.2)は、候補にしない
 					lo = at + 1

@@ -1173,6 +1173,29 @@ func TestKeyedURLWithReplacedParts(t *testing.T) {
 	}
 }
 
+// 区切りなしで続くメールアドレスは、どのモードでも、再度流しても変わらない(Q69)。
+func TestAdjacentEmails(t *testing.T) {
+	in := "0@0.AA%@0.AA@0.AA\nfrom a@b.example.com-@c.example.com@d.example.com\n"
+	env := map[string]string{keyEnv: "test-key"}
+	for _, args := range [][]string{
+		{"--mode", "mask"}, {"--mode", "hash"}, {"--mode", "hash", "--email-hash", "local"},
+		{"--mask-format", "{type}_{n}"}, {"--mask-format", "{type}-{n}"},
+	} {
+		once := run(t, in, env, append([]string{"mask"}, args...)...)
+		if once.code != 0 || strings.Contains(once.stdout, "a@b.") {
+			t.Fatalf("%v: %+v", args, once)
+		}
+		if again := run(t, once.stdout, env, append([]string{"mask"}, args...)...); again.stdout != once.stdout {
+			t.Errorf("%v is not idempotent:\n%s\n%s", args, once.stdout, again.stdout)
+		}
+	}
+	// 1 回目の結果は v1.1 と同じ
+	want := "email_1email_2@0.AA\nfrom email_3email_4@d.example.com\n"
+	if r := run(t, in, nil, "mask", "--mask-format", "{type}_{n}"); r.stdout != want {
+		t.Errorf("mask: %q, want %q", r.stdout, want)
+	}
+}
+
 func TestKeyNameAfterReplacedValue(t *testing.T) {
 	in := "0.0.0.1passwd=0\nclient 10.0.0.1passwd=s3cret\n10.0.0.1.password=x\n"
 	env := map[string]string{keyEnv: "test-key"}

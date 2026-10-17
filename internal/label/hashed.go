@@ -15,7 +15,7 @@ const (
 //   - `<種別>_<16 進数>`(例: `email_3f9a1c0b7d2e`、`ipv4_global_a1b2c3d4e5f6`)。
 //     前後が英数字でないものだけ
 //   - `hash_<16 進数>@ドメイン`(例: `hash_3f9a1c0b7d2e@example.com`)。
-//     ローカルパートが丸ごとこの形のものだけ。範囲はドメインの末尾まで
+//     ローカルパートが丸ごとこの形のものだけ。範囲はドメインの末尾まで(DomainEndBeforeHashed。Q69)
 //
 // 本物の値との区別のため、桁数・小文字・前後の文字・種別名のどれかが合わないものは見つけない(Q10)。
 func ScanHashed(line []byte, hexLen int, fn func(start, end int)) {
@@ -47,7 +47,7 @@ func ScanHashed(line []byte, hexLen int, fn func(start, end int)) {
 		if p >= 4 && string(line[p-4:p]) == "hash" && e < len(line) && line[e] == '@' {
 			s := p - 4
 			if s == 0 || !IsEmailLocalChar(line[s-1]) {
-				if end := EmailDomainEnd(line, e+1); end > 0 {
+				if end := DomainEndBeforeHashed(line, e+1, EmailDomainEnd(line, e+1), hexLen); end > 0 {
 					fn(s, end)
 					i = end
 					continue

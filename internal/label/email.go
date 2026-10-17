@@ -51,22 +51,51 @@ func EmailDomainEnd(b []byte, i int) int {
 // `user@example.com@bastion.example.org` の先頭だけがハッシュされた結果
 // (`email_<hex>@bastion.example.org`)を、全体で 1 つのメールアドレスとして、再度ハッシュしないため。
 func IsHashedLocalPart(local []byte, hexLen int) bool {
-	if hexLen <= 0 {
-		return false
+	return HashedAt(local, 0, hexLen) == len(local)
+}
+
+// HashedAt は、b[i:] が IsHashedLocalPart の形(`hash_<hex>`、`<種別>_<hex>`)で始まるなら、その終わりの位置を返す。
+// でなければ -1。前後の文字は見ない(ローカルパートの先頭に続く置換済みの形を除くため。仕様 5.2。Q69)。
+func HashedAt(b []byte, i, hexLen int) int {
+	if hexLen <= 0 || i < 0 || i > len(b) {
+		return -1
 	}
-	hashed := func(prefix []byte) bool {
-		n := len(prefix)
-		return len(local) == n+1+hexLen && bytes.HasPrefix(local, prefix) && local[n] == '_' && isLowerHex(local[n+1:])
+	hashed := func(prefix []byte) int {
+		n := i + len(prefix)
+		e := n + 1 + hexLen
+		if e > len(b) || !bytes.HasPrefix(b[i:], prefix) || b[n] != '_' || !isLowerHex(b[n+1:e]) {
+			return -1
+		}
+		return e
 	}
-	if hashed([]byte("hash")) {
-		return true
+	if e := hashed(hashPrefix); e >= 0 {
+		return e
 	}
 	for _, t := range typeBytes {
-		if hashed(t) {
-			return true
+		if e := hashed(t); e >= 0 {
+			return e
 		}
 	}
-	return false
+	return -1
+}
+
+var hashPrefix = []byte("hash")
+
+// DomainEndBeforeHashed は、b[i:end] のメールアドレスのドメイン(EmailDomainEnd の結果)の末尾が、
+// すぐ後ろに続く `hash_<hex>@` の `hash` に食い込むなら、その手前までで読み直したドメインの末尾を返す
+// (ドメインにならなければ -1)。食い込まないなら end をそのまま返す(仕様 5.2。Q69)。
+//
+// `--email-hash local` の出力が続く形(`hash_<hex>@0.AAhash_<hex>@0.AA`)で、1 つ目のドメインを `0.AAhash` と
+// 読まないため。ScanHashed の `hash_<hex>@ドメイン` の範囲と、email 検出器(detect)の範囲が、同じ位置で終わるよう、
+// 両方がこの関数を使う。
+func DomainEndBeforeHashed(b []byte, i, end, hexLen int) int {
+	p := end - len(hashPrefix) // 食い込んだ `hash` の先頭
+	e := end + 1 + hexLen      // `hash_<hex>` の終わり
+	if hexLen <= 0 || p <= i || e >= len(b) || !bytes.HasPrefix(b[p:], hashPrefix) || b[end] != '_' ||
+		!isLowerHex(b[end+1:e]) || b[e] != '@' {
+		return end
+	}
+	return EmailDomainEnd(b[:p], i)
 }
 
 func isLabelChar(c byte) bool { return isAlnum(c) || c == '-' }
