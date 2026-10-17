@@ -331,14 +331,14 @@ connect <aws_host_1>.ap-northeast-1.rds.amazonaws.com:5432
 
 | 実行 | 速度 | 最大メモリ |
 |---|---|---|
-| `logscrub mask < big.log > /dev/null` | 約 184 MB/s | 30 MB |
-| `cat big.log \| logscrub mask > /dev/null` | 約 165 MB/s | 32 MB |
-| 同上(`--types default,uuid`) | 約 173 MB/s | 32 MB |
-| AWS の値(ホスト名、URL のパスワードを含む)を含む合成ログを `--types default,aws` で | 約 138 MB/s | 36 MB |
-| 同上(`aws_host` なし: `--types default,aws_account,aws_s3_bucket`) | 約 159 MB/s | 30 MB |
+| `logscrub mask < big.log > /dev/null` | 約 229 MB/s | 30 MB |
+| `cat big.log \| logscrub mask > /dev/null` | 約 207 MB/s | 30 MB |
+| 同上(`--types default,uuid`) | 約 218 MB/s | 33 MB |
+| AWS の値(ホスト名、URL のパスワードを含む)を含む合成ログを `--types default,aws` で | 約 173 MB/s | 35 MB |
+| 同上(`aws_host` なし: `--types default,aws_account,aws_s3_bucket`) | 約 197 MB/s | 31 MB |
 
 - **メモリ**: 対応表(検出した値の種類数に比例)が主です。値の種類数が一定(1,000 種類)なら、入力が
-  20MB でも 100MB でも、最大 14MB ほどで変わりません。ほぼすべての値が異なる 100MB のログでは、29.9MB でした。
+  20MB でも 100MB でも、最大 15MB ほどで変わりません。ほぼすべての値が異なる 100MB のログでは、29.8MB でした。
 - **測定条件**: 合成ログ(1 行 200 バイト前後、約 30% の行に検出対象があり、1MB の JSON を 1 行で数行含む)、
   既定の種別、mask モード。AMD Ryzen 9 9950X、WSL2 上の Docker コンテナ(`golang:1.27.2`、2 CPU)内で測定し、
   3 回のうちの最速の値です。実際のログでは、検出対象の割合や行の長さで変わります。
@@ -385,6 +385,7 @@ $ ./scripts/go build -o bin/logscrub ./cmd/logscrub
 - `aws_account` に、S3 Control のホスト(`<12 桁>.s3-control.<リージョン>.amazonaws.com`)のアカウント ID を加えました。
 - EC2 のパブリックホスト名の IPv6 形式・デュアルスタック形式(`….ip.aws`)を、`aws_host` で置換するようになりました。
 - `logscrub types` の出力と `--stats` の並びに、`aws_host` が加わりました。
+- 検出を速くしました(既定の種別で約 184 → 229 MB/s、`--types default,aws` で約 138 → 173 MB/s。[性能](#性能))。検出の結果は変わりません。
 
 ### v1.1.0
 
