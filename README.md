@@ -393,6 +393,7 @@ $ ./scripts/go build -o bin/logscrub ./cmd/logscrub
 - `aws_account` に、S3 Control のホスト(`<12 桁>.s3-control.<リージョン>.amazonaws.com`)のアカウント ID を加えました。
 - EC2 のパブリックホスト名の IPv6 形式・デュアルスタック形式(`….ip.aws`)を、`aws_host` で置換するようになりました。
 - `::1::x` のような、IPv6 として正しくない連なり(`::` を 2 つ含むもの)の後ろに英字が続く形の一部を、IPv6 として置換しなくなりました(v1.1 までは `<ipv6_private_1>::x`)。
+- 区切りなしで続くメールアドレス(`a@b.example.com-@c.example.com@d.example.com`)を `--mode hash` などで置換した結果を、再度流したときに、まとめて置換し直さないようにしました。ローカルパートが置換済みの形(`email_<hex>` など)で始まる場合は、その部分をローカルパートに含めません。
 - `logscrub types` の出力と `--stats` の並びに、`aws_host` が加わりました。
 - 検出を速くしました(既定の種別で約 184 → 229 MB/s、`--types default,aws` で約 138 → 173 MB/s。[性能](#性能))。検出の結果は変わりません。
 
