@@ -74,18 +74,32 @@ var (
 	// サービスは英小文字・数字・`-` の 1 文字以上、リージョンは 0 文字以上。どちらも、IAM ポリシーの
 	// ワイルドカードの `*` を含んでよい(`arn:aws:ec2:*:…`)。
 	arnAccountRe = regexp.MustCompile(`^arn:` + awsPartitionRe + `:[a-z0-9*-]+:[a-z0-9*-]*:` + awsAccountRe + `:`)
-	// ecrHostRe は、ECR のレジストリのホストの、アカウント ID の後ろの部分。`.dkr.ecr` の位置に当てる。
-	ecrHostRe = regexp.MustCompile(`^\.dkr\.ecr(?:-fips)?\.` + awsRegionRe + `\.` + awsDomainRe)
+	// accountHostRe は、ECR・S3 Control のホストの、アカウント ID の後ろの部分。`.dkr.ecr` / `.s3-control` などの位置に当てる。
+	accountHostRe = regexp.MustCompile(`^` + alternation(accountHostMarkers) + `\.` + awsRegionRe + `\.` + awsDomainRe)
 	// sqsHostRe は、SQS のキュー URL の `sqs.<リージョン>.<ドメイン>/<アカウント ID>/`。`sqs.` の位置に当てる。
 	sqsHostRe = regexp.MustCompile(`^sqs\.` + awsRegionRe + `\.` + awsDomainRe + `/` + awsAccountRe + `/`)
 	// sqsPathRe は、SQS の旧形式のホスト(`queue.amazonaws.com`)の後ろの `/<アカウント ID>/`。
 	sqsPathRe = regexp.MustCompile(`^/` + awsAccountRe + `/`)
 )
 
+// accountHostMarkers は、`<12 桁>` の直後に続く、アカウント ID を含むホストの語(仕様 4.4)。後ろに `.` + リージョン
+// + `.` + 対象のドメインが続く。ECR と S3 Control(v1.2)。サービスの追加は、ここに行を足す。
+var accountHostMarkers = []string{
+	".dkr.ecr", ".dkr.ecr-fips",
+	".s3-control", ".s3-control.dualstack", ".s3-control-fips", ".s3-control-fips.dualstack",
+}
+
+var accountHostMarkerBytes = func() [][]byte {
+	bs := make([][]byte, len(accountHostMarkers))
+	for i, m := range accountHostMarkers {
+		bs[i] = []byte(m)
+	}
+	return bs
+}()
+
 var (
 	arnPrefix    = []byte("arn:")
 	arnWord      = []byte("arn")
-	ecrMarkers   = [][]byte{[]byte(".dkr.ecr"), []byte(".dkr.ecr-fips")}
 	sqsWord      = []byte("sqs")
 	sqsQueueHost = []byte("queue.amazonaws.com")
 	queueWord    = []byte("queue")
@@ -95,6 +109,7 @@ var (
 //
 //   - ARN: `arn:aws:iam::123456789012:role/x`(アカウント ID の欄が 12 桁のときだけ)
 //   - ECR: `123456789012.dkr.ecr.<リージョン>.<ドメイン>`
+//   - S3 Control: `123456789012.s3-control.<リージョン>.<ドメイン>`(`.s3-control.dualstack.`、`.s3-control-fips.` などを含む)
 //   - SQS: `sqs.<リージョン>.<ドメイン>/123456789012/`、`<リージョン>.queue.amazonaws.com/…`、`queue.amazonaws.com/…`
 //
 // 範囲は、12 桁の部分だけ。前処理: ARN は `:`、ECR と SQS は `.amazonaws.`(nextAmazonaws)を手がかりにし、
@@ -134,12 +149,12 @@ func (awsAccountFinder) arn(line []byte, dst []Match) []Match {
 	}
 }
 
-// hosts は、ECR のレジストリと、SQS のキュー URL のアカウント ID を追記する。
+// hosts は、ECR のレジストリ・S3 Control のホストと、SQS のキュー URL のアカウント ID を追記する。
 //
 // どちらのホストも、対象のドメイン(`amazonaws.…`)で終わる。`.amazonaws.` を手がかりにし、手前のリージョン
-// (`.` を含まない)を遡って、その手前が `.dkr.ecr` / `.dkr.ecr-fips`(ECR)、`sqs`(SQS)かを調べ、
+// (`.` を含まない)を遡って、その手前が accountHostMarkers(ECR、S3 Control)、`sqs`(SQS)かを調べ、
 // 形の先頭に正規表現を当てる。`queue.amazonaws.com`(SQS の旧形式)は、`.amazonaws.` の手前が `queue` の場合。
-//   - ECR: 12 桁の前が、英数字・`-`・`_`・`.` でないこと。ドメインの後ろは、ホスト名の末尾の条件(isHostEnd。Q41)
+//   - ECR・S3 Control: 12 桁の前が、英数字・`-`・`_`・`.` でないこと。ドメインの後ろは、ホスト名の末尾の条件(isHostEnd。Q41)
 //   - SQS: ホストの前が、英数字・`-`・`_`・`.` でないこと。ドメインの直後が `/` + 12 桁 + `/`
 func (awsAccountFinder) hosts(line []byte, dst []Match) []Match {
 	for pos := 0; ; {
@@ -159,8 +174,8 @@ func (awsAccountFinder) hosts(line []byte, dst []Match) []Match {
 			continue
 		}
 		d := r - 1 // リージョンの手前の `.`
-		for _, m := range ecrMarkers {
-			p := d - len(m) // `.dkr.ecr` の位置
+		for _, m := range accountHostMarkerBytes {
+			p := d - len(m) // `.dkr.ecr` / `.s3-control` などの位置
 			if p < 0 || !bytes.Equal(line[p:d], m) {
 				continue
 			}
@@ -168,7 +183,7 @@ func (awsAccountFinder) hosts(line []byte, dst []Match) []Match {
 			if s < 0 || !allDigits(line[s:p]) || s > 0 && isHostPrefixChar(line[s-1]) {
 				continue
 			}
-			if loc := ecrHostRe.FindIndex(line[p:]); loc != nil && isHostEnd(line, p+loc[1]) {
+			if loc := accountHostRe.FindIndex(line[p:]); loc != nil && isHostEnd(line, p+loc[1]) {
 				dst = append(dst, accountMatch(s))
 			}
 			break

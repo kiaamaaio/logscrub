@@ -1077,3 +1077,33 @@ func TestAWSHost(t *testing.T) {
 		}
 	}
 }
+
+// v1.2 段階 4: S3 Control のホストのアカウント ID(ECR・ARN と同じ値は同じラベル)。既定の種別では置換されない。
+func TestAWSAccountS3Control(t *testing.T) {
+	in := "ctl 123456789012.s3-control.ap-northeast-1.amazonaws.com and 123456789012.s3-control.dualstack.us-east-1.amazonaws.com\n" +
+		"ecr 123456789012.dkr.ecr.us-east-1.amazonaws.com/app arn:aws:iam::210987654321:role/x api s3-control.us-east-1.amazonaws.com\n"
+	want := "ctl <aws_account_1>.s3-control.ap-northeast-1.amazonaws.com and <aws_account_1>.s3-control.dualstack.us-east-1.amazonaws.com\n" +
+		"ecr <aws_account_1>.dkr.ecr.us-east-1.amazonaws.com/app arn:aws:iam::<aws_account_2>:role/x api s3-control.us-east-1.amazonaws.com\n"
+	if r := run(t, in, nil, "mask"); r.code != 0 || r.stdout != in {
+		t.Errorf("default types: %+v", r)
+	}
+	for _, types := range []string{"aws_account", "aws", "cloud"} {
+		if r := run(t, in, nil, "mask", "--types", types); r.code != 0 || r.stdout != want {
+			t.Errorf("--types %s: %+v\nwant %q", types, r, want)
+		}
+	}
+	dir := t.TempDir()
+	src := writeFile(t, dir, "app.log", in)
+	masked := run(t, "", nil, "mask", "--types", "aws_account", src)
+	if back := run(t, masked.stdout, nil, "restore", "--source", src, "--types", "aws_account"); back.code != 0 || back.stdout != in {
+		t.Errorf("restore: %+v", back)
+	}
+	env := map[string]string{keyEnv: "test-key"}
+	h := run(t, in, env, "mask", "--mode", "hash", "--types", "aws_account")
+	if h.code != 0 || strings.Contains(h.stdout, "123456789012") || strings.Count(h.stdout, "aws_account_") != 4 {
+		t.Fatalf("hash: %+v", h)
+	}
+	if again := run(t, h.stdout, env, "mask", "--mode", "hash", "--types", "aws_account"); again.stdout != h.stdout {
+		t.Errorf("hash is not idempotent:\n%s\n%s", h.stdout, again.stdout)
+	}
+}

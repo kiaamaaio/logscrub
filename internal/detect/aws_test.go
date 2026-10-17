@@ -80,6 +80,17 @@ func TestAWSAccount(t *testing.T) {
 		{"ecr https", "https://" + id + ".dkr.ecr.us-east-1.amazonaws.com/v2/", want},
 		{"ecr end of line", id + ".dkr.ecr.us-east-1.amazonaws.com", want},
 		{"ecr with port", id + ".dkr.ecr.us-east-1.amazonaws.com:443", want},
+		// S3 Control(v1.2)
+		{"s3 control", id + ".s3-control.ap-northeast-1.amazonaws.com", want},
+		{"s3 control dualstack", id + ".s3-control.dualstack.us-east-1.amazonaws.com", want},
+		{"s3 control fips", id + ".s3-control-fips.us-gov-west-1.amazonaws.com", want},
+		{"s3 control fips dualstack", id + ".s3-control-fips.dualstack.us-east-1.amazonaws.com", want},
+		{"s3 control china", id + ".s3-control.cn-north-1.amazonaws.com.cn", want},
+		{"s3 control eusc", id + ".s3-control.eusc-de-east-1.amazonaws.eu", want},
+		{"s3 control https", "https://" + id + ".s3-control.us-east-1.amazonaws.com/v20180820/configuration/publicAccessBlock", want},
+		{"s3 control with port", id + ".s3-control.us-east-1.amazonaws.com:443", want},
+		{"s3 control and ecr", id + ".s3-control.us-east-1.amazonaws.com " + id + ".dkr.ecr.us-east-1.amazonaws.com/a",
+			[]string{"aws_account=" + id, "aws_account=" + id}},
 		// SQS
 		{"sqs", "https://sqs.ap-northeast-1.amazonaws.com/" + id + "/orders", want},
 		{"sqs china", "https://sqs.cn-north-1.amazonaws.com.cn/" + id + "/q", want},
@@ -120,6 +131,19 @@ func TestAWSAccount(t *testing.T) {
 		{"ecr then other domain", id + ".dkr.ecr.us-east-1.amazonaws.com.example.net/a", nil},
 		{"ecr then letter", id + ".dkr.ecr.us-east-1.amazonaws.comx", nil},
 		{"ecr uppercase", id + ".DKR.ECR.us-east-1.amazonaws.com/a", nil},
+		{"s3 control 11 digits", "12345678901.s3-control.us-east-1.amazonaws.com", nil},
+		{"s3 control 13 digits", "1123456789012.s3-control.us-east-1.amazonaws.com", nil},
+		{"s3 control after letter", "x" + id + ".s3-control.us-east-1.amazonaws.com", nil},
+		{"s3 control after hyphen", "a-" + id + ".s3-control.us-east-1.amazonaws.com", nil},
+		{"s3 control after dot", "a." + id + ".s3-control.us-east-1.amazonaws.com", nil},
+		{"s3 control without region", id + ".s3-control.amazonaws.com", nil},
+		{"s3 control other domain", id + ".s3-control.us-east-1.example.com", nil},
+		{"s3 control then other domain", id + ".s3-control.us-east-1.amazonaws.com.example.net", nil},
+		{"s3 control then letter", id + ".s3-control.us-east-1.amazonaws.comx", nil},
+		{"s3 control uppercase", id + ".S3-CONTROL.us-east-1.amazonaws.com", nil},
+		{"s3 control unknown variant", id + ".s3-control-xx.us-east-1.amazonaws.com", nil},
+		{"s3 control api endpoint", "s3-control.us-east-1.amazonaws.com", nil},
+		{"s3 control api endpoint with path", "https://s3-control.us-east-1.amazonaws.com/v20180820/" + id, nil},
 		// 置換しない: SQS の形
 		{"sqs 11 digits", "https://sqs.us-east-1.amazonaws.com/12345678901/q", nil},
 		{"sqs 13 digits", "https://sqs.us-east-1.amazonaws.com/1234567890123/q", nil},
@@ -151,6 +175,8 @@ func TestAWSAccountAlreadyReplaced(t *testing.T) {
 	for _, line := range []string{
 		"arn:aws:iam::<aws_account_1>:role/x",
 		"<aws_account_1>.dkr.ecr.us-east-1.amazonaws.com/a",
+		"<aws_account_1>.s3-control.us-east-1.amazonaws.com",
+		"aws_account_3f9a1c0b7d2e.s3-control.dualstack.us-east-1.amazonaws.com",
 		"https://sqs.us-east-1.amazonaws.com/<aws_account_1>/q",
 		"arn:aws:iam::aws_account_3f9a1c0b7d2e:role/x",
 		"aws_account_3f9a1c0b7d2e.dkr.ecr.us-east-1.amazonaws.com/a",
@@ -185,6 +211,16 @@ var (
 		regexp.MustCompile(`^([0-9]{12})\.dkr\.ecr-fips\.[a-z0-9-]+\.amazonaws\.com\.cn`),
 		regexp.MustCompile(`^([0-9]{12})\.dkr\.ecr-fips\.[a-z0-9-]+\.amazonaws\.eu`),
 	}
+	// refS3ControlAccountForms は、S3 Control(v1.2)。仕様 4.4 の 4 つの語 × 3 つのドメイン
+	refS3ControlAccountForms = func() []*regexp.Regexp {
+		var out []*regexp.Regexp
+		for _, w := range []string{`s3-control`, `s3-control\.dualstack`, `s3-control-fips`, `s3-control-fips\.dualstack`} {
+			for _, d := range []string{`amazonaws\.com`, `amazonaws\.com\.cn`, `amazonaws\.eu`} {
+				out = append(out, regexp.MustCompile(`^([0-9]{12})\.`+w+`\.[a-z0-9-]+\.`+d))
+			}
+		}
+		return out
+	}()
 	refSQSAccountForms = []*regexp.Regexp{
 		regexp.MustCompile(`^sqs\.[a-z0-9-]+\.(?:amazonaws\.com|amazonaws\.com\.cn|amazonaws\.eu)/([0-9]{12})/`),
 		regexp.MustCompile(`^[a-z0-9-]+\.queue\.amazonaws\.com/([0-9]{12})/`),
@@ -207,7 +243,7 @@ func refAWSAccounts(line []byte) [][2]int {
 		if !hostStart(p) {
 			continue
 		}
-		for _, re := range refECRAccountForms {
+		for _, re := range append(slices.Clone(refECRAccountForms), refS3ControlAccountForms...) {
 			if loc := re.FindSubmatchIndex(line[p:]); loc != nil && refHostEnd.Match(line[p+loc[1]:]) {
 				seen[[2]int{p + loc[2], p + loc[3]}] = true
 			}
@@ -247,7 +283,8 @@ func TestAWSAccountMatchesRegexpReference(t *testing.T) {
 				sb.WriteString(pick([]string{"arn:", "arn:", "ARN:", "xarn:"}) + pick(partitions) + ":" + pick(services) + ":" +
 					pick(regions) + ":" + pick(ids) + pick([]string{":role/x", ":", "/x", ""}))
 			case 1:
-				sb.WriteString(pick(ids) + pick([]string{".dkr.ecr.", ".dkr.ecr-fips.", ".dkr.ecr", ".DKR.ECR."}) + pick(regions) + "." +
+				sb.WriteString(pick(ids) + pick([]string{".dkr.ecr.", ".dkr.ecr-fips.", ".dkr.ecr", ".DKR.ECR.", ".s3-control.", ".s3-control.dualstack.",
+					".s3-control-fips.", ".s3-control-fips.dualstack.", ".s3-control.dualstack", ".S3-CONTROL.", ".s3-control-fips"}) + pick(regions) + "." +
 					pick(domains) + pick([]string{"/app", "", ":443", "."}))
 			case 2:
 				sb.WriteString("sqs." + pick(regions) + "." + pick(domains) + "/" + pick(ids) + pick([]string{"/q", "", "/"}))
@@ -287,6 +324,8 @@ func TestAWSAccountFinderOnLongLines(t *testing.T) {
 		strings.Repeat("arn:", 300000),
 		strings.Repeat("arn:aws:iam::", 100000),
 		strings.Repeat(".dkr.ecr", 150000),
+		strings.Repeat(".s3-control.dualstack", 100000),
+		strings.Repeat("1", 1<<20) + ".s3-control.us-east-1.amazonaws.com",
 		strings.Repeat("1", 1<<20) + ".dkr.ecr.us-east-1.amazonaws.com",
 		strings.Repeat("sqs.", 300000),
 		strings.Repeat("queue.amazonaws.com", 60000),
