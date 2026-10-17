@@ -570,6 +570,16 @@ type hostTerminal struct {
 	tails []hostTail
 }
 
+// nextMatches は、line[p] を手がかりのバイトとしたとき、その次の 1 バイトが、終端の続きと同じかを返す。
+// 手がかりが終端の最後のバイトなら、比べるものがないので真。行末を越える場合は、終端が収まらないので偽。
+func (t *hostTerminal) nextMatches(line []byte, p int) bool {
+	k := t.off + 1
+	if k >= len(t.lit) {
+		return true
+	}
+	return p+1 < len(line) && line[p+1] == t.lit[k]
+}
+
 // hostGroup は、同じ手がかりのバイト(hint)で探す終端のまとまり。amazonaws は、`.amazonaws.` で終わる形
 // (`{domain}` で終わる形)も同じ走査で探すか。
 type hostGroup struct {
@@ -776,15 +786,20 @@ func (f awsHostFinder) find(line []byte, dst []Match) []Match {
 			}
 			p := pos + j
 			pos = p + 1
+			// 手がかりの一致の大半は、終端の一部ではない(`l` は約 1.6%)。bytes.HasPrefix の前に、終端の先頭の `.` と、
+			// 手がかりの次の 1 バイトを比べて、早く捨てる(plans/v1.2.0.md 段階 9)
 			if g.amazonaws {
-				if a := p - 4; a >= 0 && bytes.HasPrefix(line[a:], amazonawsMarker) {
+				if a := p - 4; a >= 0 && line[a] == '.' && bytes.HasPrefix(line[a:], amazonawsMarker) {
 					dst = hostAmazon(line, a, &cache, dst)
 				}
 			}
 			for ti := range g.terms {
 				term := &g.terms[ti]
 				t0 := p - term.off
-				if t0 < 0 || !bytes.HasPrefix(line[t0:], term.lit) || !isHostEnd(line, t0+len(term.lit)) {
+				if t0 < 0 || line[t0] != '.' || !term.nextMatches(line, p) {
+					continue
+				}
+				if !bytes.HasPrefix(line[t0:], term.lit) || !isHostEnd(line, t0+len(term.lit)) {
 					continue
 				}
 				dst = hostTails(line, t0, term.tails, &cache, dst)
