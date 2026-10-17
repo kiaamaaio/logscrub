@@ -1295,6 +1295,22 @@ func TestSecretKeyedURLWithLabels(t *testing.T) {
 			t.Errorf("%q: got %q, want nothing", line, got)
 		}
 	}
+	// パスワードが置換されていないのに、ユーザーの部分や `@` の直後がラベルの形は、URL のパスワードとして置換されない
+	// ので、値全体をキー名ベースの値として置換する(パスワードを残さない。Q68)
+	for _, tc := range []struct {
+		line string
+		want []string
+	}{
+		{"password=https://u:s3cret@<aws_host_1>.ap-northeast-1.rds.amazonaws.com/",
+			[]string{"secret=https://u:s3cret@<aws_host_1>.ap-northeast-1.rds.amazonaws.com/"}},
+		{`"password": "https://u:s3cret@<ipv4_private_1>:5432/app"`,
+			[]string{"secret=https://u:s3cret@<ipv4_private_1>:5432/app"}},
+		{"password=https://<uuid_1>:s3cret@db-host/app", []string{"secret=https://<uuid_1>:s3cret@db-host/app"}},
+	} {
+		if got := awsValues(t, all, tc.line); !slices.Equal(got, tc.want) {
+			t.Errorf("%q: got %q, want %q", tc.line, got, tc.want)
+		}
+	}
 	// ラベルは、ユーザー・パスワード・ホスト名の部分の全体のときだけ。部分の一部なら、URL のパスワードの形ではない
 	f := secretFinder{format: label.DefaultFormat}
 	for _, tc := range []struct {
@@ -1317,6 +1333,10 @@ func TestSecretKeyedURLWithLabels(t *testing.T) {
 		{"https://u:@h", false},
 		{"https://u@h", false},
 		{"https://<secret_1>@h", false},
+		// パスワードが置換されていなければ、ユーザーの部分や `@` の直後のラベルは読まない(Q68)
+		{"https://u:p@<aws_host_1>.x", false},
+		{"https://<uuid_1>:p@h", false},
+		{"https://<uuid_1>:<secret_1>@<aws_host_1>.x", true},
 	} {
 		if got := f.startsWithURLPassword([]byte(tc.value), 0); got != tc.want {
 			t.Errorf("%q: got %v, want %v", tc.value, got, tc.want)
@@ -1336,6 +1356,8 @@ func TestSecretKeyedURLWithLabels(t *testing.T) {
 		{"https://u:mysecret-1@h", true}, // ユーザー情報の文字として読む
 		{"https://u:secret-1x<@h", false},
 		{"https://u:p@aws_host-1.x", true},
+		{"https://uuid-1:p@h", true}, // ラベルの形でも、ユーザー情報の文字だけなので、URL のパスワードとして置換される
+		{"https://u:p@<aws_host-1>", false},
 	} {
 		if got := cf.startsWithURLPassword([]byte(tc.value), 0); got != tc.want {
 			t.Errorf("custom format: %q: got %v, want %v", tc.value, got, tc.want)

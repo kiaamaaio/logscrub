@@ -1151,6 +1151,28 @@ func TestIPv6RunBeforeHashOutput(t *testing.T) {
 }
 
 // 置換される値の直後にキー名の語が続く形(Q66)。2 回流しても変わらないこと(mask・hash・別の書式・aws の種別)。
+// キー名ベースの値が、パスワードが置換されていない URL で、ユーザーの部分か `@` の直後が置換済みの形なら、値全体を
+// キー名ベースの値として置換する。パスワードが出力に残らない(Q68)。
+func TestKeyedURLWithReplacedParts(t *testing.T) {
+	in := "password=https://u:s3cret@<aws_host_1>.ap-northeast-1.rds.amazonaws.com/\n" +
+		`"password": "https://u:s3cret@<ipv4_private_1>:5432/app"` + "\n" +
+		"password=https://<uuid_1>:s3cret@db-host/app\n"
+	want := "password=<secret_1>\n" + `"password": "<secret_2>"` + "\n" + "password=<secret_3>\n"
+	if r := run(t, in, nil, "mask"); r.code != 0 || r.stdout != want {
+		t.Errorf("mask: %+v\nwant %q", r, want)
+	}
+	env := map[string]string{keyEnv: "test-key"}
+	for _, args := range [][]string{{"--mode", "mask"}, {"--mode", "hash"}, {"--types", "default,aws"}} {
+		once := run(t, in, env, append([]string{"mask"}, args...)...)
+		if once.code != 0 || strings.Contains(once.stdout, "s3cret") {
+			t.Fatalf("%v: %+v", args, once)
+		}
+		if again := run(t, once.stdout, env, append([]string{"mask"}, args...)...); again.stdout != once.stdout {
+			t.Errorf("%v is not idempotent:\n%s\n%s", args, once.stdout, again.stdout)
+		}
+	}
+}
+
 func TestKeyNameAfterReplacedValue(t *testing.T) {
 	in := "0.0.0.1passwd=0\nclient 10.0.0.1passwd=s3cret\n10.0.0.1.password=x\n"
 	env := map[string]string{keyEnv: "test-key"}

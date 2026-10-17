@@ -507,10 +507,12 @@ func bareValueEnd(line []byte, vs int) int {
 // startsWithURLPassword は、line[s:] が URL のパスワードの形(`<スキーム>://<ユーザー>:<パスワード>@<ホスト名の文字>`)
 // で始まるかを返す(キー名ベースの値の先頭の判定。仕様 4.1。Q65)。
 //
-// 置換していない形については、`@` に urlPasswordStart を当てた結果と同じ(スキームの先頭が s になるもの)。
+// パスワードが置換されていない形は、`@` に urlPasswordStart を当てて真になるもの(urlPasswords が置換するもの)だけ。
 // キー名ベースの値の先頭の手前は、区切り・空白・引用符で、スキームの文字でも `_` でもないので、スキームは s から始まる。
-// 加えて、ユーザー・パスワードの部分が置換済みのラベル 1 つだけのもの、`@` の直後がラベルのものも、この形とする。
-// 置換後の `https://u:<secret_1>@<aws_host_1>.…` を再度流したときに、キー名ベースの値として読まないため(冪等性)。
+// 加えて、パスワードの部分が置換済みのラベル 1 つだけのものも、この形とする。そのときは、ユーザーの部分がラベル 1 つ
+// だけでも、`@` の直後がラベルでもよい。置換後の `https://u:<secret_1>@<aws_host_1>.…` を再度流したときに、
+// キー名ベースの値として読まないため(冪等性)。パスワードが置換されていないのに、ユーザーの部分や `@` の直後がラベルの
+// 形(`https://u:p@<aws_host_1>.…`)は、urlPasswords が置換しないので、この形としない(パスワードを残さないため。Q68)。
 // hash の出力形(`secret_<16 進数>` など)は、もともとユーザー情報・ホスト名の文字だけでできている。
 func (f secretFinder) startsWithURLPassword(line []byte, s int) bool {
 	n := len(line)
@@ -527,9 +529,10 @@ func (f secretFinder) startsWithURLPassword(line []byte, s int) bool {
 	if !bytes.HasPrefix(line[p:], schemeSep) {
 		return false
 	}
-	// ユーザー情報: 最初の `:` の前がユーザー(0 文字以上)、後ろがパスワード(1 文字以上)。
+	// ユーザー情報: 最初の `:` の前がユーザー(0 文字以上)、後ろがパスワード。
 	// それぞれ、ユーザー情報の文字の続きか、ラベル 1 つだけ(ラベルは、部分の先頭から、部分の終わりまでのものだけ)
-	colon, pwLen := -1, 0
+	colon := -1
+	pwLabel := false // パスワードの部分が、ラベル 1 つだけか
 	segStart := true // 今の位置が、ユーザーかパスワードの先頭か
 	x := p + len(schemeSep)
 	for {
@@ -539,9 +542,7 @@ func (f secretFinder) startsWithURLPassword(line []byte, s int) bool {
 		if segStart {
 			segStart = false
 			if e, ok := f.format.MatchAt(line, x); ok && e < n && (line[e] == '@' || colon < 0 && line[e] == ':') {
-				if colon >= 0 {
-					pwLen++
-				}
+				pwLabel = colon >= 0
 				x = e
 				continue
 			}
@@ -553,27 +554,29 @@ func (f secretFinder) startsWithURLPassword(line []byte, s int) bool {
 		if isURLUserInfoStop(c) {
 			return false
 		}
-		switch {
-		case c == ':' && colon < 0:
+		if c == ':' && colon < 0 {
 			colon, segStart = x, true
-		case colon >= 0:
-			pwLen++
 		}
 		x++
 	}
-	if colon < 0 || pwLen == 0 || x+1 >= n {
+	if colon < 0 {
 		return false
 	}
+	if !pwLabel {
+		// パスワードが置換されていない: urlPasswords が置換するものだけ(Q68)
+		_, ok := urlPasswordStart(line, x)
+		return ok
+	}
 	// `@` の後ろ: ホスト名の文字か、ラベル
+	if x+1 >= n {
+		return false
+	}
 	if isURLHostChar(line[x+1]) {
 		return true
 	}
 	_, ok := f.format.MatchAt(line, x+1)
 	return ok
 }
-
-// urlSchemeSlashes は、URL のスキームの `:` の後ろの `//`。
-var urlSchemeSlashes = []byte("//")
 
 // keyed は、キー名ベースの値の範囲を追記する(仕様 4.1、決定事項 15)。
 //
@@ -626,7 +629,7 @@ func (f secretFinder) keyed(line []byte, dst []Match) []Match {
 			break
 		}
 		pos = i + 1
-		if line[i] == ':' && bytes.HasPrefix(line[i+1:], urlSchemeSlashes) {
+		if bytes.HasPrefix(line[i:], schemeSep) {
 			continue // `<キー名>://` は、キーと値の組ではなく URL のスキーム(仕様 4.1。Q63)
 		}
 
