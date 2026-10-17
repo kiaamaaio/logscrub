@@ -367,42 +367,57 @@ func bucketAt(line []byte, s int) (int, bool) {
 //   - パス形式: `<S3 のエンドポイント>.<ドメイン>/my-bucket/…`
 //   - ARN: `arn:<パーティション>:s3:::my-bucket/…`
 //
-// 範囲は、バケット名の部分だけ。前処理: 各形の手がかり(`://`、`.amazonaws.`、`:s3:::`)を探し、
-// なければすぐ戻る(`.amazonaws.` は nextAmazonaws で探す)。
+// 範囲は、バケット名の部分だけ。前処理: 各形の手がかりを探し、なければすぐ戻る。`s3://` と ARN は `:` を
+// bytes.IndexByte で探して前後を照合し(1 回の走査)、`.amazonaws.` は nextAmazonaws で探す。
 type awsS3BucketFinder struct{}
 
 func (awsS3BucketFinder) kind() Kind { return KindAWSS3Bucket }
 
 func (f awsS3BucketFinder) find(line []byte, dst []Match) []Match {
-	dst = f.schemes(line, dst)
-	dst = f.hosts(line, dst)
-	return f.arn(line, dst)
+	dst = f.colonForms(line, dst)
+	return f.hosts(line, dst)
 }
 
 func bucketMatch(s, e int) Match {
 	return Match{Start: s, End: e, Kind: KindAWSS3Bucket}
 }
 
-// schemes は、`s3://`(`s3a://`、`s3n://`)の直後のバケット名を追記する。スキームの前が英数字でないこと。
-func (awsS3BucketFinder) schemes(line []byte, dst []Match) []Match {
+// colonForms は、`:` で始まる手がかりを持つ 2 つの形のバケット名を追記する。
+//   - `s3://`(`s3a://`、`s3n://`)の直後。スキームの前が英数字でないこと
+//   - `arn:<パーティション>:s3:::` の直後。`arn:` の前が英数字でないこと(Q46)
+//
+// `://`・`:s3:::` を bytes.Index で探すと、先頭の `:` が文中に多く(時刻、JSON のキーの区切りなど)、遅い経路になる
+// (DEVELOPMENT.md 3.4 節)。`:` を bytes.IndexByte で 1 回だけ走査し、`:` ごとに後ろを照合する(plans/v1.2.0.md 段階 8)。
+func (awsS3BucketFinder) colonForms(line []byte, dst []Match) []Match {
 	for pos := 0; ; {
-		j := bytes.Index(line[pos:], schemeSep)
+		j := bytes.IndexByte(line[pos:], ':')
 		if j < 0 {
 			return dst
 		}
-		i := pos + j // `://` の位置
+		i := pos + j // `:` の位置
 		pos = i + 1
-		for _, sch := range s3Schemes {
-			p := i - len(sch)
-			if p < 0 || !bytes.Equal(line[p:i], sch) || p > 0 && isASCIIAlnum(line[p-1]) {
-				continue
-			}
-			if e, ok := bucketAt(line, i+len(schemeSep)); ok {
-				dst = append(dst, bucketMatch(i+len(schemeSep), e))
-			}
-			break
+		switch {
+		case bytes.HasPrefix(line[i:], schemeSep):
+			dst = s3SchemeBucket(line, i, dst)
+		case bytes.HasPrefix(line[i:], s3ARNMarker):
+			dst = s3ARNBucket(line, i, dst)
 		}
 	}
+}
+
+// s3SchemeBucket は、line[i:] から始まる `://` の手前が `s3`・`s3a`・`s3n` なら、直後のバケット名を追記する。
+func s3SchemeBucket(line []byte, i int, dst []Match) []Match {
+	for _, sch := range s3Schemes {
+		p := i - len(sch)
+		if p < 0 || !bytes.Equal(line[p:i], sch) || p > 0 && isASCIIAlnum(line[p-1]) {
+			continue
+		}
+		if e, ok := bucketAt(line, i+len(schemeSep)); ok {
+			dst = append(dst, bucketMatch(i+len(schemeSep), e))
+		}
+		break
+	}
+	return dst
 }
 
 // hosts は、バーチャルホスト形式とパス形式のバケット名を追記する。
@@ -477,28 +492,21 @@ func (awsS3BucketFinder) hosts(line []byte, dst []Match) []Match {
 	}
 }
 
-// arn は、`arn:<パーティション>:s3:::` の直後のバケット名を追記する。`arn:` の前が英数字でないこと(Q46)。
-func (awsS3BucketFinder) arn(line []byte, dst []Match) []Match {
-	for pos := 0; ; {
-		j := bytes.Index(line[pos:], s3ARNMarker)
-		if j < 0 {
-			return dst
+// s3ARNBucket は、line[i:] から始まる `:s3:::` の手前が `arn:<パーティション>` なら、直後のバケット名を追記する。
+func s3ARNBucket(line []byte, i int, dst []Match) []Match {
+	for _, part := range awsPartitions {
+		p := i - len(part) - len(arnPrefix)
+		if p < 0 || !bytes.HasPrefix(line[p:], arnPrefix) || string(line[p+len(arnPrefix):i]) != part ||
+			p > 0 && isASCIIAlnum(line[p-1]) {
+			continue
 		}
-		i := pos + j // `:s3:::` の位置
-		pos = i + 1
-		for _, part := range awsPartitions {
-			p := i - len(part) - len(arnPrefix)
-			if p < 0 || !bytes.HasPrefix(line[p:], arnPrefix) || string(line[p+len(arnPrefix):i]) != part ||
-				p > 0 && isASCIIAlnum(line[p-1]) {
-				continue
-			}
-			s := i + len(s3ARNMarker)
-			if e, ok := bucketAt(line, s); ok {
-				dst = append(dst, bucketMatch(s, e))
-			}
-			break
+		s := i + len(s3ARNMarker)
+		if e, ok := bucketAt(line, s); ok {
+			dst = append(dst, bucketMatch(s, e))
 		}
+		break
 	}
+	return dst
 }
 
 // ---- aws_host(仕様 4.5) ----
