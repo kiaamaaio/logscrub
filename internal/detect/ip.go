@@ -278,11 +278,13 @@ func isLetterOrUnderscore(c byte) bool {
 
 // stripColons は、[s,e) の先頭・末尾の単独の ':'(`::` の一部でないもの)を、1 つずつ外す。
 // `src:2001:db8::1` の `:` や、`2001:db8::1: refused` の末尾の `:` は、区切りであってアドレスの一部ではない。
+// 単独かどうかは、元の行で判断する(範囲の外の隣の ':' も見る)。端のグループを切り離したあとの `::1:`
+// (`::1::x` の `x` の手前で切ったもの)の末尾の ':' は、`::` の一部なので外さない(v1.2。仕様 4.3。Q67)。
 func stripColons(line []byte, s, e int) (int, int) {
-	if e-s >= 2 && line[s] == ':' && line[s+1] != ':' {
+	if e-s >= 2 && line[s] == ':' && line[s+1] != ':' && (s == 0 || line[s-1] != ':') {
 		s++
 	}
-	if e-s >= 2 && line[e-1] == ':' && line[e-2] != ':' {
+	if e-s >= 2 && line[e-1] == ':' && line[e-2] != ':' && (e == len(line) || line[e] != ':') {
 		e--
 	}
 	return s, e

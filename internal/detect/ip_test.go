@@ -390,6 +390,16 @@ func TestIPv6Detection(t *testing.T) {
 		// 後ろが英字・'_' と癒着したものは、アドレスとして扱わない(仕様 4.3)
 		{"glued letters after", "2001:db8::1xyz", nil},
 		{"glued underscore after", "fe80::1_suffix", nil},
+		// 切り離したあとの端の ':' は、元の行で `::` の一部なら外さない(Q67)。`::1:` などが残り、解析できない
+		{"two double colons, letters after", "::1::x", nil},
+		{"two double colons, link local", "fe80::1::x", nil},
+		{"two double colons, hash output after", "::1::email_d33dcb6233c3", nil},
+		{"two double colons, letters before", "x::1::1", nil},
+		{"two double colons, underscore after", "2001:db8::1::_x", nil},
+		// 単独の ':' は、今までどおり外す
+		{"detaching keeps a valid address", "2001:db8::1:ax", []string{"ipv6_global=2001:db8::1"}}, // `:a` ごと切り離す(今までどおり)
+		{"single colon before", "tcp6:fe80::1", []string{"ipv6_private=fe80::1"}},
+		{"single colon after", "from 2001:db8::1: refused", []string{"ipv6_global=2001:db8::1"}},
 		// 特殊アドレスは置換しない
 		{"unspecified", "::", nil},
 		{"multicast", "ff02::1", nil},
@@ -760,11 +770,13 @@ func refLetterOrUnderscore(c byte) bool {
 }
 
 // refStrip は、[s,e) の先頭・末尾の単独の ':'(「::」の一部でないもの)を 1 つずつ外す。
+// 単独かどうかは、元の行の前後 1 文字ずつ(範囲の外を含む)で判断する(Q67)。
 func refStrip(line []byte, s, e int) (int, int) {
-	if e-s >= 2 && line[s] == ':' && line[s+1] != ':' {
+	colonAt := func(i int) bool { return i >= 0 && i < len(line) && line[i] == ':' }
+	if e-s >= 2 && colonAt(s) && !colonAt(s-1) && !colonAt(s+1) {
 		s++
 	}
-	if e-s >= 2 && line[e-1] == ':' && line[e-2] != ':' {
+	if e-s >= 2 && colonAt(e-1) && !colonAt(e-2) && !colonAt(e) {
 		e--
 	}
 	return s, e
@@ -833,7 +845,7 @@ func TestIPv6FinderMatchesRegexpReference(t *testing.T) {
 	alphabet := []string{
 		":", ":", "::", ":::", "1", "a", "F", "0", "ffff", "db8", "2001", "fe80", "fd00", "12345", "g", "x", "_", ".", "..",
 		"%", "%eth0", "%1", "%", "10.0.0.1", "1.2.3.4", "::1", "::ffff:", "ffff:", " ", "/", "[", "]", "-", "あ", "\xff",
-		"std", "Error", "src", "tcp6", "ip6",
+		"std", "Error", "src", "tcp6", "ip6", "email_", "::1::", "x",
 	}
 	rng := rand.New(rand.NewPCG(13, 14))
 	for iter := 0; iter < 60000; iter++ {

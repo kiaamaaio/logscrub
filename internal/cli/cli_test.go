@@ -1130,6 +1130,26 @@ func TestURLPasswordAfterHashOutput(t *testing.T) {
 	}
 }
 
+// `::` を 2 つ含む連なりの直後にメールアドレスが続く形(Q67)。hash の出力が 16 進数の英字で始まっても、
+// 2 回目に IPv6 として置換しないこと。
+func TestIPv6RunBeforeHashOutput(t *testing.T) {
+	in := "::1::0@0.AA\nfe80::1::a@b.example.com\n::1::x\n"
+	env := map[string]string{keyEnv: "test-key"}
+	for _, args := range [][]string{{"--mode", "mask"}, {"--mode", "hash"}, {"--mode", "hash", "--email-hash", "local"}} {
+		once := run(t, in, env, append([]string{"mask"}, args...)...)
+		if once.code != 0 || strings.Contains(once.stdout, "ipv6") {
+			t.Fatalf("%v: %+v", args, once)
+		}
+		if again := run(t, once.stdout, env, append([]string{"mask"}, args...)...); again.stdout != once.stdout {
+			t.Errorf("%v is not idempotent:\n%s\n%s", args, once.stdout, again.stdout)
+		}
+	}
+	// v1.1 までは `<ipv6_private_1>::x` になっていた
+	if r := run(t, "::1::x\n", nil, "mask"); r.stdout != "::1::x\n" {
+		t.Errorf("mask: %q", r.stdout)
+	}
+}
+
 // 置換される値の直後にキー名の語が続く形(Q66)。2 回流しても変わらないこと(mask・hash・別の書式・aws の種別)。
 func TestKeyNameAfterReplacedValue(t *testing.T) {
 	in := "0.0.0.1passwd=0\nclient 10.0.0.1passwd=s3cret\n10.0.0.1.password=x\n"
