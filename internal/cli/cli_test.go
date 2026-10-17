@@ -1014,18 +1014,66 @@ func TestStdoutOnlyHasTheTransformedText(t *testing.T) {
 
 var _ io.Writer = failingWriter{}
 
-// v1.2 段階 2: `--types aws_host` は受け付けられるが、検出器がまだないので何も置換しない。
-// `--stats` にも出ない。まとまり aws・cloud には含まれる(logscrub types の出力で確認)。
-func TestTypesAWSHostIsAcceptedAndReplacesNothingYet(t *testing.T) {
-	const in = "mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com a@x.com 10.0.0.1\n"
-	for _, args := range [][]string{
-		{"mask", "--types", "aws_host", "--stats"},
-		{"mask", "--types", "aws", "--stats"},
-		{"mask", "--types", "cloud", "--stats"},
-	} {
-		r := run(t, in, nil, args...)
-		if r.code != 0 || r.stdout != in || strings.Contains(r.stderr, "aws_host") {
-			t.Errorf("%v: %+v", args, r)
+// 受け入れ基準(仕様 9 章「AWS のホスト名」): 利用者ごとの部分だけが <aws_host_N> になり、サービス名・リージョン・
+// ドメインは残る。同じホスト名は同じラベル、違うホスト名は別のラベルになる。既定の種別では置換されない。
+func TestAWSHost(t *testing.T) {
+	in := "db mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432 from 10.0.0.1\n" +
+		"lb my-alb-1234567890.ap-northeast-1.elb.amazonaws.com my-nlb-0123456789abcdef.elb.ap-northeast-1.amazonaws.com\n" +
+		"cdn d111111abcdef8.cloudfront.net again mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com\n" +
+		"env my-env.ap-northeast-1.elasticbeanstalk.com fn abcdefghij0123456789klmnop.lambda-url.ap-northeast-1.on.aws\n" +
+		"mail admin@mydb.c9akciq32.ap-northeast-1.rds.amazonaws.com api https://kafka.ap-northeast-1.amazonaws.com/ data-ats.iot.us-east-1.amazonaws.com\n" +
+		"ec2 ec2-54-250-1-2.ap-northeast-1.compute.amazonaws.com bucket my-bucket.s3.ap-northeast-1.amazonaws.com\n"
+	wantHosts := "db <aws_host_1>.ap-northeast-1.rds.amazonaws.com:5432 from 10.0.0.1\n" +
+		"lb <aws_host_2>.ap-northeast-1.elb.amazonaws.com <aws_host_3>.elb.ap-northeast-1.amazonaws.com\n" +
+		"cdn <aws_host_4>.cloudfront.net again <aws_host_1>.ap-northeast-1.rds.amazonaws.com\n" +
+		"env <aws_host_5>.ap-northeast-1.elasticbeanstalk.com fn <aws_host_6>.lambda-url.ap-northeast-1.on.aws\n" +
+		"mail <email_1> api https://kafka.ap-northeast-1.amazonaws.com/ data-ats.iot.us-east-1.amazonaws.com\n" +
+		"ec2 ec2-54-250-1-2.ap-northeast-1.compute.amazonaws.com bucket my-bucket.s3.ap-northeast-1.amazonaws.com\n"
+	// 既定の種別では置換されない(IP アドレスとメールアドレスだけ)
+	def := run(t, in, nil, "mask")
+	if def.code != 0 || strings.Contains(def.stdout, "aws_host") || !strings.Contains(def.stdout, "<email_1>") {
+		t.Errorf("default types: %+v", def)
+	}
+	// --types aws_host だけ: ホスト名だけが置換される(メールアドレスのホスト名は、長いメールアドレスが優先されるが、
+	// email が無効なので、この種別だけでは aws_host になる)
+	only := run(t, in, nil, "mask", "--types", "aws_host", "--stats")
+	wantOnly := strings.Replace(wantHosts, "mail <email_1>", "mail admin@<aws_host_7>.ap-northeast-1.rds.amazonaws.com", 1)
+	if only.code != 0 || only.stdout != wantOnly || only.stderr != "logscrub: aws_host=8\n" {
+		t.Errorf("--types aws_host: %+v\nwant stdout %q", only, wantOnly)
+	}
+	// 既定の種別と合わせると、メールアドレスが優先され、EC2 のホスト名の IPv4 は ipv4 として置換される
+	both := run(t, in, nil, "mask", "--types", "default,aws_host")
+	wantBoth := strings.Replace(wantHosts, "from 10.0.0.1", "from <ipv4_private_1>", 1)
+	wantBoth = strings.Replace(wantBoth, "ec2-54-250-1-2.", "ec2-<ipv4_global_1>.", 1)
+	if both.code != 0 || both.stdout != wantBoth {
+		t.Errorf("default,aws_host: %+v\nwant stdout %q", both, wantBoth)
+	}
+	// まとまり aws・cloud にも含まれる。--stats は aws_s3_bucket のあと
+	st := run(t, in, nil, "mask", "--types", "default,aws", "--stats")
+	if st.code != 0 || !strings.HasSuffix(st.stderr, "logscrub: aws_s3_bucket=1\nlogscrub: aws_host=7\n") {
+		t.Errorf("--stats: %q", st.stderr)
+	}
+	if c := run(t, in, nil, "mask", "--types", "cloud"); !strings.Contains(c.stdout, "<aws_host_6>") {
+		t.Errorf("cloud: %+v", c)
+	}
+	// restore の往復、mask・hash の冪等性
+	dir := t.TempDir()
+	src := writeFile(t, dir, "app.log", in)
+	for _, types := range []string{"aws_host", "default,aws"} {
+		masked := run(t, "", nil, "mask", "--types", types, src)
+		if back := run(t, masked.stdout, nil, "restore", "--source", src, "--types", types); back.code != 0 || back.stdout != in {
+			t.Errorf("restore (%s): %+v", types, back)
+		}
+		if again := run(t, masked.stdout, nil, "mask", "--types", types); again.stdout != masked.stdout {
+			t.Errorf("mask (%s) is not idempotent: %q", types, again.stdout)
+		}
+		env := map[string]string{keyEnv: "test-key"}
+		h := run(t, in, env, "mask", "--mode", "hash", "--types", types)
+		if h.code != 0 || strings.Contains(h.stdout, "cluster-c9akciq32") || !strings.Contains(h.stdout, "aws_host_") {
+			t.Fatalf("hash (%s): %+v", types, h)
+		}
+		if again := run(t, h.stdout, env, "mask", "--mode", "hash", "--types", types); again.stdout != h.stdout {
+			t.Errorf("hash (%s) is not idempotent:\n%s\n%s", types, h.stdout, again.stdout)
 		}
 	}
 }
