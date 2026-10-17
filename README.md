@@ -169,6 +169,7 @@ IP アドレスだけを隠しても、ホスト名から元の値が読めて�
 `token_count`、`passwordless`、`PWD` は対象外)。値の部分だけを置換し、キー名・区切り・引用符は残します。
 JSON などの文法を壊さないよう、キー名が引用符で囲まれている場合は、文字列の値だけを置換します。
 `passwd://…` のように `:` の直後が `//` の場合は、キー名ではなく URL のスキームとして扱います(パスワードがあれば、URL のパスワードとして置換します)。
+値が `<スキーム>://<ユーザー>:<パスワード>@<ホスト>` の形で始まる場合(`password=postgres://app:s3cret@db/`)も、キー名ベースの値としては扱わず、パスワードの部分だけを置換します(`password=postgres://app:<secret_1>@db/`)。ユーザー情報のない URL(`token=https://hooks.example.com/…`)は、今までどおり値全体を置換します。
 
 ### AWS の値
 
@@ -385,6 +386,8 @@ $ ./scripts/go build -o bin/logscrub ./cmd/logscrub
     - キー名と同じ語がスキームの URL(`passwd://…`、`token://…`)は、キー名ベースの値として扱わなくなりました。
       v1.1 までは `token://abc` が `token:<secret_1>` に、`password://app:s3cret@db/` が `password:<secret_1>`(ホスト名ごと)になっていました。
       v1.2 からは、それぞれ置換されない・`password://app:<secret_1>@db/` になります。
+    - キー名ベースの値が URL のパスワードの形で始まる場合(`password=postgres://app:s3cret@db/`)も、パスワードの部分だけを置換するようになりました。
+      v1.1 までは `password=<secret_1>`(ホスト名ごと)になり、パスワードに `&` などを含むと、その後ろがそのまま残っていました(`password=https://u:p&q@h` → `password=<secret_1>&q@h`)。
 - AWS のサービスのホスト名の種別 `aws_host` を加えました(既定では無効。[AWS のサービスのホスト名](#aws-のサービスのホスト名))。まとまり `aws`・`cloud` に含まれます。
 - `aws_account` に、S3 Control のホスト(`<12 桁>.s3-control.<リージョン>.amazonaws.com`)のアカウント ID を加えました。
 - EC2 のパブリックホスト名の IPv6 形式・デュアルスタック形式(`….ip.aws`)を、`aws_host` で置換するようになりました。
