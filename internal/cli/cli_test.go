@@ -358,7 +358,7 @@ func TestInvalidOptionValuesAreErrors(t *testing.T) {
 		{"mask", "--mode", "encrypt"},
 		{"restore", "--source", "x", "--types", "foo"},
 		{"mask", "--types", "AWS"},
-		{"mask", "--types", "default,aws_host"},
+		{"mask", "--types", "default,aws_hosts"},
 		{"restore", "--source", "x", "--types", "aws_"},
 		{"restore", "--source", "x", "--mask-format", "{n}"},
 	} {
@@ -788,7 +788,7 @@ func TestHelp(t *testing.T) {
 		}
 	}
 	// --types の説明に、種別とまとまりを出す
-	for _, want := range []string{"uuid", "aws_account", "aws_s3_bucket", "default", "aws,", "cloud"} {
+	for _, want := range []string{"uuid", "aws_account", "aws_s3_bucket", "aws_host", "default", "aws,", "cloud"} {
 		if !strings.Contains(r.stdout, want) {
 			t.Errorf("mask --help lacks %q", want)
 		}
@@ -804,7 +804,7 @@ func TestTypesCommand(t *testing.T) {
 	}
 	// 1 行 1 種別(種別 ID、既定、説明)。共通の種別のあとに、クラウドごとにまとめる(仕様 6 章)。
 	wantDefault := map[string]string{
-		"email": "on", "ipv4": "on", "ipv6": "on", "secret": "on", "uuid": "off", "aws_account": "off", "aws_s3_bucket": "off",
+		"email": "on", "ipv4": "on", "ipv6": "on", "secret": "on", "uuid": "off", "aws_account": "off", "aws_s3_bucket": "off", "aws_host": "off",
 	}
 	var order []string
 	for _, line := range strings.Split(r.stdout, "\n") {
@@ -819,7 +819,7 @@ func TestTypesCommand(t *testing.T) {
 			}
 		}
 	}
-	if got := strings.Join(order, ","); got != "email,ipv4,ipv6,secret,uuid,aws_account,aws_s3_bucket" {
+	if got := strings.Join(order, ","); got != "email,ipv4,ipv6,secret,uuid,aws_account,aws_s3_bucket,aws_host" {
 		t.Errorf("type order: %s", got)
 	}
 	if !strings.Contains(r.stdout, "\nAWS:\naws_account ") {
@@ -828,8 +828,8 @@ func TestTypesCommand(t *testing.T) {
 	// 最後に、まとまりと、それぞれに含まれる種別。
 	if !strings.HasSuffix(r.stdout, "\nGroups for --types:\n"+
 		"  default  email, ipv4, ipv6, secret\n"+
-		"  aws      aws_account, aws_s3_bucket\n"+
-		"  cloud    aws_account, aws_s3_bucket\n") {
+		"  aws      aws_account, aws_s3_bucket, aws_host\n"+
+		"  cloud    aws_account, aws_s3_bucket, aws_host\n") {
 		t.Errorf("types lacks the groups:\n%s", r.stdout)
 	}
 	if strings.Contains(r.stdout, "AKIA") {
@@ -1013,3 +1013,19 @@ func TestStdoutOnlyHasTheTransformedText(t *testing.T) {
 }
 
 var _ io.Writer = failingWriter{}
+
+// v1.2 段階 2: `--types aws_host` は受け付けられるが、検出器がまだないので何も置換しない。
+// `--stats` にも出ない。まとまり aws・cloud には含まれる(logscrub types の出力で確認)。
+func TestTypesAWSHostIsAcceptedAndReplacesNothingYet(t *testing.T) {
+	const in = "mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com a@x.com 10.0.0.1\n"
+	for _, args := range [][]string{
+		{"mask", "--types", "aws_host", "--stats"},
+		{"mask", "--types", "aws", "--stats"},
+		{"mask", "--types", "cloud", "--stats"},
+	} {
+		r := run(t, in, nil, args...)
+		if r.code != 0 || r.stdout != in || strings.Contains(r.stderr, "aws_host") {
+			t.Errorf("%v: %+v", args, r)
+		}
+	}
+}
