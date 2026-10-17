@@ -1,6 +1,9 @@
 package label
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestEmailDomainEnd(t *testing.T) {
 	tests := []struct {
@@ -128,6 +131,41 @@ func TestFormatIsLabel(t *testing.T) {
 		}
 	}
 	if (Format{}).IsLabel([]byte("<email_1>")) {
+		t.Error("the zero Format matched")
+	}
+}
+
+func TestFormatEndsAt(t *testing.T) {
+	for _, tt := range []struct {
+		format string
+		line   string
+		e      int
+		want   bool
+	}{
+		{"<{type}_{n}>", "<email_1>passwd", 9, true},
+		{"<{type}_{n}>", "x<ipv4_global_12>y", 17, true},
+		{"<{type}_{n}>", "<aws_s3_bucket_" + strings.Repeat("9", 18) + ">", 34, true}, // 最も長い種別名と連番
+		{"<{type}_{n}>", "<email_1>passwd", 8, false},
+		{"<{type}_{n}>", "<email_1>passwd", 10, false},
+		{"<{type}_{n}>", "email_1>", 8, false},
+		{"<{type}_{n}>", "<email_0>", 9, false},
+		{"<{type}_{n}>", "<email_1>", 0, false},
+		{"<{type}_{n}>", "<email_1>", 10, false},
+		{"{type}_{n}", "email_12", 8, true},
+		{"{type}_{n}", "email_12", 7, false}, // 連番の途中
+		{"{type}_{n}", "xemail_1", 8, true},  // 前の文字は見ない(Scan と違い、e で終わるものを探す)
+		{"[{type}-{n}]", "a[secret-3]b", 11, true},
+		{"{n}-{type}", "7-uuid", 6, true},
+	} {
+		f, err := ParseFormat(tt.format)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := f.EndsAt([]byte(tt.line), tt.e); got != tt.want {
+			t.Errorf("%q.EndsAt(%q, %d) = %v, want %v", tt.format, tt.line, tt.e, got, tt.want)
+		}
+	}
+	if (Format{}).EndsAt([]byte("<email_1>"), 9) {
 		t.Error("the zero Format matched")
 	}
 }

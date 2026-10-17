@@ -1343,6 +1343,42 @@ func TestSecretKeyedURLWithLabels(t *testing.T) {
 	}
 }
 
+// キー名の直前が置換済みのラベルの終わりなら、キー名として扱わない(Q66)。
+func TestSecretKeyAfterLabel(t *testing.T) {
+	for _, tc := range []struct {
+		line string
+		want []string
+	}{
+		// ファズテストが見つけた形。1 回目は、キー名が `0.0.0.1passwd` で対象でない。2 回目も置換しない
+		{"0.0.0.1passwd=0", []string{"ipv4_global=0.0.0.1"}},
+		{"<ipv4_global_1>passwd=0", nil},
+		// 1 回目から対象のキー名(`.` で切れる)のもの。2 回目は、値が置換済みのラベルなので、結果は同じ
+		{"10.0.0.1.password=x", []string{"ipv4_private=10.0.0.1", "secret=x"}},
+		{"<ipv4_private_1>.password=<secret_1>", nil},
+		{"<email_1>password=abc", nil},
+		{"<email_1>Token: abc", nil},
+		{"<ipv4_global_12>passwd=0", nil},
+		// ラベルとキー名の間に、キー名の文字でないもの(空白・引用符・区切り)があれば、今までどおり
+		{"<email_1> password=abc", []string{"secret=abc"}},
+		{`<email_1>"password":"abc"`, []string{"secret=abc"}},
+		{"<email_1>,token=abc", []string{"secret=abc"}},
+		// ラベルの形でないもの
+		{"<email_0>password=abc", []string{"secret=abc"}},
+		{"<nope_1>password=abc", []string{"secret=abc"}},
+		{"email_1>password=abc", []string{"secret=abc"}},
+		// hash の出力形は英数字で終わるので、後ろの語とつながり、1 回目と同じ単位で切れる
+		{"ipv4_global_0123456789abpasswd=0", nil},
+	} {
+		if got := awsValues(t, DefaultKinds, tc.line); !slices.Equal(got, tc.want) {
+			t.Errorf("%q: got %q, want %q", tc.line, got, tc.want)
+		}
+	}
+	// 書式を指定しない(ゼロ値の)検出器は、ラベルを見ない
+	if got := (secretFinder{}).keyed([]byte("<email_1>password=abc"), nil); len(got) != 1 {
+		t.Errorf("zero format: got %v", got)
+	}
+}
+
 func TestSecretURLPasswordWithOtherKinds(t *testing.T) {
 	all := DefaultKinds.With(KindAWSAccount).With(KindAWSS3Bucket).With(KindAWSHost)
 	for _, tc := range []struct {

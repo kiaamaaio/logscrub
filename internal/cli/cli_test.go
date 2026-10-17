@@ -1130,6 +1130,33 @@ func TestURLPasswordAfterHashOutput(t *testing.T) {
 	}
 }
 
+// 置換される値の直後にキー名の語が続く形(Q66)。2 回流しても変わらないこと(mask・hash・別の書式・aws の種別)。
+func TestKeyNameAfterReplacedValue(t *testing.T) {
+	in := "0.0.0.1passwd=0\nclient 10.0.0.1passwd=s3cret\n10.0.0.1.password=x\n"
+	env := map[string]string{keyEnv: "test-key"}
+	for _, args := range [][]string{
+		{"--mode", "mask"}, {"--mode", "hash"}, {"--mode", "hash", "--email-hash", "local"},
+		{"--mask-format", "[{type}:{n}]"}, {"--types", "default,aws"},
+	} {
+		once := run(t, in, env, append([]string{"mask"}, args...)...)
+		if once.code != 0 {
+			t.Fatalf("%v: %+v", args, once)
+		}
+		if again := run(t, once.stdout, env, append([]string{"mask"}, args...)...); again.stdout != once.stdout {
+			t.Errorf("%v is not idempotent:\n%s\n%s", args, once.stdout, again.stdout)
+		}
+	}
+	// 1 回目の結果は v1.1 と同じ(キー名が数字とくっついた形は、キー名として読まない)
+	want := "<ipv4_global_1>passwd=0\nclient <ipv4_private_1>passwd=s3cret\n<ipv4_private_1>.password=<secret_1>\n"
+	if r := run(t, in, nil, "mask"); r.stdout != want {
+		t.Errorf("mask: %q, want %q", r.stdout, want)
+	}
+	// ラベルの直後のキー名の値は、置換しない
+	if r := run(t, "<email_1>password=abc <email_1> password=abc\n", nil, "mask"); r.stdout != "<email_1>password=abc <email_1> password=<secret_1>\n" {
+		t.Errorf("label before key: %q", r.stdout)
+	}
+}
+
 func TestURLPassword(t *testing.T) {
 	in := "db postgres://app:s3cret@db.example.com:5432/app\n" +
 		"rds postgres://app:s3cret@mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432/app\n" +
