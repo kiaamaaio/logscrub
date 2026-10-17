@@ -1114,11 +1114,14 @@ func TestURLPassword(t *testing.T) {
 	in := "db postgres://app:s3cret@db.example.com:5432/app\n" +
 		"rds postgres://app:s3cret@mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432/app\n" +
 		"cache redis://:other@10.0.0.5:6379 ftp://u:a:b@host.example.org\n" +
-		"web https://user:pass@10.0.0.1/ and https://taro@example.com/ and password=s3cret\n"
+		"web https://user:pass@10.0.0.1/ and https://taro@example.com/ and password=s3cret\n" +
+		`{"origin":"https://app.example.com","email":"bob@example.com"}` + "\n"
 	wantDefault := "db postgres://app:<secret_1>@db.example.com:5432/app\n" +
 		"rds postgres://app:<secret_1>@mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432/app\n" +
 		"cache redis://:<secret_2>@<ipv4_private_1>:6379 ftp://u:<secret_3>@host.example.org\n" +
-		"web https://user:<secret_4>@<ipv4_private_2>/ and https://<email_1>/ and password=<secret_1>\n"
+		"web https://user:<secret_4>@<ipv4_private_2>/ and https://<email_1>/ and password=<secret_1>\n" +
+		// パスのない URL の後ろの JSON の値は、ユーザー情報として読まない(Q60)
+		`{"origin":"https://app.example.com","email":"<email_2>"}` + "\n"
 	if r := run(t, in, nil, "mask"); r.code != 0 || r.stdout != wantDefault {
 		t.Errorf("default: %+v\nwant %q", r, wantDefault)
 	}
@@ -1128,7 +1131,7 @@ func TestURLPassword(t *testing.T) {
 		t.Errorf("default,aws: %+v\nwant %q", r, wantAWS)
 	}
 	// secret が無効でも、メールアドレスとして扱わない(Q54)。パスワードは残る
-	wantEmail := strings.Replace(in, "https://taro@example.com/", "https://<email_1>/", 1)
+	wantEmail := strings.NewReplacer("https://taro@example.com/", "https://<email_1>/", `"bob@example.com"`, `"<email_2>"`).Replace(in)
 	if r := run(t, in, nil, "mask", "--types", "email"); r.code != 0 || r.stdout != wantEmail {
 		t.Errorf("email only: %+v\nwant %q", r, wantEmail)
 	}
@@ -1145,7 +1148,7 @@ func TestURLPassword(t *testing.T) {
 		}
 		env := map[string]string{keyEnv: "test-key"}
 		h := run(t, in, env, "mask", "--mode", "hash", "--types", types)
-		if h.code != 0 || strings.Contains(h.stdout, "s3cret") || strings.Contains(h.stdout, "pass@") || !strings.Contains(h.stdout, ":secret_") {
+		if h.code != 0 || strings.Contains(h.stdout, "s3cret") || strings.Contains(h.stdout, "pass@") || strings.Contains(h.stdout, "bob@") || !strings.Contains(h.stdout, ":secret_") {
 			t.Fatalf("hash (%s): %+v", types, h)
 		}
 		if again := run(t, h.stdout, env, "mask", "--mode", "hash", "--types", types); again.stdout != h.stdout {
@@ -1153,7 +1156,7 @@ func TestURLPassword(t *testing.T) {
 		}
 	}
 	// --stats
-	if r := run(t, in, nil, "mask", "--stats"); !strings.Contains(r.stderr, "logscrub: secret=6\n") || !strings.Contains(r.stderr, "logscrub: email=1\n") {
+	if r := run(t, in, nil, "mask", "--stats"); !strings.Contains(r.stderr, "logscrub: secret=6\n") || !strings.Contains(r.stderr, "logscrub: email=2\n") {
 		t.Errorf("--stats: %q", r.stderr)
 	}
 	// 対応形式の一覧

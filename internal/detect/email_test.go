@@ -305,7 +305,7 @@ func TestEmailFinderMatchesAnchorScan(t *testing.T) {
 	alphabet := []string{
 		"a", "b", "Z", "1", "9", ".", "-", "_", "%", "+", "@", "@", " ", ",", "/", ":", "<", ">",
 		"com", ".com", "co", ".jp", "あ", "\xff", "hash_", "3f9a1c0b7d2e",
-		"http", "://", "://", "u", "p", "[", "?", "#", "\t",
+		"http", "://", "://", "u", "p", "[", "?", "#", "\t", `"`, `","k":"`, "'", "{", "|",
 	}
 	rng := rand.New(rand.NewPCG(5, 6))
 	f := emailFinder{hashLen: 12}

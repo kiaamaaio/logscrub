@@ -156,9 +156,15 @@ func isLowerHex(b []byte) bool {
 // isURLSchemeChar は、URL のスキームに使える文字(英数字・`+`・`.`・`-`)。
 func isURLSchemeChar(c byte) bool { return isASCIIAlnum(c) || c == '+' || c == '.' || c == '-' }
 
-// isURLUserInfoStop は、URL のユーザー情報(ユーザーとパスワード)に含まれない文字(空白・`/`・`?`・`#`・`@`)。
+// isURLUserInfoStop は、URL のユーザー情報(ユーザーとパスワード)に含まれない文字(空白・`/`・`?`・`#`・`@`と、
+// RFC 3986 で URL に使えない `"` `'` `` ` `` `<` `>` `\` `{` `}` `|` `^`)。後者は、JSON などで、パスのない URL の後ろの
+// 別の値(`"https://example.com","email":"bob@example.com"`)を、ユーザー情報として読まないため(Q60)。
 func isURLUserInfoStop(c byte) bool {
-	return c == ' ' || c == '\t' || c == '/' || c == '?' || c == '#' || c == '@'
+	switch c {
+	case ' ', '\t', '/', '?', '#', '@', '"', '\'', '`', '<', '>', '\\', '{', '}', '|', '^':
+		return true
+	}
+	return false
 }
 
 // isURLHostChar は、`@` の後ろのホスト名の文字(英数字・`.`・`-`・`[`)。

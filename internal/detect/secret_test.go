@@ -617,7 +617,10 @@ var (
 
 // refURLUserInfo は、URL のユーザー情報の形(仕様 4.1「URL のパスワード」)の正規表現。スキームの先頭に当てる。
 // 1 つ目のグループがパスワード。スキームの前の文字の条件は、refURLPasswords で確かめる。
-var refURLUserInfo = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*://[^ \t:/?#@]*:([^ \t/?#@]+)@[A-Za-z0-9.\[-]`)
+var refURLUserInfo = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*://[^:` + refURLUserInfoStops + `]*:([^` + refURLUserInfoStops + `]+)@[A-Za-z0-9.\[-]`)
+
+// refURLUserInfoStops は、ユーザー・パスワードに含まれない文字(文字クラスの中に書く形。仕様 4.1、Q60)。
+var refURLUserInfoStops = " \t" + regexp.QuoteMeta("/?#@\"'`<>\\{}|^")
 
 // refURLPasswords は、行のすべての位置で refURLUserInfo を試す参照実装。(パスワードの先頭, `@` の位置)の組を返す。
 func refURLPasswords(line []byte) [][2]int {
@@ -1050,6 +1053,22 @@ func TestSecretURLPassword(t *testing.T) {
 		{"empty scheme", "://u:p@h", nil},
 		{"path before userinfo", "http://host/path/u:p@h", nil},
 		{"tab in user", "http://u\t:p@h", nil},
+		// RFC 3986 で URL に使えない文字は、ユーザー情報に含めない(Q60)
+		{"json after pathless url", `{"origin":"https://app.example.com","email":"bob@example.com"}`, nil},
+		{"json after pathless url with colon", `{"u":"https://a.example.com","v":"x:y@h.example.com"}`, nil},
+		{"double quote in password", `http://u:p"w@h`, nil},
+		{"single quote in password", "http://u:p'w@h", nil},
+		{"backquote in password", "http://u:p`w@h", nil},
+		{"angle brackets in password", "http://u:<p>@h", nil},
+		{"backslash in password", `http://u:p\w@h`, nil},
+		{"braces in password", "http://u:{p}@h", nil},
+		{"pipe in password", "http://u:p|w@h", nil},
+		{"caret in password", "http://u:p^w@h", nil},
+		{"double quote in user", `http://u"v:p@h`, nil},
+		{"angle bracket in user", "http://u<v:p@h", nil},
+		// RFC 3986 でユーザー情報に使える記号は、含める
+		{"sub-delims in password", "http://u:a!$&()*+,;=~%41-._@h", []string{"secret=a!$&()*+,;=~%41-._"}},
+		{"comma and semicolon in user", "http://a,b;c:p@h", []string{"secret=p"}},
 	} {
 		got := awsValues(t, sec, tc.line)
 		if !slices.Equal(got, tc.want) {
@@ -1075,6 +1094,10 @@ func TestSecretURLPasswordWithOtherKinds(t *testing.T) {
 		{"user:pass@example.com", []string{"email=pass@example.com"}},
 		{"http://u:p@h@x.com", []string{"secret=p", "email=h@x.com"}},
 		{"mail admin@mydb.c9akciq32.ap-northeast-1.rds.amazonaws.com", []string{"email=admin@mydb.c9akciq32.ap-northeast-1.rds.amazonaws.com"}},
+		// パスのない URL の後ろの JSON の値は、ユーザー情報として読まない(Q60。読むと `"` が置換されて JSON が壊れ、
+		// メールアドレスのドメインが残る)
+		{`{"origin":"https://app.example.com","email":"bob@example.com"}`, []string{"email=bob@example.com"}},
+		{`{"u":"https://a.example.com","v":"x:y@h.example.com"}`, []string{"email=y@h.example.com"}},
 	} {
 		if got := awsValues(t, all, tc.line); !slices.Equal(got, tc.want) {
 			t.Errorf("%q: got %q, want %q", tc.line, got, tc.want)
@@ -1114,18 +1137,20 @@ func TestSecretURLPasswordAlreadyReplaced(t *testing.T) {
 // secret(パスワードの範囲)と email(`@` を除く)は、どちらもこの関数を使う。
 func TestURLPasswordMatchesRegexpReference(t *testing.T) {
 	pieces := []string{"http", "postgres", "git+ssh", "1x", "x", "ftp", "://", "://", ":/", "//", "/", ":", ":", "@", "@", "user", "u", "", "pass", "p:q",
-		"s3cret", "host.example.com", "h", "[::1]", ".", "-", "+", "_", "?", "#", " ", "\t", "あ", "\xff", "<secret_1>", "a@b.com", "10.0.0.1"}
+		"s3cret", "host.example.com", "h", "[::1]", ".", "-", "+", "_", "?", "#", " ", "\t", "あ", "\xff", "<secret_1>", "a@b.com", "10.0.0.1",
+		`"`, `","k":"`, "'", "`", "<", ">", `\`, "{", "}", "|", "^", ",", ";", "!", "%41"}
 	prefixes := []string{"", "", " ", "(", "\"", "=", "x", "1", "+", ".", "-", "_", "あ", "a://"}
 	schemes := []string{"http", "https", "postgres", "git+ssh", "a.b-c", "x1+", "1x", "-x", "", "ふ"}
 	seps := []string{"://", "://", "://", ":/", "//", ":///", "://:", ":"}
-	users := []string{"", "u", "user", "a b", "a:b", "a/b", "a?b", "a#b", "a@b", "\t", "あ"}
-	pws := []string{"p", "s3cret", "a:b", ":", "", "p w", "p/q", "p?q", "p#q", "p@q", "<secret_1>", "あ"}
+	users := []string{"", "u", "user", "a b", "a:b", "a/b", "a?b", "a#b", "a@b", "\t", "あ", `a"b`, "a,b", `h","k":"u`, "a{b", "a;b"}
+	pws := []string{"p", "s3cret", "a:b", ":", "", "p w", "p/q", "p?q", "p#q", "p@q", "<secret_1>", "あ",
+		`p"q`, "p'q", "p`q", "p\\q", "p|q", "p^q", "p,q", "p;q", "p!$&()*+=~%41"}
 	hosts := []string{"h", "host.example.com", "[::1]", "-x", ".", "10.0.0.1", "", " h", "/x", "あ", "@h", "x@y.com"}
 	suffixes := []string{"", "", "/", ":5432/app", " ", "\"", ")"}
 	rng := rand.New(rand.NewPCG(31, 32))
 	pick := func(xs []string) string { return xs[rng.IntN(len(xs))] }
 	found := 0
-	for iter := 0; iter < 80000; iter++ {
+	for iter := 0; iter < 100000; iter++ {
 		var sb strings.Builder
 		for i, n := 0, 1+rng.IntN(3); i < n; i++ {
 			if rng.IntN(3) == 0 {

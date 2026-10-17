@@ -151,8 +151,9 @@ URL のパスワード(v1.2 で追加):
 - 対象は、URL のユーザー情報に書かれたパスワード。DB の接続文字列(`postgres://app:s3cret@db-host:5432/app`)や、`https://user:pass@10.0.0.1/` のような形
 - 判定:
   - スキーム: 英字で始まり、英数字・`+`・`.`・`-` が続くもの。前が英数字・`+`・`.`・`-` でないこと。その後ろに `://`
-  - ユーザー: 0 文字以上で、空白・`:`・`/`・`?`・`#`・`@` を含まない(`redis://:pass@host` のように、ユーザーが空の形も対象)
-  - `:` + パスワード: 1 文字以上で、空白・`/`・`?`・`#`・`@` を含まない(`:` は含んでよい。最初の `:` より後ろ、`@` の手前までがパスワード)
+  - ユーザー: 0 文字以上で、空白・`:`・`/`・`?`・`#`・`@` と、下記の「URL に使えない文字」を含まない(`redis://:pass@host` のように、ユーザーが空の形も対象)
+  - `:` + パスワード: 1 文字以上で、空白・`/`・`?`・`#`・`@` と、下記の「URL に使えない文字」を含まない(`:` は含んでよい。最初の `:` より後ろ、`@` の手前までがパスワード)
+  - URL に使えない文字: `"` `'` `` ` `` `<` `>` `\` `{` `}` `|` `^`(RFC 3986 で、URL のユーザー情報に書けない文字)。JSON などで、パスのない URL の後ろに続く別の値を、ユーザー情報として読まないため(`{"origin":"https://app.example.com","email":"bob@example.com"}` の `bob@example.com` は、メールアドレスとして置換する。[plans/v1.2.0.md](plans/v1.2.0.md) Q60)。`,`・`;` などの RFC 3986 で書ける記号は含んでよい
   - `@` の後ろに、ホスト名の文字(英数字・`.`・`-`・`[`)が 1 文字以上続くこと
 - 置換するのは、パスワードの部分だけ。スキーム・ユーザー・`:`・`@`・ホスト名は残す
   - 例: `postgres://app:s3cret@mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432/app` → `postgres://app:<secret_1>@mydb.cluster-…`(`aws_host` も有効なら `postgres://app:<secret_1>@<aws_host_1>.ap-northeast-1.rds.amazonaws.com:5432/app`)
@@ -676,6 +677,7 @@ URL のパスワード(v1.2 で追加):
 - [ ] `--types default,aws` で、`postgres://app:s3cret@mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432/app` が `postgres://app:<secret_1>@<aws_host_1>.ap-northeast-1.rds.amazonaws.com:5432/app` になる
 - [ ] `redis://:s3cret@10.0.0.5:6379`(ユーザーが空)と、`:` を含むパスワード(`ftp://u:a:b@host`)のパスワード部分が置換される
 - [ ] `https://taro@example.com/`(ユーザーだけ)は、v1.1 と同じくメールアドレスとして扱われる
+- [ ] `{"origin":"https://app.example.com","email":"bob@example.com"}`(パスのない URL の後ろの JSON の値)は、`"email":"<email_1>"` になる(`"` を含めてパスワードとして置換しない。JSON を壊さない)
 - [ ] 置換後の `postgres://app:<secret_1>@…`、hash の出力 `postgres://app:secret_<hex>@…` を再度流しても変わらない
 
 除外の確認:
