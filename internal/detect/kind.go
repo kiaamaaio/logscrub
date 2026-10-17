@@ -23,6 +23,7 @@ const (
 	KindUUID
 	KindAWSAccount
 	KindAWSS3Bucket
+	KindAWSHost
 )
 
 var kindNames = [...]string{
@@ -33,6 +34,7 @@ var kindNames = [...]string{
 	KindUUID:        "uuid",
 	KindAWSAccount:  "aws_account",
 	KindAWSS3Bucket: "aws_s3_bucket",
+	KindAWSHost:     "aws_host",
 }
 
 func (k Kind) String() string {
@@ -43,7 +45,7 @@ func (k Kind) String() string {
 }
 
 // kindPriority は、範囲の長さが同じときの優先順位(小さいほうが優先)。
-// 仕様: email → ipv4 / ipv6 → secret → uuid → aws_account → aws_s3_bucket。
+// 仕様: email → ipv4 / ipv6 → secret → uuid → aws_account → aws_s3_bucket → aws_host。
 var kindPriority = [...]int{
 	KindEmail:       1,
 	KindIPv4:        2,
@@ -52,6 +54,7 @@ var kindPriority = [...]int{
 	KindUUID:        4,
 	KindAWSAccount:  5,
 	KindAWSS3Bucket: 6,
+	KindAWSHost:     7,
 }
 
 // KindSet は、Kind の集合。ビット k が Kind k。
@@ -85,6 +88,7 @@ var Types = []TypeInfo{
 	{Kind: KindUUID},
 	{Kind: KindAWSAccount, Cloud: "aws"},
 	{Kind: KindAWSS3Bucket, Cloud: "aws"},
+	{Kind: KindAWSHost, Cloud: "aws"},
 }
 
 // DefaultKinds は、`--types` を省略したときの対象(既定で有効の種別)。uuid と aws_* は含まない。
@@ -221,6 +225,8 @@ func (m Match) LabelType() string {
 		return "aws_account"
 	case KindAWSS3Bucket:
 		return "aws_s3_bucket"
+	case KindAWSHost:
+		return "aws_host"
 	case KindIPv4:
 		switch m.Class {
 		case ClassGlobal:

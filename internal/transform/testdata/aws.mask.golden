@@ -10,3 +10,10 @@
 2026-10-15T09:00:05.300Z INFO  app.policy: attached arn:aws:iam::aws:policy/ReadOnlyAccess and arn:aws:ec2:*:<aws_account_1>:vpc/*
 2026-10-15T09:00:06.000Z WARN  app.check: not replaced: account 123456789012, bucket=my-bucket, s3://My_Legacy_Bucket/, ship-10-0-1-23, ec2-54-250-1-2.example.com, x-amz-content-sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 2026-10-15T09:00:06.500Z INFO  app.done: finished on ip-<ipv4_private_1> (cn: arn:aws-cn:iam::<aws_account_1>:role/x, ecr <aws_account_1>.dkr.ecr.cn-north-1.amazonaws.com.cn/app)
+2026-10-15T09:00:07.000Z INFO  app.db: connected to <aws_host_1>.ap-northeast-1.rds.amazonaws.com:5432 (reader <aws_host_2>.ap-northeast-1.rds.amazonaws.com)
+2026-10-15T09:00:07.300Z DEBUG app.lb: forward to <aws_host_3>.ap-northeast-1.elb.amazonaws.com, <aws_host_4>.elb.ap-northeast-1.amazonaws.com and <aws_host_5>.ap-northeast-1.elb.amazonaws.com
+2026-10-15T09:00:07.600Z INFO  app.cdn: assets from <aws_host_6>.cloudfront.net and <aws_host_7>.awsglobalaccelerator.com, api <aws_host_8>.execute-api.ap-northeast-1.amazonaws.com/prod, fn <aws_host_9>.lambda-url.ap-northeast-1.on.aws
+2026-10-15T09:00:08.000Z INFO  app.k8s: kubectl --server https://<aws_host_10>.ap-northeast-1.eks.amazonaws.com env <aws_host_11>.ap-northeast-1.elasticbeanstalk.com mq <aws_host_12>.mq.ap-northeast-1.on.aws ip <aws_host_13>.ap-southeast-2.ip.aws
+2026-10-15T09:00:08.400Z INFO  app.db: dsn postgres://app:<secret_4>@<aws_host_1>.ap-northeast-1.rds.amazonaws.com:5432/app and redis://:<secret_5>@<ipv4_private_2>:6379 and https://<email_1>/
+2026-10-15T09:00:08.800Z INFO  app.s3: control <aws_account_1>.s3-control.dualstack.us-east-1.amazonaws.com, contact <email_2>
+2026-10-15T09:00:09.000Z WARN  app.check: not replaced: api rds.ap-northeast-1.amazonaws.com https://kafka.ap-northeast-1.amazonaws.com/ data-ats.iot.us-east-1.amazonaws.com db.example.com x.ap-northeast-1.cache.amazonaws.com X.CLOUDFRONT.NET x.cloudfront.net.example.org aws_host_3f9a1c0b7d2e.ap-northeast-1.rds.amazonaws.com

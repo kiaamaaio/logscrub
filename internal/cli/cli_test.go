@@ -358,7 +358,7 @@ func TestInvalidOptionValuesAreErrors(t *testing.T) {
 		{"mask", "--mode", "encrypt"},
 		{"restore", "--source", "x", "--types", "foo"},
 		{"mask", "--types", "AWS"},
-		{"mask", "--types", "default,aws_host"},
+		{"mask", "--types", "default,aws_hosts"},
 		{"restore", "--source", "x", "--types", "aws_"},
 		{"restore", "--source", "x", "--mask-format", "{n}"},
 	} {
@@ -378,7 +378,7 @@ func TestInvalidOptionValuesAreErrors(t *testing.T) {
 func TestOverlapsAndKinds(t *testing.T) {
 	for in, want := range map[string]string{
 		"::ffff:10.0.0.1\n":                               "<ipv6_private_1>\n",
-		"https://user:pass@10.0.0.1/\n":                   "https://user:pass@<ipv4_private_1>/\n",
+		"https://user:pass@10.0.0.1/\n":                   "https://user:<secret_1>@<ipv4_private_1>/\n",
 		"10.0.0.1:8080 [::1]:8080 10.0.0.0/8\n":           "<ipv4_private_1>:8080 [<ipv6_private_1>]:8080 <ipv4_private_2>/8\n",
 		"0.0.0.0 255.255.255.255 :: 224.0.0.1\n":          "0.0.0.0 255.255.255.255 :: 224.0.0.1\n",
 		"999.1.1.1 1.2 1.2.3.4.5\n":                       "999.1.1.1 1.2 1.2.3.4.5\n",
@@ -788,7 +788,7 @@ func TestHelp(t *testing.T) {
 		}
 	}
 	// --types の説明に、種別とまとまりを出す
-	for _, want := range []string{"uuid", "aws_account", "aws_s3_bucket", "default", "aws,", "cloud"} {
+	for _, want := range []string{"uuid", "aws_account", "aws_s3_bucket", "aws_host", "default", "aws,", "cloud"} {
 		if !strings.Contains(r.stdout, want) {
 			t.Errorf("mask --help lacks %q", want)
 		}
@@ -804,7 +804,7 @@ func TestTypesCommand(t *testing.T) {
 	}
 	// 1 行 1 種別(種別 ID、既定、説明)。共通の種別のあとに、クラウドごとにまとめる(仕様 6 章)。
 	wantDefault := map[string]string{
-		"email": "on", "ipv4": "on", "ipv6": "on", "secret": "on", "uuid": "off", "aws_account": "off", "aws_s3_bucket": "off",
+		"email": "on", "ipv4": "on", "ipv6": "on", "secret": "on", "uuid": "off", "aws_account": "off", "aws_s3_bucket": "off", "aws_host": "off",
 	}
 	var order []string
 	for _, line := range strings.Split(r.stdout, "\n") {
@@ -819,7 +819,7 @@ func TestTypesCommand(t *testing.T) {
 			}
 		}
 	}
-	if got := strings.Join(order, ","); got != "email,ipv4,ipv6,secret,uuid,aws_account,aws_s3_bucket" {
+	if got := strings.Join(order, ","); got != "email,ipv4,ipv6,secret,uuid,aws_account,aws_s3_bucket,aws_host" {
 		t.Errorf("type order: %s", got)
 	}
 	if !strings.Contains(r.stdout, "\nAWS:\naws_account ") {
@@ -828,8 +828,8 @@ func TestTypesCommand(t *testing.T) {
 	// 最後に、まとまりと、それぞれに含まれる種別。
 	if !strings.HasSuffix(r.stdout, "\nGroups for --types:\n"+
 		"  default  email, ipv4, ipv6, secret\n"+
-		"  aws      aws_account, aws_s3_bucket\n"+
-		"  cloud    aws_account, aws_s3_bucket\n") {
+		"  aws      aws_account, aws_s3_bucket, aws_host\n"+
+		"  cloud    aws_account, aws_s3_bucket, aws_host\n") {
 		t.Errorf("types lacks the groups:\n%s", r.stdout)
 	}
 	if strings.Contains(r.stdout, "AKIA") {
@@ -1013,3 +1013,156 @@ func TestStdoutOnlyHasTheTransformedText(t *testing.T) {
 }
 
 var _ io.Writer = failingWriter{}
+
+// 受け入れ基準(仕様 9 章「AWS のホスト名」): 利用者ごとの部分だけが <aws_host_N> になり、サービス名・リージョン・
+// ドメインは残る。同じホスト名は同じラベル、違うホスト名は別のラベルになる。既定の種別では置換されない。
+func TestAWSHost(t *testing.T) {
+	in := "db mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432 from 10.0.0.1\n" +
+		"lb my-alb-1234567890.ap-northeast-1.elb.amazonaws.com my-nlb-0123456789abcdef.elb.ap-northeast-1.amazonaws.com\n" +
+		"cdn d111111abcdef8.cloudfront.net again mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com\n" +
+		"env my-env.ap-northeast-1.elasticbeanstalk.com fn abcdefghij0123456789klmnop.lambda-url.ap-northeast-1.on.aws\n" +
+		"mail admin@mydb.c9akciq32.ap-northeast-1.rds.amazonaws.com api https://kafka.ap-northeast-1.amazonaws.com/ data-ats.iot.us-east-1.amazonaws.com api.tunneling.iot.us-east-1.amazonaws.com\n" +
+		"ec2 ec2-54-250-1-2.ap-northeast-1.compute.amazonaws.com bucket my-bucket.s3.ap-northeast-1.amazonaws.com\n"
+	wantHosts := "db <aws_host_1>.ap-northeast-1.rds.amazonaws.com:5432 from 10.0.0.1\n" +
+		"lb <aws_host_2>.ap-northeast-1.elb.amazonaws.com <aws_host_3>.elb.ap-northeast-1.amazonaws.com\n" +
+		"cdn <aws_host_4>.cloudfront.net again <aws_host_1>.ap-northeast-1.rds.amazonaws.com\n" +
+		"env <aws_host_5>.ap-northeast-1.elasticbeanstalk.com fn <aws_host_6>.lambda-url.ap-northeast-1.on.aws\n" +
+		"mail <email_1> api https://kafka.ap-northeast-1.amazonaws.com/ data-ats.iot.us-east-1.amazonaws.com api.tunneling.iot.us-east-1.amazonaws.com\n" +
+		"ec2 ec2-54-250-1-2.ap-northeast-1.compute.amazonaws.com bucket my-bucket.s3.ap-northeast-1.amazonaws.com\n"
+	// 既定の種別では置換されない(IP アドレスとメールアドレスだけ)
+	def := run(t, in, nil, "mask")
+	if def.code != 0 || strings.Contains(def.stdout, "aws_host") || !strings.Contains(def.stdout, "<email_1>") {
+		t.Errorf("default types: %+v", def)
+	}
+	// --types aws_host だけ: ホスト名だけが置換される(メールアドレスのホスト名は、長いメールアドレスが優先されるが、
+	// email が無効なので、この種別だけでは aws_host になる)
+	only := run(t, in, nil, "mask", "--types", "aws_host", "--stats")
+	wantOnly := strings.Replace(wantHosts, "mail <email_1>", "mail admin@<aws_host_7>.ap-northeast-1.rds.amazonaws.com", 1)
+	if only.code != 0 || only.stdout != wantOnly || only.stderr != "logscrub: aws_host=8\n" {
+		t.Errorf("--types aws_host: %+v\nwant stdout %q", only, wantOnly)
+	}
+	// 既定の種別と合わせると、メールアドレスが優先され、EC2 のホスト名の IPv4 は ipv4 として置換される
+	both := run(t, in, nil, "mask", "--types", "default,aws_host")
+	wantBoth := strings.Replace(wantHosts, "from 10.0.0.1", "from <ipv4_private_1>", 1)
+	wantBoth = strings.Replace(wantBoth, "ec2-54-250-1-2.", "ec2-<ipv4_global_1>.", 1)
+	if both.code != 0 || both.stdout != wantBoth {
+		t.Errorf("default,aws_host: %+v\nwant stdout %q", both, wantBoth)
+	}
+	// まとまり aws・cloud にも含まれる。--stats は aws_s3_bucket のあと
+	st := run(t, in, nil, "mask", "--types", "default,aws", "--stats")
+	if st.code != 0 || !strings.HasSuffix(st.stderr, "logscrub: aws_s3_bucket=1\nlogscrub: aws_host=7\n") {
+		t.Errorf("--stats: %q", st.stderr)
+	}
+	if c := run(t, in, nil, "mask", "--types", "cloud"); !strings.Contains(c.stdout, "<aws_host_6>") {
+		t.Errorf("cloud: %+v", c)
+	}
+	// restore の往復、mask・hash の冪等性
+	dir := t.TempDir()
+	src := writeFile(t, dir, "app.log", in)
+	for _, types := range []string{"aws_host", "default,aws"} {
+		masked := run(t, "", nil, "mask", "--types", types, src)
+		if back := run(t, masked.stdout, nil, "restore", "--source", src, "--types", types); back.code != 0 || back.stdout != in {
+			t.Errorf("restore (%s): %+v", types, back)
+		}
+		if again := run(t, masked.stdout, nil, "mask", "--types", types); again.stdout != masked.stdout {
+			t.Errorf("mask (%s) is not idempotent: %q", types, again.stdout)
+		}
+		env := map[string]string{keyEnv: "test-key"}
+		h := run(t, in, env, "mask", "--mode", "hash", "--types", types)
+		if h.code != 0 || strings.Contains(h.stdout, "cluster-c9akciq32") || !strings.Contains(h.stdout, "aws_host_") {
+			t.Fatalf("hash (%s): %+v", types, h)
+		}
+		if again := run(t, h.stdout, env, "mask", "--mode", "hash", "--types", types); again.stdout != h.stdout {
+			t.Errorf("hash (%s) is not idempotent:\n%s\n%s", types, h.stdout, again.stdout)
+		}
+	}
+}
+
+// v1.2 段階 4: S3 Control のホストのアカウント ID(ECR・ARN と同じ値は同じラベル)。既定の種別では置換されない。
+func TestAWSAccountS3Control(t *testing.T) {
+	in := "ctl 123456789012.s3-control.ap-northeast-1.amazonaws.com and 123456789012.s3-control.dualstack.us-east-1.amazonaws.com\n" +
+		"ecr 123456789012.dkr.ecr.us-east-1.amazonaws.com/app arn:aws:iam::210987654321:role/x api s3-control.us-east-1.amazonaws.com\n"
+	want := "ctl <aws_account_1>.s3-control.ap-northeast-1.amazonaws.com and <aws_account_1>.s3-control.dualstack.us-east-1.amazonaws.com\n" +
+		"ecr <aws_account_1>.dkr.ecr.us-east-1.amazonaws.com/app arn:aws:iam::<aws_account_2>:role/x api s3-control.us-east-1.amazonaws.com\n"
+	if r := run(t, in, nil, "mask"); r.code != 0 || r.stdout != in {
+		t.Errorf("default types: %+v", r)
+	}
+	for _, types := range []string{"aws_account", "aws", "cloud"} {
+		if r := run(t, in, nil, "mask", "--types", types); r.code != 0 || r.stdout != want {
+			t.Errorf("--types %s: %+v\nwant %q", types, r, want)
+		}
+	}
+	dir := t.TempDir()
+	src := writeFile(t, dir, "app.log", in)
+	masked := run(t, "", nil, "mask", "--types", "aws_account", src)
+	if back := run(t, masked.stdout, nil, "restore", "--source", src, "--types", "aws_account"); back.code != 0 || back.stdout != in {
+		t.Errorf("restore: %+v", back)
+	}
+	env := map[string]string{keyEnv: "test-key"}
+	h := run(t, in, env, "mask", "--mode", "hash", "--types", "aws_account")
+	if h.code != 0 || strings.Contains(h.stdout, "123456789012") || strings.Count(h.stdout, "aws_account_") != 4 {
+		t.Fatalf("hash: %+v", h)
+	}
+	if again := run(t, h.stdout, env, "mask", "--mode", "hash", "--types", "aws_account"); again.stdout != h.stdout {
+		t.Errorf("hash is not idempotent:\n%s\n%s", h.stdout, again.stdout)
+	}
+}
+
+// 受け入れ基準(仕様 9 章「URL のパスワード」。v1.2): パスワードの部分だけが <secret_N> になり、メールアドレスとして
+// 置換されない。既定の動作の変更(v1.1 までは <email_N> になる、またはパスワードが残る)。
+func TestURLPassword(t *testing.T) {
+	in := "db postgres://app:s3cret@db.example.com:5432/app\n" +
+		"rds postgres://app:s3cret@mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432/app\n" +
+		"cache redis://:other@10.0.0.5:6379 ftp://u:a:b@host.example.org\n" +
+		"web https://user:pass@10.0.0.1/ and https://taro@example.com/ and password=s3cret\n" +
+		`{"origin":"https://app.example.com","email":"bob@example.com"}` + "\n"
+	wantDefault := "db postgres://app:<secret_1>@db.example.com:5432/app\n" +
+		"rds postgres://app:<secret_1>@mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432/app\n" +
+		"cache redis://:<secret_2>@<ipv4_private_1>:6379 ftp://u:<secret_3>@host.example.org\n" +
+		"web https://user:<secret_4>@<ipv4_private_2>/ and https://<email_1>/ and password=<secret_1>\n" +
+		// パスのない URL の後ろの JSON の値は、ユーザー情報として読まない(Q60)
+		`{"origin":"https://app.example.com","email":"<email_2>"}` + "\n"
+	if r := run(t, in, nil, "mask"); r.code != 0 || r.stdout != wantDefault {
+		t.Errorf("default: %+v\nwant %q", r, wantDefault)
+	}
+	// aws_host も有効なら、ホスト名の情報が残る
+	wantAWS := strings.Replace(wantDefault, "@mydb.cluster-c9akciq32.ap-northeast-1.rds", "@<aws_host_1>.ap-northeast-1.rds", 1)
+	if r := run(t, in, nil, "mask", "--types", "default,aws"); r.code != 0 || r.stdout != wantAWS {
+		t.Errorf("default,aws: %+v\nwant %q", r, wantAWS)
+	}
+	// secret が無効でも、メールアドレスとして扱わない(Q54)。パスワードは残る
+	wantEmail := strings.NewReplacer("https://taro@example.com/", "https://<email_1>/", `"bob@example.com"`, `"<email_2>"`).Replace(in)
+	if r := run(t, in, nil, "mask", "--types", "email"); r.code != 0 || r.stdout != wantEmail {
+		t.Errorf("email only: %+v\nwant %q", r, wantEmail)
+	}
+	// restore の往復、mask・hash の冪等性
+	dir := t.TempDir()
+	src := writeFile(t, dir, "app.log", in)
+	for _, types := range []string{"default", "default,aws"} {
+		masked := run(t, "", nil, "mask", "--types", types, src)
+		if back := run(t, masked.stdout, nil, "restore", "--source", src, "--types", types); back.code != 0 || back.stdout != in {
+			t.Errorf("restore (%s): %+v", types, back)
+		}
+		if again := run(t, masked.stdout, nil, "mask", "--types", types); again.stdout != masked.stdout {
+			t.Errorf("mask (%s) is not idempotent: %q", types, again.stdout)
+		}
+		env := map[string]string{keyEnv: "test-key"}
+		h := run(t, in, env, "mask", "--mode", "hash", "--types", types)
+		if h.code != 0 || strings.Contains(h.stdout, "s3cret") || strings.Contains(h.stdout, "pass@") || strings.Contains(h.stdout, "bob@") || !strings.Contains(h.stdout, ":secret_") {
+			t.Fatalf("hash (%s): %+v", types, h)
+		}
+		if again := run(t, h.stdout, env, "mask", "--mode", "hash", "--types", types); again.stdout != h.stdout {
+			t.Errorf("hash (%s) is not idempotent:\n%s\n%s", types, h.stdout, again.stdout)
+		}
+	}
+	// --stats
+	if r := run(t, in, nil, "mask", "--stats"); !strings.Contains(r.stderr, "logscrub: secret=6\n") || !strings.Contains(r.stderr, "logscrub: email=2\n") {
+		t.Errorf("--stats: %q", r.stderr)
+	}
+	// 対応形式の一覧
+	for _, args := range [][]string{{"types", "--verbose"}, {"mask", "--help"}} {
+		if r := run(t, "", nil, args...); r.code != 0 || !strings.Contains(r.stdout, "URL password") {
+			t.Errorf("%v lacks the URL password format", args)
+		}
+	}
+}

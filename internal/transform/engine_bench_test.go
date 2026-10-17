@@ -42,7 +42,7 @@ func BenchmarkEngineMaskAWS(b *testing.B) {
 		b.Fatal(err)
 	}
 	data := []byte(sb.String())
-	det, err := detect.New(detect.Options{Kinds: detect.DefaultKinds.With(detect.KindAWSAccount).With(detect.KindAWSS3Bucket)})
+	det, err := detect.New(detect.Options{Kinds: detect.DefaultKinds.With(detect.KindAWSAccount).With(detect.KindAWSS3Bucket).With(detect.KindAWSHost)})
 	if err != nil {
 		b.Fatal(err)
 	}

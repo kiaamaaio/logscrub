@@ -19,6 +19,8 @@ var emailRe = regexp.MustCompile(`([A-Za-z0-9._%+-]+@(?:[A-Za-z0-9-]+\.)+[A-Za-z
 
 // emailFinder は、メールアドレスの検出器。
 //
+// URL のユーザー情報の `@`(`<スキーム>://<ユーザー>:<パスワード>@<ホスト>`。urlPasswordStart)は、候補にしない。
+//
 // ローカルパートが、`hash_<hex>` の形、hash の出力形(`<種別>_<hex>`)、現在の書式のラベルそのもののいずれか
 // であるものは、検出の対象外(仕様 5.2、決定事項 11)。
 //
@@ -54,7 +56,14 @@ func (f emailFinder) scan(line []byte, dst []Match, excludeHashed bool) []Match 
 			return dst
 		}
 		s, e := start+loc[2], start+loc[3]
-		local := line[s : s+bytes.IndexByte(line[s:e], '@')]
+		matchAt := s + bytes.IndexByte(line[s:e], '@')
+		if _, ok := urlPasswordStart(line, matchAt); ok {
+			// URL のユーザー情報の `@`(`postgres://app:s3cret@db-host/`)は、メールアドレスとして扱わない
+			// (v1.2。secret が無効でも同じ。仕様 4.1、Q54)。重なりの解決の規則には、例外を設けない。
+			pos = matchAt + 1
+			continue
+		}
+		local := line[s:matchAt]
 		if !excludeHashed || !label.IsHashedLocalPart(local, f.hashLen) && !f.format.IsLabel(local) {
 			dst = append(dst, Match{Start: s, End: e, Kind: KindEmail})
 		}

@@ -184,6 +184,8 @@ func TestGenerateWithAWS(t *testing.T) {
 	out, st := generate(t, Config{Size: 4 << 20, Seed: 1, AWS: true})
 	for _, marker := range []string{
 		"X-Amz-Signature=", "host=ec2-", "node=ip-", "arn:aws:iam::", ".dkr.ecr.", "https://sqs.", "s3://", "https://s3.",
+		// v1.2: AWS のサービスのホスト名、URL のパスワード
+		".rds.amazonaws.com:5432", ".elb.amazonaws.com", ".cloudfront.net", ".execute-api.", "dsn=postgres://app:",
 		// 既定の種別の値も、引き続き含む
 		"@example.", "AKIA", "password=",
 	} {

@@ -1,17 +1,17 @@
 2026-10-11T03:25:56.789Z INFO  [worker-3] app.http.Router: request id=req-1 user=<email_1> ip=<ipv4_private_1> path=/api/v1/items status=200
 2026-10-11T03:25:57.001Z INFO  [worker-1] app.http.Router: request id=req-2 user=<email_2> ip=<ipv4_global_1> path=/login status=302
 2026-10-11T03:25:57.120Z WARN  [worker-1] app.auth.Login: failed login for <email_1> from <ipv4_global_1> (attempt 3)
-2026-10-11T03:25:58.250Z DEBUG [worker-2] app.http.Client: GET https://user:pass@<ipv4_private_2>:8443/health -> 200
-2026-10-11T03:25:58.900Z INFO  [worker-2] app.http.Client: Authorization: Bearer <secret_1>
-2026-10-11T03:25:59.100Z INFO  [worker-4] app.config: loaded password=<secret_2>&user=admin&retries=3
-2026-10-11T03:25:59.300Z INFO  [worker-4] app.config: {"api_key": "<secret_3>", "max_tokens": 4096, "token_count": 5}
-2026-10-11T03:26:00.010Z ERROR [worker-3] app.queue.Worker: aws key <secret_4> rejected
-2026-10-11T03:26:00.200Z INFO  [worker-5] app.cache.Store: session_id=<secret_5> renewed
+2026-10-11T03:25:58.250Z DEBUG [worker-2] app.http.Client: GET https://user:<secret_1>@<ipv4_private_2>:8443/health -> 200
+2026-10-11T03:25:58.900Z INFO  [worker-2] app.http.Client: Authorization: Bearer <secret_2>
+2026-10-11T03:25:59.100Z INFO  [worker-4] app.config: loaded password=<secret_3>&user=admin&retries=3
+2026-10-11T03:25:59.300Z INFO  [worker-4] app.config: {"api_key": "<secret_4>", "max_tokens": 4096, "token_count": 5}
+2026-10-11T03:26:00.010Z ERROR [worker-3] app.queue.Worker: aws key <secret_5> rejected
+2026-10-11T03:26:00.200Z INFO  [worker-5] app.cache.Store: session_id=<secret_6> renewed
 2026-10-11T03:26:00.300Z INFO  [worker-5] app.cache.Store: trace {<uuid_1>} urn:uuid:<uuid_2>
 2026-10-11T03:26:01.000Z INFO  [worker-1] app.net.Dial: connecting to [<ipv6_global_1>]:443 via <ipv6_private_1> and <ipv6_private_2>
 2026-10-11T03:26:01.100Z INFO  [worker-1] app.net.Dial: bound 0.0.0.0:8080 and 255.255.255.255 and <ipv6_private_3>
 2026-10-11T03:26:02.000Z ERROR [worker-2] app.cpp: terminate called after throwing std::bad_alloc in fmt::Error
 2026-10-11T03:26:03.000Z INFO  [worker-3] app.user: ユーザー 山田太郎 (<email_1>) が <ipv4_private_3> からログイン。連絡先は 03-1234-5678、〒123-4567
-2026-10-11T03:26:04.000Z INFO  [worker-3] app.json: {"message":"{\"password\":\"<secret_6>\",\"user\":\"x\"}","pin":123456,"token":null}
+2026-10-11T03:26:04.000Z INFO  [worker-3] app.json: {"message":"{\"password\":\"<secret_7>\",\"user\":\"x\"}","pin":123456,"token":null}
 2026-10-11T03:26:05.000Z INFO  [worker-3] app.already: from <email_1> to <ipv4_private_1> with password=<secret_1>
 2026-10-11T03:26:06.000Z INFO  [worker-3] app.dup: <email_1> again, <email_2>, <email_1>

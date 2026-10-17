@@ -9,10 +9,11 @@ import (
 	"github.com/kiaamaaio/logscrub/internal/synthlog"
 )
 
-// AWS の値(v1.1)についての、往復・冪等性(plans/v1.1.0.md 段階 6。仕様 9 章「AWS」)。
+// AWS の値(v1.1)と、AWS のサービスのホスト名・URL のパスワード(v1.2)についての、往復・冪等性
+// (plans/v1.1.0.md 段階 6、plans/v1.2.0.md 段階 6。仕様 9 章「AWS」「AWS のホスト名」「URL のパスワード」)。
 
 // awsKinds は、`--types default,aws` に当たる種別。
-var awsKinds = detect.DefaultKinds.With(detect.KindAWSAccount).With(detect.KindAWSS3Bucket)
+var awsKinds = detect.DefaultKinds.With(detect.KindAWSAccount).With(detect.KindAWSS3Bucket).With(detect.KindAWSHost)
 
 func readAWSSample(t testing.TB) string {
 	t.Helper()
@@ -34,7 +35,7 @@ func awsSyntheticLog(t testing.TB, seed uint64) string {
 }
 
 // testdata/aws.log を `--types default,aws` で mask した結果が、testdata/aws.mask.golden と一致する。
-// 期待値は、手で確認したもの(1 行ごとに、仕様 4.1・4.3・4.4 の形と、置換しない形を確認した)。
+// 期待値は、手で確認したもの(1 行ごとに、仕様 4.1・4.3・4.4・4.5 の形と、置換しない形を確認した)。
 func TestMaskGoldenAWS(t *testing.T) {
 	want, err := os.ReadFile("testdata/aws.mask.golden")
 	if err != nil {
@@ -44,7 +45,7 @@ func TestMaskGoldenAWS(t *testing.T) {
 	if got != string(want) {
 		t.Errorf("mask output differs from internal/transform/testdata/aws.mask.golden\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
-	if st.Count("aws_account") == 0 || st.Count("aws_s3_bucket") == 0 || st.Count("secret") == 0 || st.Count("ipv4_private") == 0 {
+	if st.Count("aws_account") == 0 || st.Count("aws_s3_bucket") == 0 || st.Count("aws_host") != 14 || st.Count("secret") == 0 || st.Count("ipv4_private") == 0 {
 		t.Errorf("stats: %+v", st.Types())
 	}
 }
@@ -54,15 +55,17 @@ func TestRestoreRoundTripAWS(t *testing.T) {
 	inputs := map[string]string{
 		"sample":    readAWSSample(t),
 		"synthetic": awsSyntheticLog(t, 21),
-		"crlf":      "arn:aws:iam::123456789012:root\r\ns3://my-bucket/a\r\n",
-		"no eol":    "ip-10-0-1-23 ec2-54-250-1-2.compute-1.amazonaws.com 54.250.1.2",
+		"crlf":      "arn:aws:iam::123456789012:root\r\ns3://my-bucket/a\r\nmydb.ap-northeast-1.rds.amazonaws.com\r\n",
+		"no eol":    "ip-10-0-1-23 ec2-54-250-1-2.compute-1.amazonaws.com 54.250.1.2 d111111abcdef8.cloudfront.net",
+		"url":       "postgres://app:s3cret@mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432/app redis://:s3cret@10.0.0.5:6379\n",
 	}
 	optsList := map[string]detect.Options{
 		"default,aws":   {Kinds: awsKinds},
-		"aws":           {Kinds: detect.KindSet(0).With(detect.KindAWSAccount).With(detect.KindAWSS3Bucket)},
+		"aws":           {Kinds: detect.KindSet(0).With(detect.KindAWSAccount).With(detect.KindAWSS3Bucket).With(detect.KindAWSHost)},
+		"aws_host":      {Kinds: detect.KindSet(0).With(detect.KindAWSHost)},
 		"custom format": {Kinds: awsKinds, Format: mustFormat(t, "[{type}-{n}]")},
 		"global only":   {Kinds: awsKinds, IPScope: detect.ScopeGlobal},
-		"allow":         {Kinds: awsKinds, Allow: map[string]struct{}{"my-bucket": {}, "123456789012": {}}},
+		"allow":         {Kinds: awsKinds, Allow: map[string]struct{}{"my-bucket": {}, "123456789012": {}, "mydb.cluster-c9akciq32": {}}},
 	}
 	for iname, in := range inputs {
 		for oname, opts := range optsList {
@@ -94,7 +97,7 @@ func TestAWSIsIdempotent(t *testing.T) {
 			"curly format":  {Kinds: awsKinds, Format: mustFormat(t, "{{type}:{n}}")},
 		} {
 			once, st := mask(t, opts, in)
-			if st.Count("aws_account") == 0 || st.Count("aws_s3_bucket") == 0 {
+			if st.Count("aws_account") == 0 || st.Count("aws_s3_bucket") == 0 || st.Count("aws_host") == 0 {
 				t.Fatalf("%s / %s: no AWS value was replaced", iname, oname)
 			}
 			twice, st2 := mask(t, opts, once)
@@ -108,7 +111,8 @@ func TestAWSIsIdempotent(t *testing.T) {
 				once, _ := hashRun(t, opts, testKey, n, mode, in)
 				// 決まった形の中の値は、hash の出力になる(置換しない形の行は、元のまま)
 				for _, v := range []string{"aeeed9bbccd4", "fe5f80f77d5f", "https://my-bucket.s3.", "ec2-54-250-1-2.ap-", "[ec2-user@ip-10-0-1-23 ",
-					"sts::123456789012:", "s3a://logs.example.com", "on ip-10-0-1-23 ("} {
+					"sts::123456789012:", "s3a://logs.example.com", "on ip-10-0-1-23 (", "mydb.cluster-c9akciq32", "my-alb-1234567890", "d111111abcdef8", "0123456789ABCDEF",
+					"my-env.", "f5lnz-0khrm", "s3cret", "other@", ":other"} {
 					if iname == "sample" && strings.Contains(once, v) {
 						t.Errorf("%s / mode %d / length %d: hash output contains %q", iname, mode, n, v)
 					}

@@ -16,6 +16,7 @@ var typeDescriptions = map[detect.Kind]string{
 	detect.KindUUID:        "UUIDs, versions 1-8 (enable with --types default,uuid or --uuid-versions)",
 	detect.KindAWSAccount:  "AWS account IDs in ARNs, ECR registries and SQS queue URLs",
 	detect.KindAWSS3Bucket: "S3 bucket names in s3:// URLs, S3 endpoints and ARNs",
+	detect.KindAWSHost:     "customer-specific part of AWS service host names (RDS, ELB, CloudFront, ...)",
 }
 
 // cloudTitles は、`logscrub types` で、クラウドの種別の前に出す見出し。

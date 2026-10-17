@@ -133,6 +133,7 @@ func TestPerfThroughput(t *testing.T) {
 		{"mask with uuid", log, false, []string{"--types", "default,uuid"}},
 		{"aws log, default types", awsLog, false, nil},
 		{"aws log, default,aws", awsLog, false, []string{"--types", "default,aws"}},
+		{"aws log, without aws_host", awsLog, false, []string{"--types", "default,aws_account,aws_s3_bucket"}},
 	} {
 		best := measurement{seconds: 1e9}
 		for i := 0; i < 3; i++ {

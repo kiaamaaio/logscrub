@@ -9,7 +9,7 @@ import (
 
 func TestParseTypes(t *testing.T) {
 	def := KindSet(0).With(KindEmail).With(KindIPv4).With(KindIPv6).With(KindSecret)
-	aws := KindSet(0).With(KindAWSAccount).With(KindAWSS3Bucket)
+	aws := KindSet(0).With(KindAWSAccount).With(KindAWSS3Bucket).With(KindAWSHost)
 	tests := []struct {
 		spec string
 		want KindSet
@@ -58,7 +58,7 @@ func TestParseTypesRejectsUnknown(t *testing.T) {
 		"", "foo", "email,foo", "foo,email", "Email", "EMAIL", " email", "email ", "email, uuid",
 		"email,", ",email", "email,,uuid", "all", "ip", "ipv", "phone_jp", "postal_jp", "credit_card", "my_number", "base64", "custom",
 		"ipv4_global", "default,", "defaults",
-		"AWS", "Aws", "aws_", "aws_*", "aws_host", "aws_account_id", "s3", "aws-account", "clouds", "gcp", " aws", "aws,",
+		"AWS", "Aws", "aws_", "aws_*", "aws_hosts", "aws_account_id", "s3", "aws-account", "clouds", "gcp", " aws", "aws,",
 	} {
 		t.Run(spec, func(t *testing.T) {
 			if _, err := ParseTypes(spec); err == nil {
@@ -86,7 +86,7 @@ func TestDefaultKinds(t *testing.T) {
 			t.Errorf("DefaultKinds lacks %v", k)
 		}
 	}
-	for _, k := range []Kind{KindUUID, KindAWSAccount, KindAWSS3Bucket} {
+	for _, k := range []Kind{KindUUID, KindAWSAccount, KindAWSS3Bucket, KindAWSHost} {
 		if DefaultKinds.Has(k) {
 			t.Errorf("DefaultKinds has %v; it is disabled by default", k)
 		}
@@ -96,7 +96,7 @@ func TestDefaultKinds(t *testing.T) {
 // 種別の表の性質(仕様 4 章): 種別名は重複せず、クラウドの種別は `<クラウド>_` で始まり、
 // 既定で有効の種別はクラウドの種別でない。並びは、共通の種別のあとに、クラウドごとにまとめる。
 func TestTypesTable(t *testing.T) {
-	want := []string{"email", "ipv4", "ipv6", "secret", "uuid", "aws_account", "aws_s3_bucket"}
+	want := []string{"email", "ipv4", "ipv6", "secret", "uuid", "aws_account", "aws_s3_bucket", "aws_host"}
 	var got []string
 	seen := map[string]bool{}
 	for i, ti := range Types {
@@ -156,7 +156,7 @@ func TestGroups(t *testing.T) {
 			cloud = cloud.With(ti.Kind)
 		}
 	}
-	if aws != KindSet(0).With(KindAWSAccount).With(KindAWSS3Bucket) {
+	if aws != KindSet(0).With(KindAWSAccount).With(KindAWSS3Bucket).With(KindAWSHost) {
 		t.Errorf("aws_ types = %b", aws)
 	}
 	if byName["default"] != DefaultKinds || byName["aws"] != aws || byName["cloud"] != cloud {
@@ -183,7 +183,7 @@ func TestKindSetHoldsAllKinds(t *testing.T) {
 func TestKindString(t *testing.T) {
 	want := map[Kind]string{
 		KindEmail: "email", KindIPv4: "ipv4", KindIPv6: "ipv6", KindSecret: "secret", KindUUID: "uuid",
-		KindAWSAccount: "aws_account", KindAWSS3Bucket: "aws_s3_bucket",
+		KindAWSAccount: "aws_account", KindAWSS3Bucket: "aws_s3_bucket", KindAWSHost: "aws_host",
 	}
 	for k, s := range want {
 		if k.String() != s {
@@ -202,6 +202,7 @@ func TestLabelType(t *testing.T) {
 		{Match{Kind: KindUUID}, "uuid"},
 		{Match{Kind: KindAWSAccount}, "aws_account"},
 		{Match{Kind: KindAWSS3Bucket}, "aws_s3_bucket"},
+		{Match{Kind: KindAWSHost}, "aws_host"},
 		{Match{Kind: KindIPv4, Class: ClassGlobal}, "ipv4_global"},
 		{Match{Kind: KindIPv4, Class: ClassPrivate}, "ipv4_private"},
 		{Match{Kind: KindIPv6, Class: ClassGlobal}, "ipv6_global"},
