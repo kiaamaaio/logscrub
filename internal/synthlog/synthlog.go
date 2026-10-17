@@ -5,8 +5,10 @@
 // 検出対象でない行には、検出対象になりうる文字列(`@`、IP アドレス、キー名など)を入れない。
 // 同じ設定なら、出力は常に同じになる。
 //
-// Config.AWS を指定すると、検出対象に AWS の値(署名、EC2 のホスト名、ARN、ECR、SQS、S3)を加える
-// (v1.1 の `--types default,aws` の測定用。plans/v1.1.0.md の Q39)。指定しない場合の出力は、v1.0 と同じ。
+// Config.AWS を指定すると、検出対象に AWS の値(署名、EC2 のホスト名、ARN、ECR、SQS、S3)と、
+// v1.2 で加えた AWS のサービスのホスト名(RDS、ELB、CloudFront など)、URL のパスワードを加える
+// (`--types default,aws` の測定用。plans/v1.1.0.md の Q39、plans/v1.2.0.md の段階 6)。
+// 指定しない場合の出力は、v1.0 と同じ。
 package synthlog
 
 import (
@@ -205,7 +207,7 @@ const digits = "0123456789"
 // awsFragment は、AWS の値を 1 つ含む断片を返す(Config.AWS のとき)。
 func (g *generator) awsFragment() string {
 	region := g.pick([]string{"ap-northeast-1", "us-east-1", "eu-west-1", "us-west-2"})
-	switch g.rng.IntN(8) {
+	switch g.rng.IntN(13) {
 	case 0:
 		return "url=https://" + g.lower(8) + ".s3." + region + ".amazonaws.com/" + g.lower(6) + "?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=" +
 			g.chars(hexDigits, 64)
@@ -221,6 +223,16 @@ func (g *generator) awsFragment() string {
 		return "queue=https://sqs." + region + ".amazonaws.com/" + g.chars(digits, 12) + "/" + g.lower(6)
 	case 6:
 		return "src=s3://" + g.lower(4) + "-" + g.lower(6) + "/logs/" + g.lower(6) + ".gz"
+	case 7:
+		return "db=" + g.lower(6) + ".cluster-" + g.lower(9) + "." + region + ".rds.amazonaws.com:5432"
+	case 8:
+		return "lb=" + g.lower(8) + "-" + g.chars(digits, 10) + "." + region + ".elb.amazonaws.com"
+	case 9:
+		return "cdn=d" + g.chars(hexDigits, 13) + ".cloudfront.net"
+	case 10:
+		return "api=" + g.lower(10) + ".execute-api." + region + ".amazonaws.com"
+	case 11:
+		return "dsn=postgres://app:" + g.chars(alnum, 10) + "@" + g.lower(8) + "." + region + ".rds.amazonaws.com:5432/app"
 	default:
 		return "obj=https://s3." + region + ".amazonaws.com/" + g.lower(4) + "." + g.lower(6) + "/" + g.lower(6)
 	}

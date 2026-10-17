@@ -12,6 +12,7 @@ import (
 //
 //   - 固定形式: AWS、GitHub、Slack、Stripe、Google、`sk-`、JWT(前後が英数字でないこと。Q14)
 //   - AWS の署名(SigV4): `X-Amz-Signature=<値>`、`Signature=<値>` の値の部分(v1.1。Q32)
+//   - URL のパスワード: `<スキーム>://<ユーザー>:<パスワード>@<ホスト>` のパスワード部分(v1.2。Q48)
 //   - キー名ベース: `password=<値>`、`"api_key": "<値>"`、`Authorization: Bearer <値>` などの値の部分
 //     (Q15、Q16。JSON の文法を壊さない。決定事項 15)
 type secretFinder struct{}
@@ -21,6 +22,7 @@ func (secretFinder) kind() Kind { return KindSecret }
 func (f secretFinder) find(line []byte, dst []Match) []Match {
 	dst = f.fixed(line, dst)
 	dst = f.signatures(line, dst)
+	dst = f.urlPasswords(line, dst)
 	return f.keyed(line, dst)
 }
 
@@ -147,6 +149,74 @@ func isLowerHex(b []byte) bool {
 		}
 	}
 	return true
+}
+
+// ---- URL のパスワード(v1.2。仕様 4.1、Q48) ----
+
+// isURLSchemeChar は、URL のスキームに使える文字(英数字・`+`・`.`・`-`)。
+func isURLSchemeChar(c byte) bool { return isASCIIAlnum(c) || c == '+' || c == '.' || c == '-' }
+
+// isURLUserInfoStop は、URL のユーザー情報(ユーザーとパスワード)に含まれない文字(空白・`/`・`?`・`#`・`@`と、
+// RFC 3986 で URL に使えない `"` `'` `` ` `` `<` `>` `\` `{` `}` `|` `^`)。後者は、JSON などで、パスのない URL の後ろの
+// 別の値(`"https://example.com","email":"bob@example.com"`)を、ユーザー情報として読まないため(Q60)。
+func isURLUserInfoStop(c byte) bool {
+	switch c {
+	case ' ', '\t', '/', '?', '#', '@', '"', '\'', '`', '<', '>', '\\', '{', '}', '|', '^':
+		return true
+	}
+	return false
+}
+
+// isURLHostChar は、`@` の後ろのホスト名の文字(英数字・`.`・`-`・`[`)。
+func isURLHostChar(c byte) bool { return isASCIIAlnum(c) || c == '.' || c == '-' || c == '[' }
+
+// urlPasswordStart は、line[at] の `@` が、URL のユーザー情報の `@` なら、パスワードの先頭を返す(仕様 4.1)。
+//
+// `@` の手前を遡り、ユーザー情報(isURLUserInfoStop でない文字の続き)を求める。その中の最初の `:` より後ろ
+// (1 文字以上)がパスワード、手前がユーザー(0 文字以上)。ユーザー情報の直前が `://` で、その前がスキーム
+// (英数字・`+`・`.`・`-` の続きで、英字で始まる)、`@` の後ろがホスト名の文字であること。
+// 遡る範囲は、手前の `@`・`/` などで止まるので、`@` ごとに呼んでも、遡る長さの合計は行の長さ以内に収まる。
+// secret のパスワードの検出と、email の検出器の「この `@` はメールアドレスとして扱わない」の判定が共用する。
+func urlPasswordStart(line []byte, at int) (int, bool) {
+	if at+1 >= len(line) || !isURLHostChar(line[at+1]) {
+		return 0, false
+	}
+	p, colon := at, -1
+	for p > 0 && !isURLUserInfoStop(line[p-1]) {
+		p--
+		if line[p] == ':' {
+			colon = p
+		}
+	}
+	if colon < 0 || colon+1 >= at || p < 3 || line[p-3] != ':' || line[p-2] != '/' || line[p-1] != '/' {
+		return 0, false
+	}
+	q := p - 3
+	for q > 0 && isURLSchemeChar(line[q-1]) {
+		q--
+	}
+	if q == p-3 || !(line[q] >= 'a' && line[q] <= 'z' || line[q] >= 'A' && line[q] <= 'Z') {
+		return 0, false
+	}
+	return colon + 1, true
+}
+
+// urlPasswords は、URL のユーザー情報のパスワードの範囲を追記する(仕様 4.1)。
+//
+// 前処理: `@` を bytes.IndexByte で探し(email も同じ手がかり。`@` のない行はここで終わる)、見つけた `@` ごとに
+// urlPasswordStart で手前を調べる。`://` を手がかりにすると、`:` が文中に多く(時刻など)、探す回数が増える。
+func (secretFinder) urlPasswords(line []byte, dst []Match) []Match {
+	for pos := 0; ; {
+		j := bytes.IndexByte(line[pos:], '@')
+		if j < 0 {
+			return dst
+		}
+		at := pos + j
+		pos = at + 1
+		if s, ok := urlPasswordStart(line, at); ok {
+			dst = append(dst, Match{Start: s, End: at, Kind: KindSecret})
+		}
+	}
 }
 
 // ---- Authorization ヘッダ(Bearer / Basic) ----

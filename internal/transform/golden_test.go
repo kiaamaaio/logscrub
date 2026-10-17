@@ -106,6 +106,9 @@ func FuzzMaskStable(f *testing.F) {
 		"AKIAIOSFODNN7EXAMPLE ghp_" + strings.Repeat("a", 36) + "\n", "<email_1> password=<secret_1>\n",
 		"token: Bearer abc.def-ghi\n", "接続元 10.0.0.1 から taro@example.com\n", "\xff\xfe a@b.co\r\n", "hash_3f9a1c0b7d2e@example.com\n",
 		"000000A10.0.0.0fC00::\n", "0@0.AA@0.AA\n", "ssh user@example.com@bastion.example.org\n",
+		// URL のパスワード(v1.2)
+		"postgres://app:s3cret@db.example.com:5432/app redis://:s3cret@10.0.0.5:6379 ftp://u:a:b@host\n",
+		"https://taro@example.com/ http://u:p@h@x.com password=s3cret\n", "postgres://app:<secret_1>@db/x postgres://app:secret_3f9a1c0b7d2e@db/x\n",
 	} {
 		f.Add(s)
 	}
@@ -139,6 +142,18 @@ var awsFuzzSeeds = []string{
 	"s3://my-bucket/a https://logs.example.com.s3.amazonaws.com/b https://s3.amazonaws.com/my-bucket/c arn:aws:s3:::my-bucket/*\n",
 	"ec2-ipv4_global_a1b2c3d4e5f6.compute-1.amazonaws.com s3://aws_s3_bucket_3f9a1c0b7d2e/ arn:aws:iam::aws_account_3f9a1c0b7d2e:root\n",
 	"logs.s3.backup.s3.amazonaws.com s3://abc_def/ s3://my-bucket.\n",
+	// AWS のサービスのホスト名(v1.2)。表の各サービスの例と、置換済みの形(hash の出力)、除外される形
+	"mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432 my-cluster.c9akciq32.ap-northeast-1.redshift.amazonaws.com default.123456789012.ap-northeast-1.redshift-serverless.amazonaws.com\n",
+	"my-alb-1234567890.ap-northeast-1.elb.amazonaws.com my-nlb-0123456789abcdef.elb.ap-northeast-1.amazonaws.com a1b2c3d4e5.execute-api.ap-northeast-1.amazonaws.com\n",
+	"abcdefghij0123456789klmnop.lambda-url.ap-northeast-1.on.aws d111111abcdef8.cloudfront.net a1234567890abcdef.awsglobalaccelerator.com\n",
+	"0123456789ABCDEF0123456789ABCDEF.gr7.ap-northeast-1.eks.amazonaws.com search-my-domain-abcdefghij.ap-northeast-1.es.amazonaws.com abcdefghij.ap-northeast-1.aoss.amazonaws.com\n",
+	"b-1-public.my-cluster.abc123.c2.kafka.ap-northeast-1.amazonaws.com b-1234abcd-12ab-34cd-56ef-1234567890ab-1.mq.ap-northeast-1.amazonaws.com x.mq.ap-northeast-1.on.aws\n",
+	"s-0123456789abcdef0.server.transfer.ap-northeast-1.amazonaws.com abcdefghijklmnopqrstuvwxyz.appsync-api.ap-northeast-1.amazonaws.com my-app.auth.ap-northeast-1.amazoncognito.com\n",
+	"a1b2c3d4e5f6g7-ats.iot.ap-northeast-1.amazonaws.com data-ats.iot.us-east-1.amazonaws.com abcdefghij.ap-northeast-1.awsapprunner.com main.d1a2b3c4d5e6f7.amplifyapp.com\n",
+	"my-env.ap-northeast-1.elasticbeanstalk.com my-env.elasticbeanstalk.com f5lnz-0khrm-nt2u3-gyqqt-nbdl5.ap-southeast-2.ip.aws 123456789012.s3-control.dualstack.us-east-1.amazonaws.com\n",
+	"aws_host_3f9a1c0b7d2e.ap-northeast-1.rds.amazonaws.com <aws_host_1>.cloudfront.net x.cloudfront.net.example.org X.CLOUDFRONT.NET rds.ap-northeast-1.amazonaws.com\n",
+	"admin@mydb.c9akciq32.ap-northeast-1.rds.amazonaws.com postgres://app:s3cret@mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432/app\n",
+	"x..y.cloudfront.net -x.cloudfront.net x-.cloudfront.net a.b.cloudfront.net.-c.cloudfront.net\n",
 }
 
 // fuzzOptions は、ファズテストで試す検出の設定(v1.0 の既定 + uuid と、v1.1 の `--types default,aws`)と、
@@ -146,7 +161,7 @@ var awsFuzzSeeds = []string{
 func fuzzOptions(f *testing.F) ([]detect.Options, []*detect.Detector) {
 	optsList := []detect.Options{
 		{Kinds: detect.DefaultKinds.With(detect.KindUUID)},
-		{Kinds: detect.DefaultKinds.With(detect.KindAWSAccount).With(detect.KindAWSS3Bucket)},
+		{Kinds: detect.DefaultKinds.With(detect.KindAWSAccount).With(detect.KindAWSS3Bucket).With(detect.KindAWSHost)},
 	}
 	dets := make([]*detect.Detector, len(optsList))
 	for i, o := range optsList {

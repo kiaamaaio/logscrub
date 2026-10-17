@@ -102,8 +102,8 @@ func TestResolveIPv4MappedIPv6(t *testing.T) {
 }
 
 func TestResolveSameLengthUsesKindPriority(t *testing.T) {
-	// 優先順位: email → ipv4 / ipv6 → secret → uuid → aws_account → aws_s3_bucket
-	order := []Kind{KindEmail, KindIPv4, KindSecret, KindUUID, KindAWSAccount, KindAWSS3Bucket}
+	// 優先順位: email → ipv4 / ipv6 → secret → uuid → aws_account → aws_s3_bucket → aws_host
+	order := []Kind{KindEmail, KindIPv4, KindSecret, KindUUID, KindAWSAccount, KindAWSS3Bucket, KindAWSHost}
 	for i := 0; i < len(order); i++ {
 		for j := i + 1; j < len(order); j++ {
 			hi, lo := order[i], order[j]
