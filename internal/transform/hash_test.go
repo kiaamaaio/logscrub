@@ -301,6 +301,8 @@ func FuzzHashStable(f *testing.F) {
 		"email_3f9a1c0b7d2e password=secret_3f9a1c0b7d2e hash_3f9a1c0b7d2e@example.com\n", "token: Bearer abc.def-ghi\n",
 		"接続元 10.0.0.1 から taro@example.com\n", "\xff\xfe a@b.co\r\n", "000000A10.0.0.0fC00::\n", "10.0.0.1abc a@b.coabc\n",
 		"0@0.AA@0.AA\n", "0@0.AA:::1\n", "ssh user@example.com@bastion.example.org\n",
+		"postgres://app:s3cret@db.example.com:5432/app redis://:s3cret@10.0.0.5:6379 ftp://u:a:b@host\n",
+		"https://taro@example.com/ http://u:p@h@x.com\n", "postgres://app:secret_3f9a1c0b7d2e@db/x password=secret_3f9a1c0b7d2e\n",
 	} {
 		f.Add(s)
 	}
