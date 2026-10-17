@@ -1021,13 +1021,13 @@ func TestAWSHost(t *testing.T) {
 		"lb my-alb-1234567890.ap-northeast-1.elb.amazonaws.com my-nlb-0123456789abcdef.elb.ap-northeast-1.amazonaws.com\n" +
 		"cdn d111111abcdef8.cloudfront.net again mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com\n" +
 		"env my-env.ap-northeast-1.elasticbeanstalk.com fn abcdefghij0123456789klmnop.lambda-url.ap-northeast-1.on.aws\n" +
-		"mail admin@mydb.c9akciq32.ap-northeast-1.rds.amazonaws.com api https://kafka.ap-northeast-1.amazonaws.com/ data-ats.iot.us-east-1.amazonaws.com\n" +
+		"mail admin@mydb.c9akciq32.ap-northeast-1.rds.amazonaws.com api https://kafka.ap-northeast-1.amazonaws.com/ data-ats.iot.us-east-1.amazonaws.com api.tunneling.iot.us-east-1.amazonaws.com\n" +
 		"ec2 ec2-54-250-1-2.ap-northeast-1.compute.amazonaws.com bucket my-bucket.s3.ap-northeast-1.amazonaws.com\n"
 	wantHosts := "db <aws_host_1>.ap-northeast-1.rds.amazonaws.com:5432 from 10.0.0.1\n" +
 		"lb <aws_host_2>.ap-northeast-1.elb.amazonaws.com <aws_host_3>.elb.ap-northeast-1.amazonaws.com\n" +
 		"cdn <aws_host_4>.cloudfront.net again <aws_host_1>.ap-northeast-1.rds.amazonaws.com\n" +
 		"env <aws_host_5>.ap-northeast-1.elasticbeanstalk.com fn <aws_host_6>.lambda-url.ap-northeast-1.on.aws\n" +
-		"mail <email_1> api https://kafka.ap-northeast-1.amazonaws.com/ data-ats.iot.us-east-1.amazonaws.com\n" +
+		"mail <email_1> api https://kafka.ap-northeast-1.amazonaws.com/ data-ats.iot.us-east-1.amazonaws.com api.tunneling.iot.us-east-1.amazonaws.com\n" +
 		"ec2 ec2-54-250-1-2.ap-northeast-1.compute.amazonaws.com bucket my-bucket.s3.ap-northeast-1.amazonaws.com\n"
 	// 既定の種別では置換されない(IP アドレスとメールアドレスだけ)
 	def := run(t, in, nil, "mask")

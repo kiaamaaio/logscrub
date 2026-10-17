@@ -511,7 +511,7 @@ type awsHostForm struct {
 	// 末尾の `.{domain}`(awsDomains のどれか)を含められる。それ以外の部分は、小文字の決まった語(Q42)。
 	// 後ろの条件は、どの形も isHostEnd(Q41)。
 	tails []string
-	// exclude は、利用者ごとの部分がこの名前そのものの場合は検出しない、という名前(AWS 共通のエンドポイント。Q57)。
+	// exclude は、利用者ごとの部分がこの名前そのものの場合は検出しない、という名前(AWS 共通のエンドポイント。Q57、Q61)。
 	exclude []string
 }
 
@@ -536,7 +536,7 @@ var awsHostForms = []awsHostForm{
 	{service: "Transfer Family", tails: []string{".server.transfer.{region}.{domain}"}},
 	{service: "AppSync", tails: []string{".appsync-api.{region}.{domain}", ".appsync-realtime-api.{region}.{domain}"}},
 	{service: "Cognito domain", tails: []string{".auth.{region}.amazoncognito.com"}},
-	{service: "IoT Core", tails: []string{".iot.{region}.{domain}"}, exclude: []string{"data-ats"}},
+	{service: "IoT Core", tails: []string{".iot.{region}.{domain}"}, exclude: []string{"data-ats", "api.tunneling", "data.tunneling"}},
 	{service: "App Runner", tails: []string{".{region}.awsapprunner.com"}},
 	{service: "Amplify Hosting", tails: []string{".amplifyapp.com"}},
 	{service: "Elastic Beanstalk", tails: []string{".{region}.elasticbeanstalk.com", ".elasticbeanstalk.com"}},

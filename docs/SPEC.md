@@ -379,7 +379,7 @@ AWS のサービスのホスト名には、利用者ごとの部分(DB の名前
 - 末尾の形の決まった部分は、小文字の形だけを対象にする(Q42)。末尾の形の後ろの条件は、4.4 のホスト名の末尾と同じ(Q41)
 - 利用者ごとの部分: 英字(大文字・小文字)・数字・`-`・`.` からなる 1 文字以上で、先頭と末尾が英数字、`.` が 2 つ続かないこと。その前が、英数字・`-`・`_`・`.` でないこと
   - 英大文字を許すのは、EKS の ID のように、AWS が大文字で付ける値があるため(DNS の名前は大文字・小文字を区別しない)
-- 利用者ごとの部分が次の名前そのものの場合は、検出しない(AWS 共通のエンドポイントで、利用者ごとの値ではないため)。IoT Core の `data-ats`(`data-ats.iot.us-east-1.amazonaws.com`)。表の行ごとに持ち、必要な行にだけ加える
+- 利用者ごとの部分が次の名前そのものの場合は、検出しない(AWS 共通のエンドポイントで、利用者ごとの値ではないため)。IoT Core の `data-ats`(`data-ats.iot.us-east-1.amazonaws.com`)、`api.tunneling`・`data.tunneling`(Secure Tunneling の `api.tunneling.iot.us-east-1.amazonaws.com` など。[plans/v1.2.0.md](plans/v1.2.0.md) Q61)。表の行ごとに持ち、必要な行にだけ加える。名前と完全に一致する場合だけ除く(`x.api.tunneling` や、Jobs の `<接頭辞>.jobs` は置換する)
 - 1 つのホスト名に、複数の末尾の形が当てはまる場合(`.<リージョン>.elasticbeanstalk.com` と `.elasticbeanstalk.com`)は、長いほうの形を採る(利用者ごとの部分が短くなるほう)
 - 置換するのは、利用者ごとの部分だけ。`dualstack.`(ELB)、`internal-`(内部向けの ELB)、アベイラビリティゾーンの接頭辞(NLB)なども、利用者ごとの部分に含める
 - 同じ値の判定は、通常どおりバイト列で行う。`dualstack.my-alb-1234567890` と `my-alb-1234567890` は、別の値として扱う
@@ -663,7 +663,7 @@ AWS のホスト名(v1.2 で追加):
 - [ ] 同じホスト名は同じラベルに、違うホスト名は別のラベルになる
 - [ ] `.<リージョン>.elasticbeanstalk.com` の形では、リージョンが利用者ごとの部分に含まれない
 - [ ] `<ID>.mq.ap-northeast-1.on.aws` が `<aws_host_N>.mq.ap-northeast-1.on.aws` になる
-- [ ] `data-ats.iot.us-east-1.amazonaws.com` は置換されず、`a1b2c3d4e5f6g7-ats.iot.us-east-1.amazonaws.com` は置換される
+- [ ] `data-ats.iot.us-east-1.amazonaws.com`・`api.tunneling.iot.us-east-1.amazonaws.com`・`data.tunneling.iot.us-east-1.amazonaws.com` は置換されず、`a1b2c3d4e5f6g7-ats.iot.us-east-1.amazonaws.com` は置換される
 - [ ] AWS 自体の API のエンドポイント(`rds.ap-northeast-1.amazonaws.com`、`https://kafka.ap-northeast-1.amazonaws.com/`)、`cloudfront.net` だけのもの、表にない形(`mydb.example.com`、`x.ap-northeast-1.cache.amazonaws.com`)は置換されない
 - [ ] 末尾の形の後ろに英数字や「`.` + 英数字」が続くもの(`x.cloudfront.net.example.org`)、決まった部分が大文字のもの(`X.CLOUDFRONT.NET`)は置換されない
 - [ ] EC2 のホスト名・S3 のホスト名・ECR のホスト名は、`aws_host` ではなく、それぞれ `ipv4`・`aws_s3_bucket`・`aws_account` として置換される

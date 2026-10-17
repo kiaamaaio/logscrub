@@ -220,7 +220,7 @@ connect <aws_host_1>.ap-northeast-1.rds.amazonaws.com:5432
 | Transfer Family | `.server.transfer.<リージョン>.<ドメイン>` |
 | AppSync | `.appsync-api.<リージョン>.<ドメイン>`、`.appsync-realtime-api.<リージョン>.<ドメイン>` |
 | Cognito のドメイン | `.auth.<リージョン>.amazoncognito.com` |
-| IoT Core | `.iot.<リージョン>.<ドメイン>`(AWS 共通の `data-ats.iot.…` は除く) |
+| IoT Core | `.iot.<リージョン>.<ドメイン>`(AWS 共通の `data-ats.iot.…`・`api.tunneling.iot.…`・`data.tunneling.iot.…` は除く) |
 | App Runner / Amplify Hosting | `.<リージョン>.awsapprunner.com` / `.amplifyapp.com` |
 | Elastic Beanstalk | `.<リージョン>.elasticbeanstalk.com`、`.elasticbeanstalk.com` |
 | EC2 のパブリックホスト名(IPv6・デュアルスタック) | `.<リージョン>.ip.aws` |

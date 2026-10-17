@@ -754,6 +754,12 @@ var awsHostExamples = []struct{ user, tail string }{
 	{"abcdefghijklmnopqrstuvwxyz", ".appsync-realtime-api.ap-northeast-1.amazonaws.com"},
 	{"my-app", ".auth.ap-northeast-1.amazoncognito.com"},
 	{"a1b2c3d4e5f6g7-ats", ".iot.ap-northeast-1.amazonaws.com"},
+	// 除外する名前(Q57、Q61)そのものでなければ、置換する(Jobs の `<接頭辞>.jobs`、認証情報の `<接頭辞>.credentials` など)
+	{"a1b2c3d4e5f6g7.jobs", ".iot.ap-northeast-1.amazonaws.com"},
+	{"data.jobs", ".iot.ap-northeast-1.amazonaws.com"},
+	{"c1a2b3d4e5f6g7.credentials", ".iot.ap-northeast-1.amazonaws.com"},
+	{"x.api.tunneling", ".iot.ap-northeast-1.amazonaws.com"},
+	{"tunneling", ".iot.ap-northeast-1.amazonaws.com"},
 	{"abcdefghij", ".ap-northeast-1.awsapprunner.com"},
 	{"main.d1a2b3c4d5e6f7", ".amplifyapp.com"},
 	{"my-env", ".ap-northeast-1.elasticbeanstalk.com"},
@@ -825,8 +831,10 @@ func TestAWSHostRejects(t *testing.T) {
 		"https://elasticloadbalancing.ap-northeast-1.amazonaws.com",
 		"https://iot.ap-northeast-1.amazonaws.com",
 		"mq.ap-northeast-1.amazonaws.com",
-		// IoT の AWS 共通のエンドポイント(Q57)
+		// IoT の AWS 共通のエンドポイント(Q57、Q61)
 		"data-ats.iot.us-east-1.amazonaws.com",
+		"api.tunneling.iot.us-east-1.amazonaws.com", "https://api.tunneling.iot.ap-northeast-1.amazonaws.com/tunnels",
+		"data.tunneling.iot.us-east-1.amazonaws.com", "wss://data.tunneling.iot.ap-northeast-1.amazonaws.com:443/tunnel",
 		// cloudfront.net だけ、表にない形、独自のドメイン
 		"cloudfront.net", ".cloudfront.net", "https://cloudfront.net/x",
 		"x.ap-northeast-1.cache.amazonaws.com", "mydb.example.com", "db.example.com",
@@ -991,38 +999,38 @@ func TestAWSHostTable(t *testing.T) {
 // refAWSHostTails は、仕様 4.5 の表の末尾の形を、実装の表を使わずに正規表現で書いたもの(`DOM` は対象のドメイン)。
 var refAWSHostTails = []struct {
 	re      string
-	exclude string
+	exclude []string
 }{
-	{`\.[a-z0-9-]+\.elb\.DOM`, ""},
-	{`\.elb\.[a-z0-9-]+\.DOM`, ""},
-	{`\.execute-api\.[a-z0-9-]+\.DOM`, ""},
-	{`\.lambda-url\.[a-z0-9-]+\.on\.aws`, ""},
-	{`\.cloudfront\.net`, ""},
-	{`\.awsglobalaccelerator\.com`, ""},
-	{`\.[a-z0-9-]+\.eks\.DOM`, ""},
-	{`\.[a-z0-9-]+\.rds\.DOM`, ""},
-	{`\.[a-z0-9-]+\.redshift\.DOM`, ""},
-	{`\.[a-z0-9-]+\.redshift-serverless\.DOM`, ""},
-	{`\.[a-z0-9-]+\.es\.DOM`, ""},
-	{`\.[a-z0-9-]+\.aoss\.DOM`, ""},
-	{`\.kafka\.[a-z0-9-]+\.DOM`, ""},
-	{`\.mq\.[a-z0-9-]+\.DOM`, ""},
-	{`\.mq\.[a-z0-9-]+\.on\.aws`, ""},
-	{`\.server\.transfer\.[a-z0-9-]+\.DOM`, ""},
-	{`\.appsync-api\.[a-z0-9-]+\.DOM`, ""},
-	{`\.appsync-realtime-api\.[a-z0-9-]+\.DOM`, ""},
-	{`\.auth\.[a-z0-9-]+\.amazoncognito\.com`, ""},
-	{`\.iot\.[a-z0-9-]+\.DOM`, "data-ats"},
-	{`\.[a-z0-9-]+\.awsapprunner\.com`, ""},
-	{`\.amplifyapp\.com`, ""},
-	{`\.[a-z0-9-]+\.elasticbeanstalk\.com`, ""},
-	{`\.elasticbeanstalk\.com`, ""},
-	{`\.[a-z0-9-]+\.ip\.aws`, ""},
+	{`\.[a-z0-9-]+\.elb\.DOM`, nil},
+	{`\.elb\.[a-z0-9-]+\.DOM`, nil},
+	{`\.execute-api\.[a-z0-9-]+\.DOM`, nil},
+	{`\.lambda-url\.[a-z0-9-]+\.on\.aws`, nil},
+	{`\.cloudfront\.net`, nil},
+	{`\.awsglobalaccelerator\.com`, nil},
+	{`\.[a-z0-9-]+\.eks\.DOM`, nil},
+	{`\.[a-z0-9-]+\.rds\.DOM`, nil},
+	{`\.[a-z0-9-]+\.redshift\.DOM`, nil},
+	{`\.[a-z0-9-]+\.redshift-serverless\.DOM`, nil},
+	{`\.[a-z0-9-]+\.es\.DOM`, nil},
+	{`\.[a-z0-9-]+\.aoss\.DOM`, nil},
+	{`\.kafka\.[a-z0-9-]+\.DOM`, nil},
+	{`\.mq\.[a-z0-9-]+\.DOM`, nil},
+	{`\.mq\.[a-z0-9-]+\.on\.aws`, nil},
+	{`\.server\.transfer\.[a-z0-9-]+\.DOM`, nil},
+	{`\.appsync-api\.[a-z0-9-]+\.DOM`, nil},
+	{`\.appsync-realtime-api\.[a-z0-9-]+\.DOM`, nil},
+	{`\.auth\.[a-z0-9-]+\.amazoncognito\.com`, nil},
+	{`\.iot\.[a-z0-9-]+\.DOM`, []string{"data-ats", "api.tunneling", "data.tunneling"}},
+	{`\.[a-z0-9-]+\.awsapprunner\.com`, nil},
+	{`\.amplifyapp\.com`, nil},
+	{`\.[a-z0-9-]+\.elasticbeanstalk\.com`, nil},
+	{`\.elasticbeanstalk\.com`, nil},
+	{`\.[a-z0-9-]+\.ip\.aws`, nil},
 }
 
 type refAWSHostTail struct {
 	re      *regexp.Regexp
-	exclude string
+	exclude []string
 }
 
 // refAWSHostForms は、refAWSHostTails の DOM を、対象のドメインごとに展開した正規表現(1 つずつ試す)。
@@ -1058,7 +1066,7 @@ func refAWSHosts(line []byte) [][2]int {
 			for u := 0; u < s; u++ {
 				part := line[u:s]
 				if !refHostUserPart.Match(part) || strings.Contains(string(part), "..") ||
-					u > 0 && refHostChar.Match(line[u-1:u]) || string(part) == f.exclude {
+					u > 0 && refHostChar.Match(line[u-1:u]) || slices.Contains(f.exclude, string(part)) {
 					continue
 				}
 				if old, ok := bestS[e]; !ok || s < old {
@@ -1080,7 +1088,7 @@ func refAWSHosts(line []byte) [][2]int {
 // 行は「前の文字 + 利用者ごとの部分 + 末尾の形 + 後ろの文字」の組を並べて作る。
 func TestAWSHostMatchesRegexpReference(t *testing.T) {
 	users := []string{"mydb", "mydb", "my-alb-1234567890", "a.b", "a-b.c", "A1-B2", "0123456789ABCDEF.gr7", "x", "ab", "a..b", "-x", "x-", ".x", "x.",
-		"a.-b", "a_b", "aws_host_3f9a1c0b7d2e", "<aws_host_1>", "data-ats", "b-1-public.cl.abc.c2", "", "ap-northeast-1", "elb", "x.us-east-1", "あ"}
+		"a.-b", "a_b", "aws_host_3f9a1c0b7d2e", "<aws_host_1>", "data-ats", "api.tunneling", "data.tunneling", "x.api.tunneling", "tunneling", "b-1-public.cl.abc.c2", "", "ap-northeast-1", "elb", "x.us-east-1", "あ"}
 	regions := []string{"ap-northeast-1", "ap-northeast-1", "us-east-1", "cn-north-1", "eusc-de-east-1", "a", "0", "-", "", "US-EAST-1", "a.b", "x_y"}
 	domains := []string{"amazonaws.com", "amazonaws.com", "amazonaws.com.cn", "amazonaws.eu", "amazonaws.org", "example.com", "amazonaws.comx", "AMAZONAWS.COM"}
 	labels := []string{"elb", "execute-api", "lambda-url", "eks", "rds", "redshift", "redshift-serverless", "es", "aoss", "kafka", "mq", "server.transfer",
