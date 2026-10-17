@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/base64"
 	"regexp"
+
+	"github.com/kiaamaaio/logscrub/internal/label"
 )
 
 // secretFinder は、トークン類(secret)の検出器(仕様 4.1、決定事項 15)。
@@ -15,7 +17,11 @@ import (
 //   - URL のパスワード: `<スキーム>://<ユーザー>:<パスワード>@<ホスト>` のパスワード部分(v1.2。Q48)
 //   - キー名ベース: `password=<値>`、`"api_key": "<値>"`、`Authorization: Bearer <値>` などの値の部分
 //     (Q15、Q16。JSON の文法を壊さない。決定事項 15)
-type secretFinder struct{}
+type secretFinder struct {
+	// format は、置換済みのラベルの書式(ゼロ値は、ラベルを見ない)。キー名ベースの値が URL のパスワードの形で
+	// 始まるかの判定で、置換済みのラベルを、ユーザー・パスワード・ホスト名の部分として読むために使う(Q65)
+	format label.Format
+}
 
 func (secretFinder) kind() Kind { return KindSecret }
 
@@ -497,6 +503,74 @@ func bareValueEnd(line []byte, vs int) int {
 	return e
 }
 
+// startsWithURLPassword は、line[s:] が URL のパスワードの形(`<スキーム>://<ユーザー>:<パスワード>@<ホスト名の文字>`)
+// で始まるかを返す(キー名ベースの値の先頭の判定。仕様 4.1。Q65)。
+//
+// 置換していない形については、`@` に urlPasswordStart を当てた結果と同じ(スキームの先頭が s になるもの)。
+// キー名ベースの値の先頭の手前は、区切り・空白・引用符で、スキームの文字でも `_` でもないので、スキームは s から始まる。
+// 加えて、ユーザー・パスワードの部分が置換済みのラベル 1 つだけのもの、`@` の直後がラベルのものも、この形とする。
+// 置換後の `https://u:<secret_1>@<aws_host_1>.…` を再度流したときに、キー名ベースの値として読まないため(冪等性)。
+// hash の出力形(`secret_<16 進数>` など)は、もともとユーザー情報・ホスト名の文字だけでできている。
+func (f secretFinder) startsWithURLPassword(line []byte, s int) bool {
+	n := len(line)
+	if s >= n || !(line[s] >= 'a' && line[s] <= 'z' || line[s] >= 'A' && line[s] <= 'Z') {
+		return false
+	}
+	if s > 0 && (isURLSchemeChar(line[s-1]) || line[s-1] == '_') {
+		return false
+	}
+	p := s + 1
+	for p < n && isURLSchemeChar(line[p]) {
+		p++
+	}
+	if !bytes.HasPrefix(line[p:], schemeSep) {
+		return false
+	}
+	// ユーザー情報: 最初の `:` の前がユーザー(0 文字以上)、後ろがパスワード(1 文字以上)。
+	// それぞれ、ユーザー情報の文字の続きか、ラベル 1 つだけ(ラベルは、部分の先頭から、部分の終わりまでのものだけ)
+	colon, pwLen := -1, 0
+	segStart := true // 今の位置が、ユーザーかパスワードの先頭か
+	x := p + len(schemeSep)
+	for {
+		if x >= n {
+			return false
+		}
+		if segStart {
+			segStart = false
+			if e, ok := f.format.MatchAt(line, x); ok && e < n && (line[e] == '@' || colon < 0 && line[e] == ':') {
+				if colon >= 0 {
+					pwLen++
+				}
+				x = e
+				continue
+			}
+		}
+		c := line[x]
+		if c == '@' {
+			break
+		}
+		if isURLUserInfoStop(c) {
+			return false
+		}
+		switch {
+		case c == ':' && colon < 0:
+			colon, segStart = x, true
+		case colon >= 0:
+			pwLen++
+		}
+		x++
+	}
+	if colon < 0 || pwLen == 0 || x+1 >= n {
+		return false
+	}
+	// `@` の後ろ: ホスト名の文字か、ラベル
+	if isURLHostChar(line[x+1]) {
+		return true
+	}
+	_, ok := f.format.MatchAt(line, x+1)
+	return ok
+}
+
 // urlSchemeSlashes は、URL のスキームの `:` の後ろの `//`。
 var urlSchemeSlashes = []byte("//")
 
@@ -507,6 +581,9 @@ var urlSchemeSlashes = []byte("//")
 //   - `:` の直後が `//` なら、区切りとして扱わない(`<キー名>://` は URL のスキーム。v1.2。Q63)。
 //     キー名と値として読むと、URL のパスワードと置換の範囲が隣り合い、置換で値の区切り(`&` など)が消えて、
 //     2 回目に置換済みのラベルごと再度置換されることがあった(`passwd://u:&x@host`)
+//   - 値(引用符で始まる場合は、引用符の次)が URL のパスワードの形で始まるなら、対象にしない(v1.2。Q65)。
+//     パスワードは urlPasswords が拾う。キー名ベースの値として読むと、値が `&` などで終わるため、
+//     置換の範囲が隣り合って 2 回目に再度置換されたり、パスワードの残りが出力に残ったりした(`password=https://u:p&q@h`)
 //   - 値が `Bearer ` / `Basic ` で始まる場合は、方式名の後ろの値だけが対象
 //     (後ろが値として読めなければ、何も置換しない)。キー名が Authorization で、方式名がなければ対象でない
 //   - 値が引用符(" または ')で始まる場合は、閉じ引用符の手前まで。`\` の次の文字は、値の一部。
@@ -519,7 +596,7 @@ var urlSchemeSlashes = []byte("//")
 //   - 値が空なら、置換しない
 //
 // 値の範囲だけを返す(キー名・区切り・引用符は残す)。
-func (secretFinder) keyed(line []byte, dst []Match) []Match {
+func (f secretFinder) keyed(line []byte, dst []Match) []Match {
 	n := len(line)
 	ne, nc := -1, -1 // 次の '='、':' の位置(-1: 未計算、n: これ以上ない)
 	// 直前に求めた引用符なしの値の範囲 [bareStart, bareEnd)。この中から始まる値は、同じ位置で終わる
@@ -600,6 +677,9 @@ func (secretFinder) keyed(line []byte, dst []Match) []Match {
 		}
 		if authOnly {
 			continue
+		}
+		if f.startsWithURLPassword(line, cs) {
+			continue // パスワードは、URL のパスワードとして置換する(仕様 4.1。Q65)
 		}
 		s, e := cs, n
 		switch {

@@ -109,6 +109,7 @@ func FuzzMaskStable(f *testing.F) {
 		// URL のパスワード(v1.2)
 		"postgres://app:s3cret@db.example.com:5432/app redis://:s3cret@10.0.0.5:6379 ftp://u:a:b@host\n",
 		"https://taro@example.com/ http://u:p@h@x.com password=s3cret\n", "postgres://app:<secret_1>@db/x postgres://app:secret_3f9a1c0b7d2e@db/x\n",
+		"password=https://u:p&q@db.example.com/ token=\"postgres://app:&x@10.0.0.1/\" password=https://u:<secret_1>@<ipv4_private_1>/\n",
 	} {
 		f.Add(s)
 	}

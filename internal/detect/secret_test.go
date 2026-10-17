@@ -826,6 +826,9 @@ func refSecrets(line []byte) [][2]int {
 		if schemeOnly {
 			continue
 		}
+		if refURLUserInfo.Match(line[cs:]) {
+			continue // 値の先頭が URL のパスワードの形なら、URL のパスワードとして扱う(Q65)
+		}
 		var s, e int
 		switch {
 		case re != nil:
@@ -1139,6 +1142,21 @@ func TestSecretURLPassword(t *testing.T) {
 		{"space after colon", "password: //abc", []string{"secret=//abc"}},
 		{"equals and slashes", "token=//abc", []string{"secret=//abc"}},
 		{"single slash", "token:/abc", []string{"secret=/abc"}},
+		// キー名ベースの値が URL のパスワードの形で始まるものは、パスワードだけ(Q65)
+		{"keyed url, terminator in password", "password=https://u:p&q@db.example.com/", []string{"secret=p&q"}},
+		{"keyed url, password starts with terminator", "password=https://u:&x@db.example.com/", []string{"secret=&x"}},
+		{"keyed url, no terminator", "password=postgres://app:s3cret@db/app", []string{"secret=s3cret"}},
+		{"keyed url, space after separator", "secret: \tredis://:pw@h", []string{"secret=pw"}},
+		{"keyed url, quoted", `"password": "postgres://app:s3cret@db/"`, []string{"secret=s3cret"}},
+		{"keyed url, single quoted", "password='https://u:p&q@h'", []string{"secret=p&q"}},
+		{"keyed url, escaped quotes", `{"msg":"{\"password\":\"https://u:p@h\"}"}`, []string{"secret=p"}},
+		{"keyed url, camel case key", "dbPassword=mysql://root:hunter2@db:3306", []string{"secret=hunter2"}},
+		// 値の先頭が URL のパスワードの形でないものは、今までどおりキー名ベース
+		{"keyed url in the middle", "password=x,https://u:p@h", []string{"secret=x", "secret=p"}},
+		{"keyed url without userinfo", "token=https://hooks.example.com/T000/XXXX", []string{"secret=https://hooks.example.com/T000/XXXX"}},
+		{"keyed url with user only", "token=https://u@h/x", []string{"secret=https://u@h/x"}},
+		{"keyed url with empty password", "token=https://u:@h", []string{"secret=https://u:@h"}},
+		{"keyed underscore before scheme", "token=_https://u:p@h", []string{"secret=_https://u:p@h"}},
 		// 対象外
 		{"user only", "https://taro@example.com/", nil},
 		{"no scheme", "user:pass@host", nil},
@@ -1183,6 +1201,148 @@ func TestSecretURLPassword(t *testing.T) {
 }
 
 // ホスト名の部分は、通常どおり他の種別として検出される。メールアドレスとして扱われない(受け入れ基準)。
+// キー名ベースの値が URL のパスワードの形で始まる場合(Q65)に絞った乱数テスト。参照実装と一致すること。
+// 行は「キー名 + 区切り + 引用符 + URL の部品」の組と、雑多な文字列を、ランダムに並べて作る。
+func TestSecretKeyedURLMatchesRegexpReference(t *testing.T) {
+	keys := []string{"password", "token", "\"secret\"", "dbPassword", "authorization", "user", "x_token", ""}
+	seps := []string{"=", ":", ": ", " =\t", "://", ""}
+	quotes := []string{"", "", "\"", "'", "\\\""}
+	urlParts := []string{
+		"https", "postgres", "git+ssh", "_https", "1x", "://", "://", ":/", "u", "app", "", ":", ":", "p", "s3cret", "&", "&x", ",",
+		";", ")", "}", "]", "\"", "'", "<", "<secret_1>", "@", "@", "db.example.com", "[::1]", " ", "/", "?", "#", "%41", "!$*+=~",
+	}
+	around := []string{"", "", " ", "&", ",", "{", "}", "x", "_", "\t", "あ"}
+	rng := rand.New(rand.NewPCG(65, 66))
+	f := secretFinder{}
+	skipped := 0 // 区切り(`=`・`:`)の後ろの値の先頭が、URL のパスワードの形だった数(キー名の有無は問わない)
+	for iter := 0; iter < 100000; iter++ {
+		var sb strings.Builder
+		for i, n := 0, 1+rng.IntN(3); i < n; i++ {
+			sb.WriteString(around[rng.IntN(len(around))])
+			sb.WriteString(keys[rng.IntN(len(keys))])
+			sb.WriteString(seps[rng.IntN(len(seps))])
+			sb.WriteString(quotes[rng.IntN(len(quotes))])
+			if rng.IntN(3) > 0 {
+				// URL のパスワードの形になりやすい並び
+				sb.WriteString(urlParts[rng.IntN(2)])
+				sb.WriteString("://")
+				for _, part := range []string{"u", ":", "p", "@", "db.example.com"} {
+					if rng.IntN(5) == 0 {
+						part = urlParts[rng.IntN(len(urlParts))]
+					}
+					sb.WriteString(part)
+				}
+			} else {
+				for j, m := 0, rng.IntN(8); j < m; j++ {
+					sb.WriteString(urlParts[rng.IntN(len(urlParts))])
+				}
+			}
+			sb.WriteString(around[rng.IntN(len(around))])
+		}
+		line := []byte(sb.String())
+		want := refSecrets(line)
+		var got [][2]int
+		for _, m := range f.find(line, nil) {
+			got = append(got, [2]int{m.Start, m.End})
+		}
+		slices.SortFunc(got, func(a, b [2]int) int {
+			if a[0] != b[0] {
+				return a[0] - b[0]
+			}
+			return a[1] - b[1]
+		})
+		if !slices.Equal(got, want) {
+			t.Fatalf("iter %d, line %q\n got  %v\n want %v", iter, line, got, want)
+		}
+		for i := range line {
+			if line[i] != '=' && line[i] != ':' {
+				continue
+			}
+			cs := i + 1
+			for cs < len(line) && (line[cs] == ' ' || line[cs] == '\t') {
+				cs++
+			}
+			if strings.HasPrefix(string(line[cs:]), `\"`) {
+				cs += 2
+			} else if cs < len(line) && (line[cs] == '"' || line[cs] == '\'') {
+				cs++
+			}
+			if f.startsWithURLPassword(line, cs) {
+				skipped++
+			}
+		}
+	}
+	// 規則に当たる値が少なすぎると、比べた意味がない
+	if skipped < 20000 {
+		t.Errorf("only %d values started with a URL password", skipped)
+	}
+	t.Logf("%d values started with a URL password", skipped)
+}
+
+// 置換済みのラベルを含む URL の形(Q65)。置換後の出力を再度流しても、キー名ベースの値として読まないこと。
+func TestSecretKeyedURLWithLabels(t *testing.T) {
+	all := DefaultKinds.With(KindAWSAccount).With(KindAWSS3Bucket).With(KindAWSHost)
+	for _, line := range []string{
+		"password=https://u:<secret_1>@db.example.com/",
+		"password=https://u:<secret_1>@<aws_host_1>.ap-northeast-1.rds.amazonaws.com:5432/app",
+		"password=https://u:<secret_1>@<ipv4_private_1>/",
+		"password=https://<ipv4_private_1>:<secret_1>@h",
+		"password=redis://:<secret_1>@h",
+		`"password": "postgres://app:<secret_1>@db/"`,
+		"password=https://u:secret_0123456789ab@db.example.com/",
+	} {
+		if got := awsValues(t, all, line); got != nil {
+			t.Errorf("%q: got %q, want nothing", line, got)
+		}
+	}
+	// ラベルは、ユーザー・パスワード・ホスト名の部分の全体のときだけ。部分の一部なら、URL のパスワードの形ではない
+	f := secretFinder{format: label.DefaultFormat}
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{
+		{"https://u:p@h", true},
+		{"https://u:<secret_1>@h", true},
+		{"https://<secret_2>:<secret_1>@h", true},
+		{"https://:<secret_1>@h", true},
+		{"https://u:<secret_1>@<aws_host_1>.x", true},
+		{"https://u:<secret_1>:x@h", false}, // パスワードの一部
+		{"https://u:x<secret_1>@h", false},
+		{"https://u<secret_2>:p@h", false},
+		{"https://u:<secret_1>", false},
+		{"https://u:<secret_1>@", false},
+		{"https://u:<secret_1>@ h", false},
+		{"https://u:<secret_0>@h", false}, // ラベルの形でない
+		{"https://u:<nope_1>@h", false},
+		{"https://u:@h", false},
+		{"https://u@h", false},
+		{"https://<secret_1>@h", false},
+	} {
+		if got := f.startsWithURLPassword([]byte(tc.value), 0); got != tc.want {
+			t.Errorf("%q: got %v, want %v", tc.value, got, tc.want)
+		}
+	}
+	// 書式を指定しない(ゼロ値の)検出器は、ラベルを読まない
+	if (secretFinder{}).startsWithURLPassword([]byte("https://u:<secret_1>@h"), 0) {
+		t.Error("zero format must not read labels")
+	}
+	// 独自の書式(`{type}-{n}`)では、文字列の途中のラベルに似た部分を、ラベルとして読まない
+	cf := secretFinder{format: mustFormat(t, "{type}-{n}")}
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{
+		{"https://u:secret-1@h", true},
+		{"https://u:mysecret-1@h", true}, // ユーザー情報の文字として読む
+		{"https://u:secret-1x<@h", false},
+		{"https://u:p@aws_host-1.x", true},
+	} {
+		if got := cf.startsWithURLPassword([]byte(tc.value), 0); got != tc.want {
+			t.Errorf("custom format: %q: got %v, want %v", tc.value, got, tc.want)
+		}
+	}
+}
+
 func TestSecretURLPasswordWithOtherKinds(t *testing.T) {
 	all := DefaultKinds.With(KindAWSAccount).With(KindAWSS3Bucket).With(KindAWSHost)
 	for _, tc := range []struct {

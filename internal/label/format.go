@@ -211,6 +211,16 @@ func TypeIndex(typ string) int {
 	return -1
 }
 
+// MatchAt は、line[i:] がラベル(現在の書式、既知の種別名、先頭 0 のない 1 以上の連番)で始まるなら、
+// その終わりの位置と true を返す。ゼロ値の書式では、常に false。
+func (f Format) MatchAt(line []byte, i int) (int, bool) {
+	if !f.ok || i < 0 || i >= len(line) {
+		return 0, false
+	}
+	end, _, _, ok := f.matchAt(line, i)
+	return end, ok
+}
+
 // IsLabel は、b 全体が、ちょうど 1 つのラベル(現在の書式、既知の種別名、先頭 0 のない 1 以上の連番)かを返す。
 func (f Format) IsLabel(b []byte) bool {
 	found := false
