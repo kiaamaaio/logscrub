@@ -53,7 +53,9 @@ func TestEmailFinderMatches(t *testing.T) {
 		{"json", `{"email":"user@example.com","n":1}`, []string{"user@example.com"}},
 		{"comma separated", "a@x.com,b@y.org", []string{"a@x.com", "b@y.org"}},
 		{"space separated", "a@x.com b@y.org  c@z.net", []string{"a@x.com", "b@y.org", "c@z.net"}},
-		{"url userinfo", "https://user:pass@example.com/", []string{"pass@example.com"}},
+		// ユーザーだけの URL のユーザー情報は、メールアドレスのまま(v1.1 と同じ。仕様 4.1)
+		{"url userinfo, user only", "https://taro@example.com/", []string{"taro@example.com"}},
+		{"url userinfo, no password", "ftp://taro@example.com:21/", []string{"taro@example.com"}},
 		{"japanese around", "ユーザーtaro@example.comです", []string{"taro@example.com"}},
 		{"fullwidth space", "　taro@example.com　", []string{"taro@example.com"}},
 		{"invalid utf8 around", "\xff\xfetaro@example.com\x80", []string{"taro@example.com"}},
@@ -82,6 +84,9 @@ func TestEmailFinderIgnores(t *testing.T) {
 		"", "no at sign here", "@", "@@@", "@example.com", "user@", "user @example.com", "user@ example.com",
 		// TLD は英字 2 文字以上(受け入れ基準: pass@10.0.0.1 はメールアドレスとして扱わない)
 		"pass@10.0.0.1", "https://user:pass@10.0.0.1/", "user@10.0.0.1:8080",
+		// URL のユーザー情報の `@`(`<スキーム>://<ユーザー>:<パスワード>@<ホスト>`)は、メールアドレスとして扱わない(v1.2。仕様 4.1)
+		"https://user:pass@example.com/", "postgres://app:s3cret@mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432/app",
+		"redis://:s3cret@cache.example.com:6379", "ftp://u:a:b@host.example.org", "git+ssh://git:tok@github.com/x/y.git",
 		"user@localhost", "user@example", "user@example.c", "user@example.c0m", "user@example.123", "user@[10.0.0.1]",
 		"user@.com", "user@example..com", "user@example.com-", "user@-",
 		// 非 ASCII は英数字でない扱い。ローカルパートが空になる。
@@ -276,9 +281,15 @@ func anchorScan(line []byte, dst []Match) []Match {
 		}
 		if s < at {
 			if e := label.EmailDomainEnd(line, at+1); e > 0 {
-				dst = append(dst, Match{Start: s, End: e, Kind: KindEmail})
-				lo = e
-				next = e
+				if slices.ContainsFunc(refURLPasswords(line), func(r [2]int) bool { return r[1] == at }) {
+					// URL のユーザー情報の `@`(v1.2)は、候補にしない
+					lo = at + 1
+					next = at + 1
+				} else {
+					dst = append(dst, Match{Start: s, End: e, Kind: KindEmail})
+					lo = e
+					next = e
+				}
 			}
 		}
 		j := bytes.IndexByte(line[next:], '@')
@@ -294,6 +305,7 @@ func TestEmailFinderMatchesAnchorScan(t *testing.T) {
 	alphabet := []string{
 		"a", "b", "Z", "1", "9", ".", "-", "_", "%", "+", "@", "@", " ", ",", "/", ":", "<", ">",
 		"com", ".com", "co", ".jp", "あ", "\xff", "hash_", "3f9a1c0b7d2e",
+		"http", "://", "://", "u", "p", "[", "?", "#", "\t",
 	}
 	rng := rand.New(rand.NewPCG(5, 6))
 	f := emailFinder{hashLen: 12}

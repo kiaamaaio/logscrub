@@ -378,7 +378,7 @@ func TestInvalidOptionValuesAreErrors(t *testing.T) {
 func TestOverlapsAndKinds(t *testing.T) {
 	for in, want := range map[string]string{
 		"::ffff:10.0.0.1\n":                               "<ipv6_private_1>\n",
-		"https://user:pass@10.0.0.1/\n":                   "https://user:pass@<ipv4_private_1>/\n",
+		"https://user:pass@10.0.0.1/\n":                   "https://user:<secret_1>@<ipv4_private_1>/\n",
 		"10.0.0.1:8080 [::1]:8080 10.0.0.0/8\n":           "<ipv4_private_1>:8080 [<ipv6_private_1>]:8080 <ipv4_private_2>/8\n",
 		"0.0.0.0 255.255.255.255 :: 224.0.0.1\n":          "0.0.0.0 255.255.255.255 :: 224.0.0.1\n",
 		"999.1.1.1 1.2 1.2.3.4.5\n":                       "999.1.1.1 1.2 1.2.3.4.5\n",
@@ -1105,5 +1105,61 @@ func TestAWSAccountS3Control(t *testing.T) {
 	}
 	if again := run(t, h.stdout, env, "mask", "--mode", "hash", "--types", "aws_account"); again.stdout != h.stdout {
 		t.Errorf("hash is not idempotent:\n%s\n%s", h.stdout, again.stdout)
+	}
+}
+
+// 受け入れ基準(仕様 9 章「URL のパスワード」。v1.2): パスワードの部分だけが <secret_N> になり、メールアドレスとして
+// 置換されない。既定の動作の変更(v1.1 までは <email_N> になる、またはパスワードが残る)。
+func TestURLPassword(t *testing.T) {
+	in := "db postgres://app:s3cret@db.example.com:5432/app\n" +
+		"rds postgres://app:s3cret@mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432/app\n" +
+		"cache redis://:other@10.0.0.5:6379 ftp://u:a:b@host.example.org\n" +
+		"web https://user:pass@10.0.0.1/ and https://taro@example.com/ and password=s3cret\n"
+	wantDefault := "db postgres://app:<secret_1>@db.example.com:5432/app\n" +
+		"rds postgres://app:<secret_1>@mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432/app\n" +
+		"cache redis://:<secret_2>@<ipv4_private_1>:6379 ftp://u:<secret_3>@host.example.org\n" +
+		"web https://user:<secret_4>@<ipv4_private_2>/ and https://<email_1>/ and password=<secret_1>\n"
+	if r := run(t, in, nil, "mask"); r.code != 0 || r.stdout != wantDefault {
+		t.Errorf("default: %+v\nwant %q", r, wantDefault)
+	}
+	// aws_host も有効なら、ホスト名の情報が残る
+	wantAWS := strings.Replace(wantDefault, "@mydb.cluster-c9akciq32.ap-northeast-1.rds", "@<aws_host_1>.ap-northeast-1.rds", 1)
+	if r := run(t, in, nil, "mask", "--types", "default,aws"); r.code != 0 || r.stdout != wantAWS {
+		t.Errorf("default,aws: %+v\nwant %q", r, wantAWS)
+	}
+	// secret が無効でも、メールアドレスとして扱わない(Q54)。パスワードは残る
+	wantEmail := strings.Replace(in, "https://taro@example.com/", "https://<email_1>/", 1)
+	if r := run(t, in, nil, "mask", "--types", "email"); r.code != 0 || r.stdout != wantEmail {
+		t.Errorf("email only: %+v\nwant %q", r, wantEmail)
+	}
+	// restore の往復、mask・hash の冪等性
+	dir := t.TempDir()
+	src := writeFile(t, dir, "app.log", in)
+	for _, types := range []string{"default", "default,aws"} {
+		masked := run(t, "", nil, "mask", "--types", types, src)
+		if back := run(t, masked.stdout, nil, "restore", "--source", src, "--types", types); back.code != 0 || back.stdout != in {
+			t.Errorf("restore (%s): %+v", types, back)
+		}
+		if again := run(t, masked.stdout, nil, "mask", "--types", types); again.stdout != masked.stdout {
+			t.Errorf("mask (%s) is not idempotent: %q", types, again.stdout)
+		}
+		env := map[string]string{keyEnv: "test-key"}
+		h := run(t, in, env, "mask", "--mode", "hash", "--types", types)
+		if h.code != 0 || strings.Contains(h.stdout, "s3cret") || strings.Contains(h.stdout, "pass@") || !strings.Contains(h.stdout, ":secret_") {
+			t.Fatalf("hash (%s): %+v", types, h)
+		}
+		if again := run(t, h.stdout, env, "mask", "--mode", "hash", "--types", types); again.stdout != h.stdout {
+			t.Errorf("hash (%s) is not idempotent:\n%s\n%s", types, h.stdout, again.stdout)
+		}
+	}
+	// --stats
+	if r := run(t, in, nil, "mask", "--stats"); !strings.Contains(r.stderr, "logscrub: secret=6\n") || !strings.Contains(r.stderr, "logscrub: email=1\n") {
+		t.Errorf("--stats: %q", r.stderr)
+	}
+	// 対応形式の一覧
+	for _, args := range [][]string{{"types", "--verbose"}, {"mask", "--help"}} {
+		if r := run(t, "", nil, args...); r.code != 0 || !strings.Contains(r.stdout, "URL password") {
+			t.Errorf("%v lacks the URL password format", args)
+		}
 	}
 }

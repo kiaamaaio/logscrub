@@ -83,7 +83,7 @@ func TestMaskAcceptanceBasics(t *testing.T) {
 		{"secret json", `"api_key": "abc def"` + "\n", `"api_key": "<secret_1>"` + "\n"},
 		{"secret bearer", "Authorization: Bearer xxxxx\n", "Authorization: Bearer <secret_1>\n"},
 		{"ipv4 mapped", "::ffff:10.0.0.1\n", "<ipv6_private_1>\n"},
-		{"userinfo with ip", "https://user:pass@10.0.0.1/\n", "https://user:pass@<ipv4_private_1>/\n"},
+		{"userinfo with ip", "https://user:pass@10.0.0.1/\n", "https://user:<secret_1>@<ipv4_private_1>/\n"},
 		{"port and cidr", "10.0.0.1:8080 10.0.0.0/8 [::1]:8080\n", "<ipv4_private_1>:8080 <ipv4_private_2>/8 [<ipv6_private_1>]:8080\n"},
 		// 特殊アドレスは置換せず、番号も消費しない
 		{"special addresses keep numbers", "0.0.0.0 10.0.0.1 255.255.255.255 ::\n", "0.0.0.0 <ipv4_private_1> 255.255.255.255 ::\n"},

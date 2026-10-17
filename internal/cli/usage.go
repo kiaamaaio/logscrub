@@ -20,6 +20,8 @@ const secretFormatsHelp = `Supported secret formats:
   AWS access key ID     AKIA or ASIA + 16 uppercase letters or digits
   AWS signature (SigV4) exactly 64 lowercase hex digits after X-Amz-Signature= or
                         Signature= (presigned URLs, AWS4-HMAC-SHA256 Authorization)
+  URL password          the password in scheme://user:password@host (the user may be
+                        empty); the @ is then not treated as an email address
   GitHub                ghp_ gho_ ghu_ ghs_ ghr_ + 36 or more alphanumerics;
                         github_pat_ + 22 or more alphanumerics or _
   Slack                 xoxb- xoxp- xoxa- xoxr- xoxs- + 10 or more alphanumerics or -

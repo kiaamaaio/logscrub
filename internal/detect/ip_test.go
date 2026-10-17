@@ -474,8 +474,8 @@ func TestIPv4MappedIsOneIPv6Match(t *testing.T) {
 	}
 }
 
-// 受け入れ基準: https://user:pass@10.0.0.1/ が https://user:pass@<ipv4_private_1>/ になる。
-// pass@10.0.0.1 はメールアドレスとして扱わない。
+// 受け入れ基準: https://user:pass@10.0.0.1/ が https://user:<secret_1>@<ipv4_private_1>/ になる(v1.2 で変更。
+// v1.1 まではパスワードがそのまま残っていた)。pass@10.0.0.1 はメールアドレスとして扱わない。
 func TestUserinfoWithIPv4(t *testing.T) {
 	d, err := New(Options{Kinds: DefaultKinds})
 	if err != nil {
@@ -483,7 +483,7 @@ func TestUserinfoWithIPv4(t *testing.T) {
 	}
 	line := "https://user:pass@10.0.0.1/"
 	got, _ := d.Find([]byte(line), nil)
-	want := []Match{{Start: 18, End: 26, Kind: KindIPv4, Class: ClassPrivate}}
+	want := []Match{{Start: 13, End: 17, Kind: KindSecret}, {Start: 18, End: 26, Kind: KindIPv4, Class: ClassPrivate}}
 	if !slices.Equal(got, want) {
 		t.Errorf("got %+v, want %+v", got, want)
 	}

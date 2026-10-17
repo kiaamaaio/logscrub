@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kiaamaaio/logscrub/internal/label"
 )
@@ -614,6 +615,27 @@ var (
 	refToken68   = regexp.MustCompile(`^[A-Za-z0-9._~+/-]+=*`)
 )
 
+// refURLUserInfo は、URL のユーザー情報の形(仕様 4.1「URL のパスワード」)の正規表現。スキームの先頭に当てる。
+// 1 つ目のグループがパスワード。スキームの前の文字の条件は、refURLPasswords で確かめる。
+var refURLUserInfo = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*://[^ \t:/?#@]*:([^ \t/?#@]+)@[A-Za-z0-9.\[-]`)
+
+// refURLPasswords は、行のすべての位置で refURLUserInfo を試す参照実装。(パスワードの先頭, `@` の位置)の組を返す。
+func refURLPasswords(line []byte) [][2]int {
+	var out [][2]int
+	for p := 0; p < len(line); p++ {
+		if p > 0 {
+			c := line[p-1]
+			if refIsAlnum(c) || c == '+' || c == '.' || c == '-' {
+				continue
+			}
+		}
+		if loc := refURLUserInfo.FindSubmatchIndex(line[p:]); loc != nil {
+			out = append(out, [2]int{p + loc[2], p + loc[3]})
+		}
+	}
+	return out
+}
+
 func refIsAlnum(c byte) bool {
 	return c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }
@@ -658,6 +680,8 @@ func refSecrets(line []byte) [][2]int {
 		}
 		out = append(out, [2]int{p + loc[2], p + loc[3]})
 	}
+	// URL のパスワード(v1.2)
+	out = append(out, refURLPasswords(line)...)
 	// キー名ベース(Authorization と、方式名つきの値を含む)
 	for i := 0; i < len(line); i++ {
 		if line[i] != '=' && line[i] != ':' {
@@ -780,6 +804,7 @@ func TestSecretFinderMatchesRegexpReference(t *testing.T) {
 		"sk_live_", "rk_test_", rep("c", 24), "AIza", rep("d", 35), "sk-", rep("e", 20), "eyJ", ".", "eyJhbGci", "-", "_",
 		"Signature", "signature", "SIGNATURE", "X-Amz-", "x-amz-", "Signature=", "X-Amz-Signature=", awsSig, awsSig,
 		awsSig[:32], awsSig[32:], "0", "f", "F", "?", "%2F",
+		"://", "://", "http", "postgres", "git+ssh", "user", "pw", "@", "@", "host.example.com", "/", "#", "+", "1x", "[::1]", "s3cret",
 	}
 	rng := rand.New(rand.NewPCG(21, 22))
 	f := secretFinder{}
@@ -977,6 +1002,198 @@ func BenchmarkSecretFinder(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		for _, line := range lines {
 			dst = (secretFinder{}).find(line, dst[:0])
+		}
+	}
+}
+
+// ---- URL のパスワード(v1.2。仕様 4.1、9 章「URL のパスワード」) ----
+
+func TestSecretURLPassword(t *testing.T) {
+	sec := KindSet(0).With(KindSecret)
+	for _, tc := range []struct {
+		name, line string
+		want       []string
+	}{
+		{"postgres", "postgres://app:s3cret@db.example.com:5432/app", []string{"secret=s3cret"}},
+		{"rds host", "postgres://app:s3cret@mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432/app", []string{"secret=s3cret"}},
+		{"ip host", "https://user:pass@10.0.0.1/", []string{"secret=pass"}},
+		{"empty user", "redis://:s3cret@10.0.0.5:6379", []string{"secret=s3cret"}},
+		{"colon in password", "ftp://u:a:b@host", []string{"secret=a:b"}},
+		{"colons only in password", "ftp://u::@host", []string{"secret=:"}},
+		{"scheme chars", "git+ssh://git:tok@github.com/x/y.git", []string{"secret=tok"}},
+		{"scheme with dot and dash", "jdbc.v-2://u:p@h", []string{"secret=p"}},
+		{"scheme with digit and plus", "x1+://u:p@h", []string{"secret=p"}},
+		{"ipv6 host", "http://u:p@[::1]:80/", []string{"secret=p"}},
+		{"host starts with dash", "http://u:p@-x", []string{"secret=p"}},
+		{"in quotes", `url="mysql://root:hunter2@db:3306/x"`, []string{"secret=hunter2"}},
+		{"in json", `{"dsn":"postgres://a:b@c/d"}`, []string{"secret=b"}},
+		{"two urls", "a://u:p1@h b://v:p2@i", []string{"secret=p1", "secret=p2"}},
+		{"uppercase scheme", "HTTPS://U:P@H", []string{"secret=P"}},
+		{"after non scheme chars", "(http://u:p@h) <ftp://u:q@h>", []string{"secret=p", "secret=q"}},
+		{"at in password", "http://u:p@w@h", []string{"secret=p"}},
+		// 対象外
+		{"user only", "https://taro@example.com/", nil},
+		{"no scheme", "user:pass@host", nil},
+		{"no slashes", "mailto:user:pass@host", nil},
+		{"one slash", "http:/u:p@h", nil},
+		{"empty password", "http://u:@h", nil},
+		{"no host", "http://u:p@", nil},
+		{"space after at", "http://u:p@ h", nil},
+		{"host char is slash", "http://u:p@/x", nil},
+		{"space in user", "http://u v:p@h", nil},
+		{"space in password", "http://u:p w@h", nil},
+		{"slash in password", "http://u:p/w@h", nil},
+		{"question mark in password", "http://u:p?w@h", nil},
+		{"hash in password", "http://u:p#w@h", nil},
+		{"scheme starts with digit", "1http://u:p@h", nil},
+		{"scheme starts with dash", "-http://u:p@h", nil},
+		{"empty scheme", "://u:p@h", nil},
+		{"path before userinfo", "http://host/path/u:p@h", nil},
+		{"tab in user", "http://u\t:p@h", nil},
+	} {
+		got := awsValues(t, sec, tc.line)
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("%s: %q: got %q, want %q", tc.name, tc.line, got, tc.want)
+		}
+	}
+}
+
+// ホスト名の部分は、通常どおり他の種別として検出される。メールアドレスとして扱われない(受け入れ基準)。
+func TestSecretURLPasswordWithOtherKinds(t *testing.T) {
+	all := DefaultKinds.With(KindAWSAccount).With(KindAWSS3Bucket).With(KindAWSHost)
+	for _, tc := range []struct {
+		line string
+		want []string
+	}{
+		{"https://user:pass@10.0.0.1/", []string{"secret=pass", "ipv4_private=10.0.0.1"}},
+		{"postgres://app:s3cret@db.example.com:5432/app", []string{"secret=s3cret"}},
+		{"postgres://app:s3cret@mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432/app", []string{"secret=s3cret", "aws_host=mydb.cluster-c9akciq32"}},
+		{"redis://:s3cret@10.0.0.5:6379", []string{"secret=s3cret", "ipv4_private=10.0.0.5"}},
+		{"ftp://u:a:b@host", []string{"secret=a:b"}},
+		// ユーザーだけ、パスワードの形に当たらないものは、v1.1 と同じくメールアドレス
+		{"https://taro@example.com/", []string{"email=taro@example.com"}},
+		{"user:pass@example.com", []string{"email=pass@example.com"}},
+		{"http://u:p@h@x.com", []string{"secret=p", "email=h@x.com"}},
+		{"mail admin@mydb.c9akciq32.ap-northeast-1.rds.amazonaws.com", []string{"email=admin@mydb.c9akciq32.ap-northeast-1.rds.amazonaws.com"}},
+	} {
+		if got := awsValues(t, all, tc.line); !slices.Equal(got, tc.want) {
+			t.Errorf("%q: got %q, want %q", tc.line, got, tc.want)
+		}
+	}
+	// secret が無効でも、この形の `@` はメールアドレスとして扱わない(Q54)。パスワードは残る
+	for _, line := range []string{"https://user:pass@example.com/", "postgres://app:s3cret@db.example.com:5432/app"} {
+		if got := awsValues(t, KindSet(0).With(KindEmail), line); got != nil {
+			t.Errorf("email only, %q: got %q, want nothing", line, got)
+		}
+	}
+	if got := awsValues(t, KindSet(0).With(KindEmail), "https://taro@example.com/"); !slices.Equal(got, []string{"email=taro@example.com"}) {
+		t.Errorf("email only, user only: %q", got)
+	}
+}
+
+// 置換済みの形(mask のラベル、hash の出力)は、再度は置換されない(冪等性)。
+func TestSecretURLPasswordAlreadyReplaced(t *testing.T) {
+	d, err := New(Options{Kinds: DefaultKinds | KindSet(0).With(KindAWSHost)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{
+		"postgres://app:<secret_1>@db.example.com:5432/app",
+		"postgres://app:secret_3f9a1c0b7d2e@db.example.com:5432/app",
+		"postgres://app:<secret_1>@<aws_host_1>.ap-northeast-1.rds.amazonaws.com:5432/app",
+		"postgres://app:secret_3f9a1c0b7d2e@aws_host_3f9a1c0b7d2e.ap-northeast-1.rds.amazonaws.com:5432/app",
+	} {
+		got, _ := d.Find([]byte(line), nil)
+		if len(got) != 0 {
+			t.Errorf("Find(%q) = %+v, want nothing", line, got)
+		}
+	}
+}
+
+// urlPasswordStart と、正規表現の参照実装(スキームから前向きに調べる)が、`@` ごとに一致すること。
+// secret(パスワードの範囲)と email(`@` を除く)は、どちらもこの関数を使う。
+func TestURLPasswordMatchesRegexpReference(t *testing.T) {
+	pieces := []string{"http", "postgres", "git+ssh", "1x", "x", "ftp", "://", "://", ":/", "//", "/", ":", ":", "@", "@", "user", "u", "", "pass", "p:q",
+		"s3cret", "host.example.com", "h", "[::1]", ".", "-", "+", "_", "?", "#", " ", "\t", "あ", "\xff", "<secret_1>", "a@b.com", "10.0.0.1"}
+	prefixes := []string{"", "", " ", "(", "\"", "=", "x", "1", "+", ".", "-", "_", "あ", "a://"}
+	schemes := []string{"http", "https", "postgres", "git+ssh", "a.b-c", "x1+", "1x", "-x", "", "ふ"}
+	seps := []string{"://", "://", "://", ":/", "//", ":///", "://:", ":"}
+	users := []string{"", "u", "user", "a b", "a:b", "a/b", "a?b", "a#b", "a@b", "\t", "あ"}
+	pws := []string{"p", "s3cret", "a:b", ":", "", "p w", "p/q", "p?q", "p#q", "p@q", "<secret_1>", "あ"}
+	hosts := []string{"h", "host.example.com", "[::1]", "-x", ".", "10.0.0.1", "", " h", "/x", "あ", "@h", "x@y.com"}
+	suffixes := []string{"", "", "/", ":5432/app", " ", "\"", ")"}
+	rng := rand.New(rand.NewPCG(31, 32))
+	pick := func(xs []string) string { return xs[rng.IntN(len(xs))] }
+	found := 0
+	for iter := 0; iter < 80000; iter++ {
+		var sb strings.Builder
+		for i, n := 0, 1+rng.IntN(3); i < n; i++ {
+			if rng.IntN(3) == 0 {
+				for k, m := 0, 1+rng.IntN(8); k < m; k++ {
+					sb.WriteString(pick(pieces))
+				}
+				continue
+			}
+			sb.WriteString(pick(prefixes) + pick(schemes) + pick(seps) + pick(users) + pick([]string{":", ":", ":", ""}) + pick(pws) +
+				pick([]string{"@", "@", "@", ""}) + pick(hosts) + pick(suffixes))
+		}
+		line := []byte(sb.String())
+		want := refURLPasswords(line)
+		var got [][2]int
+		for at := range line {
+			if line[at] != '@' {
+				continue
+			}
+			if s, ok := urlPasswordStart(line, at); ok {
+				got = append(got, [2]int{s, at})
+			}
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("iter %d, line %q\n got  %v\n want %v", iter, line, got, want)
+		}
+		var fromFinder [][2]int
+		for _, m := range (secretFinder{}).urlPasswords(line, nil) {
+			fromFinder = append(fromFinder, [2]int{m.Start, m.End})
+		}
+		if !slices.Equal(fromFinder, want) {
+			t.Fatalf("iter %d, line %q: finder %v, want %v", iter, line, fromFinder, want)
+		}
+		found += len(want)
+	}
+	if found < 3000 {
+		t.Errorf("only %d URL passwords were found; the generator does not exercise the rules", found)
+	}
+}
+
+// 手前へ遡る長さの合計が、行の長さ以内に収まること(長い行で遅くならない)。
+func TestURLPasswordOnLongLines(t *testing.T) {
+	for _, c := range []struct {
+		name, line string
+		want       int
+	}{
+		{"ats", strings.Repeat("@", 1<<20), 0},
+		{"long user", "http://" + strings.Repeat("a", 1<<20) + ":p@h", 1},
+		{"long password", "http://u:" + strings.Repeat("p", 1<<20) + "@h", 1},
+		{"long scheme", strings.Repeat("a", 1<<20) + "://u:p@h", 1},
+		{"colon runs", "http://" + strings.Repeat(":", 1<<20) + "@h", 1},
+		{"repeated schemes", strings.Repeat("a://b:c@", 100000) + "h", 100000},
+		{"repeated userinfo", "http://" + strings.Repeat("a:b@", 200000) + "h", 1},
+		{"no scheme", strings.Repeat("u:p@h ", 150000), 0},
+		{"scheme chars then at", strings.Repeat("a-", 500000) + "@h", 0},
+		{"slashes", strings.Repeat("://", 300000) + "u:p@h", 0},
+	} {
+		start := time.Now()
+		got := (secretFinder{}).urlPasswords([]byte(c.line), nil)
+		if d := time.Since(start); d > 5*time.Second {
+			t.Errorf("%s: took %v", c.name, d)
+		}
+		if len(got) != c.want {
+			t.Errorf("%s: %d matches, want %d", c.name, len(got), c.want)
+		}
+		start = time.Now()
+		_ = (emailFinder{hashLen: 12}).find([]byte(c.line), nil)
+		if d := time.Since(start); d > 5*time.Second {
+			t.Errorf("%s (email): took %v", c.name, d)
 		}
 	}
 }
