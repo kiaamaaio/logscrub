@@ -1,6 +1,7 @@
 package detect
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"math/rand/v2"
@@ -133,6 +134,92 @@ func TestSecretFixedFormats(t *testing.T) {
 			}
 		})
 	}
+}
+
+// indexFixedLiterals、indexFixed は、v1.2 の段階 7 より前の固定形式の検出(接頭辞を bytes.Index で探す)。
+// 手がかりのバイトで探す今の実装(fixedPrefixes)と、結果が一致することを確かめる参照実装。
+var indexFixedLiterals = [...][]byte{
+	[]byte("AKIA"), []byte("ASIA"), []byte("AIza"), []byte("gh"), []byte("github_pat_"),
+	[]byte("xox"), []byte("sk"), []byte("rk"), []byte("eyJ"),
+}
+
+func indexFixed(line []byte) []Match {
+	var dst []Match
+	n := len(line)
+	var next [len(indexFixedLiterals)]int
+	for i := range next {
+		next[i] = -1
+	}
+	for pos := 0; pos < n; {
+		best := n
+		for i, lit := range indexFixedLiterals {
+			if next[i] == n {
+				continue
+			}
+			if next[i] < pos {
+				j := bytes.Index(line[pos:], lit)
+				if j < 0 {
+					next[i] = n
+					continue
+				}
+				next[i] = pos + j
+			}
+			best = min(best, next[i])
+		}
+		if best >= n {
+			break
+		}
+		p := best
+		if p > 0 && isASCIIAlnum(line[p-1]) {
+			pos = p + 1
+			continue
+		}
+		loc := fixedRe.FindIndex(line[p:])
+		if loc == nil || p+loc[1] < n && isASCIIAlnum(line[p+loc[1]]) {
+			pos = p + 1
+			continue
+		}
+		dst = append(dst, Match{Start: p, End: p + loc[1], Kind: KindSecret})
+		pos = p + loc[1]
+	}
+	return dst
+}
+
+// 固定形式の接頭辞を、手がかりのバイトで探す実装(段階 7)が、bytes.Index で探す参照実装と一致すること。
+// 行は、接頭辞・その一部・形に合う続き・前後の文字を、ランダムに並べて作る。
+func TestSecretFixedMatchesIndexReference(t *testing.T) {
+	alphabet := []string{
+		"AKIA", "ASIA", "AIza", "gh", "github_pat_", "xox", "sk", "rk", "eyJ",
+		"A", "K", "I", "S", "z", "g", "h", "i", "x", "o", "s", "r", "k", "e", "y", "J",
+		"p_", "u_", "b-", "_live_", "_test_", "-", "_", ".", " ", "=", "\"", ":", "/", "@", "あ", "\xff",
+		"IOSFODNN7EXAMPLE", rep("a", 20), rep("b", 22), rep("C", 24), rep("1", 35), rep("d", 36), "hbGci", ".eyJ",
+		// 形に合う値(前後の部品しだいで、一致したり、前後の英数字のため一致しなかったりする)
+		"AKIAIOSFODNN7EXAMPLE", "ghp_" + rep("a", 36), "github_pat_" + rep("b", 22), "xoxb-" + rep("1", 10),
+		"sk_live_" + rep("c", 24), "rk_test_" + rep("c", 24), "AIza" + rep("d", 35), "sk-" + rep("e", 20), "eyJa.eyJb.c",
+	}
+	rng := rand.New(rand.NewPCG(41, 42))
+	f := secretFinder{}
+	matched := 0
+	for iter := 0; iter < 100000; iter++ {
+		var sb strings.Builder
+		for i, n := 0, rng.IntN(12); i < n; i++ {
+			sb.WriteString(alphabet[rng.IntN(len(alphabet))])
+		}
+		line := []byte(sb.String())
+		want := indexFixed(line)
+		got := f.fixed(line, nil)
+		if !slices.Equal(got, want) {
+			t.Fatalf("iter %d, line %q\n got  %v\n want %v", iter, line, got, want)
+		}
+		if len(want) > 0 {
+			matched++
+		}
+	}
+	// 一致する行が少なすぎると、比べた意味がない
+	if matched < 20000 {
+		t.Errorf("only %d lines had fixed-format matches", matched)
+	}
+	t.Logf("%d lines had fixed-format matches", matched)
 }
 
 // ---- AWS の署名(仕様 4.1「AWS の署名」、Q32) ----

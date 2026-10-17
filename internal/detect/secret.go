@@ -32,7 +32,7 @@ func isASCIIAlnum(c byte) bool {
 
 // ---- 固定形式 ----
 
-// fixedRe は、固定形式の正規表現(仕様 4.1 の表)。位置は、fixedLiterals の接頭辞で絞る。
+// fixedRe は、固定形式の正規表現(仕様 4.1 の表)。位置は、fixedPrefixes の接頭辞で絞る。
 // 前後が英数字でないこと(Q14)は、呼び出し側で確認する。
 var fixedRe = regexp.MustCompile(`^(?:` +
 	`(?:AKIA|ASIA)[A-Z0-9]{16}` + // AWS アクセスキー ID
@@ -45,31 +45,80 @@ var fixedRe = regexp.MustCompile(`^(?:` +
 	`|eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*` + // JWT(署名部は空でもよい)
 	`)`)
 
-// fixedLiterals は、固定形式の接頭辞(の先頭部分)。どれかを含まない行は、正規表現を当てない。
-var fixedLiterals = [...][]byte{
-	[]byte("AKIA"), []byte("ASIA"), []byte("AIza"), []byte("gh"), []byte("github_pat_"),
-	[]byte("xox"), []byte("sk"), []byte("rk"), []byte("eyJ"),
+// fixedPrefix は、固定形式の接頭辞(の先頭部分)のまとまり。lits は、どれも off の位置に同じバイト(手がかり)を持つ。
+type fixedPrefix struct {
+	lits [][]byte
+	off  int
+}
+
+// fixedPrefixes は、固定形式の接頭辞を、手がかりのバイトごとにまとめたもの。どれも含まない行は、正規表現を当てない。
+//
+// 接頭辞を bytes.Index で探すと、先頭の文字が文中に多い場合(`sk` の `s`、`rk` の `r` など)に、遅い経路になる
+// (DEVELOPMENT.md 3.4 節)。接頭辞の中の、文中に少ない 1 バイトを bytes.IndexByte で探してから、前後を照合する。
+// 手がかりが同じ接頭辞は、1 回の走査でまとめて探す(plans/v1.2.0.md 段階 7 の実測)。
+var fixedPrefixes = []fixedPrefix{
+	{lits: [][]byte{[]byte("AKIA"), []byte("ASIA"), []byte("AIza")}, off: 0}, // `A`
+	{lits: [][]byte{[]byte("gh"), []byte("github_pat_")}, off: 0},             // `g`
+	{lits: [][]byte{[]byte("xox")}, off: 0},                                   // `x`
+	{lits: [][]byte{[]byte("sk"), []byte("rk")}, off: 1},                      // `k`
+	{lits: [][]byte{[]byte("eyJ")}, off: 2},                                   // `J`
+}
+
+// maxFixedPrefixes は、fixedPrefixes のまとまりの数の上限(fixed の作業領域を、配列で持つため)。
+const maxFixedPrefixes = 8
+
+func init() {
+	if len(fixedPrefixes) > maxFixedPrefixes {
+		panic("too many fixed prefix groups")
+	}
+	for _, g := range fixedPrefixes {
+		for _, l := range g.lits {
+			if g.off >= len(l) || l[g.off] != g.lits[0][g.off] {
+				panic("fixed prefixes in a group must share the hint byte: " + string(l))
+			}
+		}
+	}
+}
+
+// nextFixedPrefix は、line[pos:] の中で、g の接頭辞のどれかが始まる最初の位置を返す。なければ -1。
+func nextFixedPrefix(line []byte, pos int, g *fixedPrefix) int {
+	hint := g.lits[0][g.off]
+	for q := pos + g.off; q < len(line); {
+		j := bytes.IndexByte(line[q:], hint)
+		if j < 0 {
+			return -1
+		}
+		p := q + j - g.off // 接頭辞の先頭
+		q += j + 1
+		for _, l := range g.lits {
+			if bytes.HasPrefix(line[p:], l) {
+				return p
+			}
+		}
+	}
+	return -1
 }
 
 func (secretFinder) fixed(line []byte, dst []Match) []Match {
 	n := len(line)
-	var next [len(fixedLiterals)]int // 各接頭辞の次の出現位置。-1: 未計算、n: これ以上ない
+	var nextBuf [maxFixedPrefixes]int
+	next := nextBuf[:len(fixedPrefixes)] // まとまりごとの、接頭辞の次の出現位置。-1: 未計算、n: これ以上ない
 	for i := range next {
 		next[i] = -1
 	}
 	for pos := 0; pos < n; {
 		best := n
-		for i, lit := range fixedLiterals {
+		for i := range fixedPrefixes {
 			if next[i] == n {
 				continue
 			}
 			if next[i] < pos {
-				j := bytes.Index(line[pos:], lit)
+				j := nextFixedPrefix(line, pos, &fixedPrefixes[i])
 				if j < 0 {
 					next[i] = n
 					continue
 				}
-				next[i] = pos + j
+				next[i] = j
 			}
 			if next[i] < best {
 				best = next[i]
