@@ -351,8 +351,8 @@ AWS のサービスのホスト名には、利用者ごとの部分(DB の名前
 
 | サービス | 末尾の形 | 例 |
 |---|---|---|
-| ELB(ALB・CLB) | `.<リージョン>.elb.<ドメイン>` | `my-alb-1234567890.ap-northeast-1.elb.amazonaws.com` |
-| ELB(NLB) | `.elb.<リージョン>.<ドメイン>` | `my-nlb-0123456789abcdef.elb.ap-northeast-1.amazonaws.com` |
+| ELB(CLB、ALB) | `.<リージョン>.elb.<ドメイン>` | `my-alb-1234567890.ap-northeast-1.elb.amazonaws.com` |
+| ELB(NLB、ALB) | `.elb.<リージョン>.<ドメイン>` | `my-nlb-0123456789abcdef.elb.ap-northeast-1.amazonaws.com` |
 | API Gateway | `.execute-api.<リージョン>.<ドメイン>` | `a1b2c3d4e5.execute-api.ap-northeast-1.amazonaws.com` |
 | Lambda 関数 URL | `.lambda-url.<リージョン>.on.aws` | `abcdefghij0123456789klmnop.lambda-url.ap-northeast-1.on.aws` |
 | CloudFront | `.cloudfront.net` | `d111111abcdef8.cloudfront.net` |
@@ -362,7 +362,7 @@ AWS のサービスのホスト名には、利用者ごとの部分(DB の名前
 | Redshift | `.<リージョン>.redshift.<ドメイン>`、`.<リージョン>.redshift-serverless.<ドメイン>` | `my-cluster.c9akciq32.ap-northeast-1.redshift.amazonaws.com` |
 | OpenSearch | `.<リージョン>.es.<ドメイン>`、`.<リージョン>.aoss.<ドメイン>` | `search-my-domain-abcdefghij.ap-northeast-1.es.amazonaws.com` |
 | MSK | `.kafka.<リージョン>.<ドメイン>` | `b-1-public.my-cluster.abc123.c2.kafka.ap-northeast-1.amazonaws.com` |
-| Amazon MQ | `.mq.<リージョン>.<ドメイン>` | `b-1234abcd-12ab-34cd-56ef-1234567890ab-1.mq.ap-northeast-1.amazonaws.com` |
+| Amazon MQ | `.mq.<リージョン>.<ドメイン>`、`.mq.<リージョン>.on.aws` | `b-1234abcd-12ab-34cd-56ef-1234567890ab-1.mq.ap-northeast-1.amazonaws.com` |
 | Transfer Family | `.server.transfer.<リージョン>.<ドメイン>` | `s-0123456789abcdef0.server.transfer.ap-northeast-1.amazonaws.com` |
 | AppSync | `.appsync-api.<リージョン>.<ドメイン>`、`.appsync-realtime-api.<リージョン>.<ドメイン>` | `abcdefghijklmnopqrstuvwxyz.appsync-api.ap-northeast-1.amazonaws.com` |
 | Cognito のドメイン | `.auth.<リージョン>.amazoncognito.com` | `my-app.auth.ap-northeast-1.amazoncognito.com` |
@@ -378,6 +378,7 @@ AWS のサービスのホスト名には、利用者ごとの部分(DB の名前
 - 末尾の形の決まった部分は、小文字の形だけを対象にする(Q42)。末尾の形の後ろの条件は、4.4 のホスト名の末尾と同じ(Q41)
 - 利用者ごとの部分: 英字(大文字・小文字)・数字・`-`・`.` からなる 1 文字以上で、先頭と末尾が英数字、`.` が 2 つ続かないこと。その前が、英数字・`-`・`_`・`.` でないこと
   - 英大文字を許すのは、EKS の ID のように、AWS が大文字で付ける値があるため(DNS の名前は大文字・小文字を区別しない)
+- 利用者ごとの部分が次の名前そのものの場合は、検出しない(AWS 共通のエンドポイントで、利用者ごとの値ではないため)。IoT Core の `data-ats`(`data-ats.iot.us-east-1.amazonaws.com`)。表の行ごとに持ち、必要な行にだけ加える
 - 1 つのホスト名に、複数の末尾の形が当てはまる場合(`.<リージョン>.elasticbeanstalk.com` と `.elasticbeanstalk.com`)は、長いほうの形を採る(利用者ごとの部分が短くなるほう)
 - 置換するのは、利用者ごとの部分だけ。`dualstack.`(ELB)、`internal-`(内部向けの ELB)、アベイラビリティゾーンの接頭辞(NLB)なども、利用者ごとの部分に含める
 - 同じ値の判定は、通常どおりバイト列で行う。`dualstack.my-alb-1234567890` と `my-alb-1234567890` は、別の値として扱う
@@ -389,6 +390,9 @@ AWS のサービスのホスト名には、利用者ごとの部分(DB の名前
 - AWS のサービス自体の API のエンドポイント(`rds.ap-northeast-1.amazonaws.com`、`kafka.ap-northeast-1.amazonaws.com` など)。利用者ごとの部分がないため、表の形に当てはまらない
 - VPC の中からしかアクセスできないサービス(ElastiCache、DocumentDB、Neptune、VPC エンドポイント `vpce-…` など)
 - デュアルスタックのドメイン `api.aws` の形(`<ID>.<リージョン>.api.aws`)。AWS 自体の API のエンドポイント(`sqs.us-east-1.api.aws` など)と区別できないため
+- 表にない新しい形: OpenSearch Serverless の NextGen(`<ID>.aoss.<リージョン>.on.aws`、`<アカウント ID>.aoss.<リージョン>.on.aws`)、Cognito の FIPS(`<接頭辞>.auth-fips.<リージョン>.amazoncognito.com`)。必要になったら、表に行を足すだけで追加できる
+
+表の形は、2026-10-18 に AWS の公式ドキュメントで確認した([plans/v1.2.0.md](plans/v1.2.0.md) Q47)。
 
 範囲が重なった場合:
 
@@ -399,6 +403,8 @@ AWS のサービスのホスト名には、利用者ごとの部分(DB の名前
 - 独自のドメイン(Route 53 の CNAME などで付けた `db.example.com`)は検出しない
 - `dualstack.` などの接頭辞の有無で、同じロードバランサが別のラベルになる
 - 表にないサービスのホスト名は検出しない
+- `<ドメイン>` は 4.4 のドメインの一覧をそのまま使う。公式ドキュメントで実在を確認できたのは `amazonaws.com` の形だけで、`amazonaws.com.cn`・`amazonaws.eu` との組み合わせは確認していない。EKS の中国リージョン(`amazonwebservices.com.cn`)など、一覧にないドメインのホスト名は検出しない
+- 表にない新しい形(OpenSearch Serverless の NextGen、Cognito の FIPS)は検出しない
 
 ## 5. 変換モードと復元
 
@@ -655,6 +661,8 @@ AWS のホスト名(v1.2 で追加):
 - [ ] 4.5 の表の各サービスの例が、`<aws_host_N>` + 末尾の形(サービス名・リージョン・ドメインが残る)になる
 - [ ] 同じホスト名は同じラベルに、違うホスト名は別のラベルになる
 - [ ] `.<リージョン>.elasticbeanstalk.com` の形では、リージョンが利用者ごとの部分に含まれない
+- [ ] `<ID>.mq.ap-northeast-1.on.aws` が `<aws_host_N>.mq.ap-northeast-1.on.aws` になる
+- [ ] `data-ats.iot.us-east-1.amazonaws.com` は置換されず、`a1b2c3d4e5f6g7-ats.iot.us-east-1.amazonaws.com` は置換される
 - [ ] AWS 自体の API のエンドポイント(`rds.ap-northeast-1.amazonaws.com`、`https://kafka.ap-northeast-1.amazonaws.com/`)、`cloudfront.net` だけのもの、表にない形(`mydb.example.com`、`x.ap-northeast-1.cache.amazonaws.com`)は置換されない
 - [ ] 末尾の形の後ろに英数字や「`.` + 英数字」が続くもの(`x.cloudfront.net.example.org`)、決まった部分が大文字のもの(`X.CLOUDFRONT.NET`)は置換されない
 - [ ] EC2 のホスト名・S3 のホスト名・ECR のホスト名は、`aws_host` ではなく、それぞれ `ipv4`・`aws_s3_bucket`・`aws_account` として置換される
@@ -720,7 +728,7 @@ CLI:
 
 ## 11. 未決事項
 
-なし(v1.1 の細部は [plans/v1.1.0.md](plans/v1.1.0.md) 5 章の Q32〜Q46、v1.2 の細部は [plans/v1.2.0.md](plans/v1.2.0.md) 5 章の Q47〜Q54 で確定済み)
+なし(v1.1 の細部は [plans/v1.1.0.md](plans/v1.1.0.md) 5 章の Q32〜Q46、v1.2 の細部は [plans/v1.2.0.md](plans/v1.2.0.md) 5 章の Q47〜Q59 で確定済み)
 
 ---
 
