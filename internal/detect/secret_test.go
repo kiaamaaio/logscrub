@@ -715,7 +715,7 @@ func refURLPasswords(line []byte) [][2]int {
 	for p := 0; p < len(line); p++ {
 		if p > 0 {
 			c := line[p-1]
-			if refIsAlnum(c) || c == '+' || c == '.' || c == '-' {
+			if refIsAlnum(c) || c == '+' || c == '.' || c == '-' || c == '_' { // `_` は Q64
 				continue
 			}
 		}
@@ -776,6 +776,9 @@ func refSecrets(line []byte) [][2]int {
 	for i := 0; i < len(line); i++ {
 		if line[i] != '=' && line[i] != ':' {
 			continue
+		}
+		if line[i] == ':' && strings.HasPrefix(string(line[i+1:]), "//") {
+			continue // `<キー名>://` は URL のスキーム(Q63)
 		}
 		km := refKeyRun.FindSubmatch(line[:i])
 		if km == nil {
@@ -1121,6 +1124,21 @@ func TestSecretURLPassword(t *testing.T) {
 		{"uppercase scheme", "HTTPS://U:P@H", []string{"secret=P"}},
 		{"after non scheme chars", "(http://u:p@h) <ftp://u:q@h>", []string{"secret=p", "secret=q"}},
 		{"at in password", "http://u:p@w@h", []string{"secret=p"}},
+		// キー名と同じ語のスキーム(`<キー名>://`)は、キーと値の組として読まない(Q63)
+		{"key name as scheme", "passwd://u:&x@db.example.com/", []string{"secret=&x"}},
+		{"key name as scheme, fuzz", "passwd://:&@0", []string{"secret=&"}},
+		{"password scheme", "password://app:s3cret@db/", []string{"secret=s3cret"}},
+		{"quoted key name before slashes", `"token"://u:p@h`, nil}, // URL の形でもない(スキームの直後が `"`)
+		{"key name scheme without password", "token://abc", nil},
+		{"key name scheme without password, in json", `{"url":"secret://vault/path"}`, nil},
+		// スキームの直前が `_` の形は、URL のパスワードとして扱わない(hash の出力の 16 進数を、スキームとして読まない。Q64)
+		{"underscore before scheme", "x_https://u:p@h", nil},
+		{"hash output before slashes", "email_fde789562e9a://:0@0", nil},
+		{"other chars before scheme", "(https://u:p@h =ftp://u:q@h", []string{"secret=p", "secret=q"}},
+		// 区切りの後ろに空白があるもの、`=` のものは、今までどおりキー名ベース
+		{"space after colon", "password: //abc", []string{"secret=//abc"}},
+		{"equals and slashes", "token=//abc", []string{"secret=//abc"}},
+		{"single slash", "token:/abc", []string{"secret=/abc"}},
 		// 対象外
 		{"user only", "https://taro@example.com/", nil},
 		{"no scheme", "user:pass@host", nil},

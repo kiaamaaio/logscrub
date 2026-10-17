@@ -1110,18 +1110,41 @@ func TestAWSAccountS3Control(t *testing.T) {
 
 // 受け入れ基準(仕様 9 章「URL のパスワード」。v1.2): パスワードの部分だけが <secret_N> になり、メールアドレスとして
 // 置換されない。既定の動作の変更(v1.1 までは <email_N> になる、またはパスワードが残る)。
+// hash の出力(`email_<16 進数>`)の後ろに `://` が続いても、16 進数の部分を URL のスキームとして読まない(Q64)。
+// 読むと、2 回目に URL のパスワードとして置換され直す(冪等性の違反。ファズテストで見つかった)。
+func TestURLPasswordAfterHashOutput(t *testing.T) {
+	in := "0@0.ZA://:0@0\nfrom a@b.example.com://u:p@db\nx_https://u:p@h\n"
+	env := map[string]string{keyEnv: "test-key"}
+	for _, mode := range [][]string{{"--mode", "mask"}, {"--mode", "hash"}, {"--mode", "hash", "--email-hash", "local"}} {
+		once := run(t, in, env, append([]string{"mask"}, mode...)...)
+		if once.code != 0 {
+			t.Fatalf("%v: %+v", mode, once)
+		}
+		if again := run(t, once.stdout, env, append([]string{"mask"}, mode...)...); again.stdout != once.stdout {
+			t.Errorf("%v is not idempotent:\n%s\n%s", mode, once.stdout, again.stdout)
+		}
+	}
+	// スキームの直前が `_` の形は、URL のパスワードとして扱わない(`p@h` は、ドメインに `.` がないのでメールアドレスでもない)
+	if r := run(t, "x_https://u:p@h\n", nil, "mask"); r.stdout != "x_https://u:p@h\n" {
+		t.Errorf("underscore before scheme: %q", r.stdout)
+	}
+}
+
 func TestURLPassword(t *testing.T) {
 	in := "db postgres://app:s3cret@db.example.com:5432/app\n" +
 		"rds postgres://app:s3cret@mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432/app\n" +
 		"cache redis://:other@10.0.0.5:6379 ftp://u:a:b@host.example.org\n" +
 		"web https://user:pass@10.0.0.1/ and https://taro@example.com/ and password=s3cret\n" +
-		`{"origin":"https://app.example.com","email":"bob@example.com"}` + "\n"
+		`{"origin":"https://app.example.com","email":"bob@example.com"}` + "\n" +
+		"scheme passwd://u:&x@db.example.com/ token://abc password: //x\n"
 	wantDefault := "db postgres://app:<secret_1>@db.example.com:5432/app\n" +
 		"rds postgres://app:<secret_1>@mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432/app\n" +
 		"cache redis://:<secret_2>@<ipv4_private_1>:6379 ftp://u:<secret_3>@host.example.org\n" +
 		"web https://user:<secret_4>@<ipv4_private_2>/ and https://<email_1>/ and password=<secret_1>\n" +
 		// パスのない URL の後ろの JSON の値は、ユーザー情報として読まない(Q60)
-		`{"origin":"https://app.example.com","email":"<email_2>"}` + "\n"
+		`{"origin":"https://app.example.com","email":"<email_2>"}` + "\n" +
+		// キー名と同じ語のスキームは、キーと値の組として読まない(Q63)。区切りの後ろに空白があれば、キー名ベース
+		"scheme passwd://u:<secret_5>@db.example.com/ token://abc password: <secret_6>\n"
 	if r := run(t, in, nil, "mask"); r.code != 0 || r.stdout != wantDefault {
 		t.Errorf("default: %+v\nwant %q", r, wantDefault)
 	}
@@ -1156,7 +1179,7 @@ func TestURLPassword(t *testing.T) {
 		}
 	}
 	// --stats
-	if r := run(t, in, nil, "mask", "--stats"); !strings.Contains(r.stderr, "logscrub: secret=6\n") || !strings.Contains(r.stderr, "logscrub: email=2\n") {
+	if r := run(t, in, nil, "mask", "--stats"); !strings.Contains(r.stderr, "logscrub: secret=8\n") || !strings.Contains(r.stderr, "logscrub: email=2\n") {
 		t.Errorf("--stats: %q", r.stderr)
 	}
 	// 対応形式の一覧
