@@ -43,6 +43,8 @@ func (f emailFinder) find(line []byte, dst []Match) []Match {
 // excludeHashed が false のときは、置換済みの形のローカルパートを持つものも含める(テスト用)。
 func (f emailFinder) scan(line []byte, dst []Match, excludeHashed bool) []Match {
 	pos := 0 // 前の一致の終端。ローカルパートは、これより前に伸ばさない
+	// URL のユーザー情報の判定で、遡った範囲を覚える(Q70)
+	var run userInfoRun
 	for {
 		at := bytes.IndexByte(line[pos:], '@')
 		if at < 0 {
@@ -63,7 +65,7 @@ func (f emailFinder) scan(line []byte, dst []Match, excludeHashed bool) []Match 
 			pos = matchAt + 1
 			continue
 		}
-		if _, ok := urlPasswordStart(line, matchAt); ok {
+		if _, ok := run.passwordStart(line, matchAt); ok {
 			// URL のユーザー情報の `@`(`postgres://app:s3cret@db-host/`)は、メールアドレスとして扱わない
 			// (v1.2。secret が無効でも同じ。仕様 4.1、Q54)。重なりの解決の規則には、例外を設けない。
 			pos = matchAt + 1

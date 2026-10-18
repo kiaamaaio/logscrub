@@ -1196,6 +1196,40 @@ func TestAdjacentEmails(t *testing.T) {
 	}
 }
 
+// URL のユーザー・パスワードは `@` を含んでよい。ホストの手前の最後の `@` で、ユーザー情報とホストを分ける(Q70)。
+func TestURLPasswordAtInUserinfo(t *testing.T) {
+	in := "azure postgres://myadmin@mydemoserver:s3cret@10.0.0.5:5432/db\n" +
+		"azure postgres://myadmin@mydemoserver:s3cret@mydemoserver.postgres.database.azure.com:5432/db\n" +
+		"git https://bob@example.com:pw@10.0.0.1/repo\n" +
+		"keyed password=postgres://myadmin@srv:s3cret@10.0.0.6/db\n"
+	want := "azure postgres://myadmin@mydemoserver:<secret_1>@<ipv4_private_1>:5432/db\n" +
+		"azure postgres://myadmin@mydemoserver:<secret_1>@mydemoserver.postgres.database.azure.com:5432/db\n" +
+		"git https://<email_1>:<secret_2>@<ipv4_private_2>/repo\n" +
+		"keyed password=postgres://myadmin@srv:<secret_1>@<ipv4_private_3>/db\n"
+	if r := run(t, in, nil, "mask"); r.code != 0 || r.stdout != want {
+		t.Errorf("mask: %+v\nwant %q", r, want)
+	}
+	dir := t.TempDir()
+	src := writeFile(t, dir, "app.log", in)
+	env := map[string]string{keyEnv: "test-key"}
+	for _, types := range []string{"default", "default,aws"} {
+		masked := run(t, "", nil, "mask", "--types", types, src)
+		if back := run(t, masked.stdout, nil, "restore", "--source", src, "--types", types); back.code != 0 || back.stdout != in {
+			t.Errorf("restore (%s): %+v", types, back)
+		}
+		if again := run(t, masked.stdout, nil, "mask", "--types", types); again.stdout != masked.stdout {
+			t.Errorf("mask (%s) is not idempotent: %q", types, again.stdout)
+		}
+		h := run(t, in, env, "mask", "--mode", "hash", "--types", types)
+		if h.code != 0 || strings.Contains(h.stdout, "s3cret") || strings.Contains(h.stdout, ":pw@") {
+			t.Fatalf("hash (%s): %+v", types, h)
+		}
+		if again := run(t, h.stdout, env, "mask", "--mode", "hash", "--types", types); again.stdout != h.stdout {
+			t.Errorf("hash (%s) is not idempotent:\n%s\n%s", types, h.stdout, again.stdout)
+		}
+	}
+}
+
 func TestKeyNameAfterReplacedValue(t *testing.T) {
 	in := "0.0.0.1passwd=0\nclient 10.0.0.1passwd=s3cret\n10.0.0.1.password=x\n"
 	env := map[string]string{keyEnv: "test-key"}

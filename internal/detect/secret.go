@@ -226,47 +226,98 @@ func isURLUserInfoStop(c byte) bool {
 // isURLHostChar は、`@` の後ろのホスト名の文字(英数字・`.`・`-`・`[`)。
 func isURLHostChar(c byte) bool { return isASCIIAlnum(c) || c == '.' || c == '-' || c == '[' }
 
+// isURLUserInfoBreak は、URL のユーザー情報の続きを切る文字(isURLUserInfoStop のうち `@` 以外)。
+// ユーザー・パスワードは `@` を含んでよい(ホストの手前の最後の `@` で、ユーザー情報とホストを分ける。v1.2。Q70)。
+func isURLUserInfoBreak(c byte) bool { return c != '@' && isURLUserInfoStop(c) }
+
 // urlPasswordStart は、line[at] の `@` が、URL のユーザー情報の `@` なら、パスワードの先頭を返す(仕様 4.1)。
-//
-// `@` の手前を遡り、ユーザー情報(isURLUserInfoStop でない文字の続き)を求める。その中の最初の `:` より後ろ
-// (1 文字以上)がパスワード、手前がユーザー(0 文字以上)。ユーザー情報の直前が `://` で、その前がスキーム
-// (英数字・`+`・`.`・`-` の続きで、英字で始まり、直前が `_` でない。Q64)、`@` の後ろがホスト名の文字であること。
-// 遡る範囲は、手前の `@`・`/` などで止まるので、`@` ごとに呼んでも、遡る長さの合計は行の長さ以内に収まる。
-// secret のパスワードの検出と、email の検出器の「この `@` はメールアドレスとして扱わない」の判定が共用する。
+// 1 回だけ調べる場合の形。同じ行の `@` を左から順に調べる場合は、userInfoRun.passwordStart を使う。
 func urlPasswordStart(line []byte, at int) (int, bool) {
+	var r userInfoRun
+	return r.passwordStart(line, at)
+}
+
+// userInfoRun は、URL のユーザー情報の候補(isURLUserInfoBreak でない文字の続き)を遡った結果を覚える。
+// ユーザー情報は `@` を含んでよいので、`@` ごとに `://` まで遡り直すと、`@` の多い行で、行の長さの 2 乗の時間がかかる。
+// 同じ行の `@` を左から順に調べる間、覚えた範囲の後ろだけを読み足して、読む長さの合計を行の長さ以内に収める(Q70)。
+type userInfoRun struct {
+	valid  bool
+	end    int // [start, end) は、ユーザー情報の候補の続き
+	start  int
+	colon  int // [start, end) の中の最初の `:`(なければ -1)
+	scheme int // start の手前のスキームの判定(0: 未判定、1: スキームの形、-1: でない)
+}
+
+// passwordStart は、line[at] の `@` が、URL のユーザー情報の `@` なら、パスワードの先頭を返す(仕様 4.1)。
+//
+// `@` の手前を遡り、ユーザー情報(isURLUserInfoBreak でない文字の続き。`@` を含んでよい)を求める。その中の最初の `:` より
+// 後ろ(1 文字以上)がパスワード、手前がユーザー(0 文字以上)。ユーザー情報の直前が `://` で、その前がスキーム
+// (英数字・`+`・`.`・`-` の続きで、英字で始まり、直前が `_` でない。Q64)、`@` の後ろがホスト名の文字であること。
+// ユーザー情報の中に `@` が複数あれば、それぞれの `@` で真になりうる(`https://u:p@q@host` の `p` と `p@q`)。
+// 範囲の重なりの解決で、長いほう(最後の `@` まで)が採られる。
+// secret のパスワードの検出と、email の検出器の「この `@` はメールアドレスとして扱わない」の判定が共用する。
+func (r *userInfoRun) passwordStart(line []byte, at int) (int, bool) {
 	if at+1 >= len(line) || !isURLHostChar(line[at+1]) {
 		return 0, false
 	}
+	r.extend(line, at)
+	if r.colon < 0 || r.colon+1 >= at || !r.schemeBefore(line) {
+		return 0, false
+	}
+	return r.colon + 1, true
+}
+
+// extend は、ユーザー情報の候補の続きを、at の手前まで求める。at から手前を、区切りの文字(isURLUserInfoBreak)か、
+// 前に遡った範囲の終わりまで遡る。前の範囲の終わりまで切れずに続けば、前の範囲とつなげる。遡る範囲は呼び出しごとに
+// 重ならないので、左から順に呼べば、合計は行の長さ以内に収まる(区切りの文字は文中に多いので、たいていすぐ止まる)。
+func (r *userInfoRun) extend(line []byte, at int) {
+	cont := r.valid && r.end <= at
+	lo := 0
+	if cont {
+		lo = r.end
+	}
 	p, colon := at, -1
-	for p > 0 && !isURLUserInfoStop(line[p-1]) {
+	for p > lo && !isURLUserInfoBreak(line[p-1]) {
 		p--
 		if line[p] == ':' {
 			colon = p
 		}
 	}
-	if colon < 0 || colon+1 >= at || p < 3 || line[p-3] != ':' || line[p-2] != '/' || line[p-1] != '/' {
-		return 0, false
+	if cont && p == lo {
+		if r.colon < 0 {
+			r.colon = colon
+		}
+		r.end = at
+		return
 	}
-	q := p - 3
-	for q > 0 && isURLSchemeChar(line[q-1]) {
-		q--
+	*r = userInfoRun{valid: true, end: at, start: p, colon: colon}
+}
+
+// schemeBefore は、ユーザー情報の候補の直前が `<スキーム>://` かを返す。
+func (r *userInfoRun) schemeBefore(line []byte) bool {
+	if r.scheme == 0 {
+		r.scheme = -1
+		if p := r.start; p >= 3 && line[p-3] == ':' && line[p-2] == '/' && line[p-1] == '/' {
+			q := p - 3
+			for q > 0 && isURLSchemeChar(line[q-1]) {
+				q--
+			}
+			// スキームの直前が `_` なら対象にしない。hash の出力(`email_<16 進数>`)の 16 進数の部分を、スキームとして
+			// 読まないため(`email_fde789562e9a://:0@0` の `0` を再度置換しない。仕様 4.1。Q64)
+			if q < p-3 && (line[q] >= 'a' && line[q] <= 'z' || line[q] >= 'A' && line[q] <= 'Z') && (q == 0 || line[q-1] != '_') {
+				r.scheme = 1
+			}
+		}
 	}
-	if q == p-3 || !(line[q] >= 'a' && line[q] <= 'z' || line[q] >= 'A' && line[q] <= 'Z') {
-		return 0, false
-	}
-	// スキームの直前が `_` なら対象にしない。hash の出力(`email_<16 進数>`)の 16 進数の部分を、スキームとして読まないため
-	// (`email_fde789562e9a://:0@0` の `0` を再度置換しない。仕様 4.1。Q64)
-	if q > 0 && line[q-1] == '_' {
-		return 0, false
-	}
-	return colon + 1, true
+	return r.scheme > 0
 }
 
 // urlPasswords は、URL のユーザー情報のパスワードの範囲を追記する(仕様 4.1)。
 //
 // 前処理: `@` を bytes.IndexByte で探し(email も同じ手がかり。`@` のない行はここで終わる)、見つけた `@` ごとに
-// urlPasswordStart で手前を調べる。`://` を手がかりにすると、`:` が文中に多く(時刻など)、探す回数が増える。
+// 手前を調べる。`://` を手がかりにすると、`:` が文中に多く(時刻など)、探す回数が増える。
 func (secretFinder) urlPasswords(line []byte, dst []Match) []Match {
+	var run userInfoRun
 	for pos := 0; ; {
 		j := bytes.IndexByte(line[pos:], '@')
 		if j < 0 {
@@ -274,7 +325,7 @@ func (secretFinder) urlPasswords(line []byte, dst []Match) []Match {
 		}
 		at := pos + j
 		pos = at + 1
-		if s, ok := urlPasswordStart(line, at); ok {
+		if s, ok := run.passwordStart(line, at); ok {
 			dst = append(dst, Match{Start: s, End: at, Kind: KindSecret})
 		}
 	}
@@ -529,16 +580,14 @@ func (f secretFinder) startsWithURLPassword(line []byte, s int) bool {
 	if !bytes.HasPrefix(line[p:], schemeSep) {
 		return false
 	}
-	// ユーザー情報: 最初の `:` の前がユーザー(0 文字以上)、後ろがパスワード。
-	// それぞれ、ユーザー情報の文字の続きか、ラベル 1 つだけ(ラベルは、部分の先頭から、部分の終わりまでのものだけ)
+	// ユーザー情報: 最初の `:` の前がユーザー(0 文字以上)、後ろがパスワード。どちらも `@` を含んでよく、`@` ごとに、
+	// そこでユーザー情報が終わる形かを調べる(Q70)。ユーザー・パスワードは、ユーザー情報の文字の続きか、ラベル 1 つだけ
+	// (ラベルは、部分の先頭から、部分の終わり(`:`・`@` の直前)までのものだけ)
+	var run userInfoRun
 	colon := -1
 	pwLabel := false // パスワードの部分が、ラベル 1 つだけか
 	segStart := true // 今の位置が、ユーザーかパスワードの先頭か
-	x := p + len(schemeSep)
-	for {
-		if x >= n {
-			return false
-		}
+	for x := p + len(schemeSep); x < n; {
 		if segStart {
 			segStart = false
 			if e, ok := f.format.MatchAt(line, x); ok && e < n && (line[e] == '@' || colon < 0 && line[e] == ':') {
@@ -549,7 +598,12 @@ func (f secretFinder) startsWithURLPassword(line []byte, s int) bool {
 		}
 		c := line[x]
 		if c == '@' {
-			break
+			if colon >= 0 && f.userInfoEndsAt(line, x, pwLabel, &run) {
+				return true
+			}
+			pwLabel = false // パスワードが `@` の後ろに続くなら、ラベル 1 つだけではない
+			x++
+			continue
 		}
 		if isURLUserInfoStop(c) {
 			return false
@@ -559,22 +613,24 @@ func (f secretFinder) startsWithURLPassword(line []byte, s int) bool {
 		}
 		x++
 	}
-	if colon < 0 {
-		return false
-	}
+	return false
+}
+
+// userInfoEndsAt は、startsWithURLPassword で、line[at] の `@` でユーザー情報が終わる形かを返す。
+// パスワードが置換されていなければ、urlPasswords が置換するもの(passwordStart が真)だけ(Q68)。
+// パスワードがラベル 1 つだけなら、`@` の後ろはホスト名の文字か、ラベル。
+func (f secretFinder) userInfoEndsAt(line []byte, at int, pwLabel bool, run *userInfoRun) bool {
 	if !pwLabel {
-		// パスワードが置換されていない: urlPasswords が置換するものだけ(Q68)
-		_, ok := urlPasswordStart(line, x)
+		_, ok := run.passwordStart(line, at)
 		return ok
 	}
-	// `@` の後ろ: ホスト名の文字か、ラベル
-	if x+1 >= n {
+	if at+1 >= len(line) {
 		return false
 	}
-	if isURLHostChar(line[x+1]) {
+	if isURLHostChar(line[at+1]) {
 		return true
 	}
-	_, ok := f.format.MatchAt(line, x+1)
+	_, ok := f.format.MatchAt(line, at+1)
 	return ok
 }
 

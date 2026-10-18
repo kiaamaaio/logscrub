@@ -702,27 +702,43 @@ var (
 	refToken68   = regexp.MustCompile(`^[A-Za-z0-9._~+/-]+=*`)
 )
 
-// refURLUserInfo は、URL のユーザー情報の形(仕様 4.1「URL のパスワード」)の正規表現。スキームの先頭に当てる。
-// 1 つ目のグループがパスワード。スキームの前の文字の条件は、refURLPasswords で確かめる。
-var refURLUserInfo = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*://[^:` + refURLUserInfoStops + `]*:([^` + refURLUserInfoStops + `]+)@[A-Za-z0-9.\[-]`)
+// refURLUserInfo は、URL のユーザー情報の形(仕様 4.1「URL のパスワード」)の正規表現。スキームの先頭から、ユーザー情報の
+// 終わりの `@` の手前までに当てる(ユーザー・パスワードは `@` を含んでよい。Q70)。1 つ目のグループがパスワード。
+// スキームの前の文字の条件と、`@` の後ろのホスト名の文字は、refURLUserInfoAt で確かめる。
+var refURLUserInfo = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*://[^:` + refURLUserInfoStops + `]*:([^` + refURLUserInfoStops + `]+)$`)
 
 // refURLUserInfoStops は、ユーザー・パスワードに含まれない文字(文字クラスの中に書く形。仕様 4.1、Q60)。
-var refURLUserInfoStops = " \t" + regexp.QuoteMeta("/?#@\"'`<>\\{}|^")
+var refURLUserInfoStops = " \t" + regexp.QuoteMeta("/?#\"'`<>\\{}|^")
 
-// refURLPasswords は、行のすべての位置で refURLUserInfo を試す参照実装。(パスワードの先頭, `@` の位置)の組を返す。
+// refURLUserInfoAt は、line[p:] がスキームで始まる URL のユーザー情報なら、ユーザー情報が終わりうる `@` ごとに、
+// (パスワードの先頭, `@` の位置)の組を返す。
+func refURLUserInfoAt(line []byte, p int) [][2]int {
+	if p > 0 {
+		c := line[p-1]
+		if refIsAlnum(c) || c == '+' || c == '.' || c == '-' || c == '_' { // `_` は Q64
+			return nil
+		}
+	}
+	var out [][2]int
+	for at := p + 1; at+1 < len(line); at++ {
+		if line[at] != '@' || !(refIsAlnum(line[at+1]) || strings.IndexByte(".-[", line[at+1]) >= 0) {
+			continue
+		}
+		if loc := refURLUserInfo.FindSubmatchIndex(line[p:at]); loc != nil {
+			out = append(out, [2]int{p + loc[2], at})
+		}
+	}
+	return out
+}
+
+// refURLPasswords は、行のすべての位置で refURLUserInfoAt を試す参照実装。(パスワードの先頭, `@` の位置)の組を、
+// `@` の位置の順に返す。
 func refURLPasswords(line []byte) [][2]int {
 	var out [][2]int
 	for p := 0; p < len(line); p++ {
-		if p > 0 {
-			c := line[p-1]
-			if refIsAlnum(c) || c == '+' || c == '.' || c == '-' || c == '_' { // `_` は Q64
-				continue
-			}
-		}
-		if loc := refURLUserInfo.FindSubmatchIndex(line[p:]); loc != nil {
-			out = append(out, [2]int{p + loc[2], p + loc[3]})
-		}
+		out = append(out, refURLUserInfoAt(line, p)...)
 	}
+	slices.SortFunc(out, func(a, b [2]int) int { return a[1] - b[1] })
 	return out
 }
 
@@ -826,7 +842,7 @@ func refSecrets(line []byte) [][2]int {
 		if schemeOnly {
 			continue
 		}
-		if refURLUserInfo.Match(line[cs:]) {
+		if cs < len(line) && len(refURLUserInfoAt(line, cs)) > 0 {
 			continue // 値の先頭が URL のパスワードの形なら、URL のパスワードとして扱う(Q65)
 		}
 		var s, e int
@@ -1126,7 +1142,13 @@ func TestSecretURLPassword(t *testing.T) {
 		{"two urls", "a://u:p1@h b://v:p2@i", []string{"secret=p1", "secret=p2"}},
 		{"uppercase scheme", "HTTPS://U:P@H", []string{"secret=P"}},
 		{"after non scheme chars", "(http://u:p@h) <ftp://u:q@h>", []string{"secret=p", "secret=q"}},
-		{"at in password", "http://u:p@w@h", []string{"secret=p"}},
+		// ユーザー・パスワードは `@` を含んでよい。ホストの手前の最後の `@` まで(Q70)
+		{"at in password", "http://u:p@w@h", []string{"secret=p@w"}},
+		{"at in user (azure)", "postgres://myadmin@mydemoserver:s3cret@10.0.0.5:5432/db", []string{"secret=s3cret"}},
+		{"email as user", "https://bob@example.com:pw@10.0.0.1/repo", []string{"secret=pw"}},
+		{"ats in user and password", "redis://a@b@c:d@e@cache-host:6379", []string{"secret=d@e"}},
+		{"space before second at", "http://u:p@h @x", []string{"secret=p"}}, // 2 つ目の `@` の手前に空白があれば、そこで切れる
+		{"encoded at in user", "https://bob%40example.com:pw@git.example.com/", []string{"secret=pw"}},
 		// キー名と同じ語のスキーム(`<キー名>://`)は、キーと値の組として読まない(Q63)
 		{"key name as scheme", "passwd://u:&x@db.example.com/", []string{"secret=&x"}},
 		{"key name as scheme, fuzz", "passwd://:&@0", []string{"secret=&"}},
@@ -1415,7 +1437,11 @@ func TestSecretURLPasswordWithOtherKinds(t *testing.T) {
 		// ユーザーだけ、パスワードの形に当たらないものは、v1.1 と同じくメールアドレス
 		{"https://taro@example.com/", []string{"email=taro@example.com"}},
 		{"user:pass@example.com", []string{"email=pass@example.com"}},
-		{"http://u:p@h@x.com", []string{"secret=p", "email=h@x.com"}},
+		// ユーザー情報は、ホストの手前の最後の `@` まで(Q70)
+		{"http://u:p@h@x.com", []string{"secret=p@h"}},
+		{"https://bob@example.com:pw@10.0.0.1/repo", []string{"email=bob@example.com", "secret=pw", "ipv4_private=10.0.0.1"}},
+		{"postgres://myadmin@mydemoserver:s3cret@10.0.0.5:5432/db", []string{"secret=s3cret", "ipv4_private=10.0.0.5"}},
+		{"postgres://myadmin@mydemoserver:s3cret@mydemoserver.postgres.database.azure.com:5432/db", []string{"secret=s3cret"}},
 		{"mail admin@mydb.c9akciq32.ap-northeast-1.rds.amazonaws.com", []string{"email=admin@mydb.c9akciq32.ap-northeast-1.rds.amazonaws.com"}},
 		// パスのない URL の後ろの JSON の値は、ユーザー情報として読まない(Q60。読むと `"` が置換されて JSON が壊れ、
 		// メールアドレスのドメインが残る)
@@ -1525,7 +1551,10 @@ func TestURLPasswordOnLongLines(t *testing.T) {
 		{"long scheme", strings.Repeat("a", 1<<20) + "://u:p@h", 1},
 		{"colon runs", "http://" + strings.Repeat(":", 1<<20) + "@h", 1},
 		{"repeated schemes", strings.Repeat("a://b:c@", 100000) + "h", 100000},
-		{"repeated userinfo", "http://" + strings.Repeat("a:b@", 200000) + "h", 1},
+		{"repeated userinfo", "http://" + strings.Repeat("a:b@", 200000) + "h", 200000}, // `@` ごとの候補(重なりの解決で 1 つになる)
+		{"ats in user", "http://" + strings.Repeat("a@", 1<<19) + ":p@h", 1},
+		{"ats in password", "http://u:" + strings.Repeat("p@", 1<<19) + "h", 1 << 19},
+		{"ats without scheme", strings.Repeat("a:b@", 300000) + "h", 0},
 		{"no scheme", strings.Repeat("u:p@h ", 150000), 0},
 		{"scheme chars then at", strings.Repeat("a-", 500000) + "@h", 0},
 		{"slashes", strings.Repeat("://", 300000) + "u:p@h", 0},
@@ -1542,6 +1571,21 @@ func TestURLPasswordOnLongLines(t *testing.T) {
 		_ = (emailFinder{hashLen: 12}).find([]byte(c.line), nil)
 		if d := time.Since(start); d > 5*time.Second {
 			t.Errorf("%s (email): took %v", c.name, d)
+		}
+	}
+	// 重なる候補が多い行でも、検出器全体(重なりの解決)が遅くならない。採られるのは、最後の `@` までのもの(Q70)
+	d, err := New(Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{"http://" + strings.Repeat("a:b@", 200000) + "h", "http://u:" + strings.Repeat("p@", 1<<19) + "h"} {
+		start := time.Now()
+		got, _ := d.Find([]byte(line), nil)
+		if el := time.Since(start); el > 5*time.Second {
+			t.Errorf("Find took %v", el)
+		}
+		if len(got) != 1 || got[0].End != len(line)-2 {
+			t.Errorf("Find: %d matches, want 1 ending at the last '@'", len(got))
 		}
 	}
 }
