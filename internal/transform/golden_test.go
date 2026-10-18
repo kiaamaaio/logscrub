@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/kiaamaaio/logscrub/internal/detect"
-	"github.com/kiaamaaio/logscrub/internal/label"
 	"github.com/kiaamaaio/logscrub/internal/synthlog"
 )
 
@@ -97,45 +96,7 @@ func checkSecondPass(t *testing.T, det *detect.Detector, in, once string, placeh
 	}
 }
 
-func FuzzMaskStable(f *testing.F) {
-	for _, s := range []string{
-		"taro@example.com 192.168.0.1\n", "password=abc123&user=x\n", `"api_key": "abc def"` + "\n",
-		"Authorization: Bearer xxxxx\r\n", "::ffff:10.0.0.1 [::1]:8080 fe80::1%eth0\n", "https://user:pass@10.0.0.1/\n",
-		"id=123e4567-e89b-42d3-a456-426614174000 {123e4567-e89b-42d3-a456-426614174000}\n",
-		`{"m":"{\"password\":\"abc\",\"user\":\"a@x.com\"}"}` + "\n", "std::string fmt::Error d::bad\n",
-		"AKIAIOSFODNN7EXAMPLE ghp_" + strings.Repeat("a", 36) + "\n", "<email_1> password=<secret_1>\n",
-		"token: Bearer abc.def-ghi\n", "接続元 10.0.0.1 から taro@example.com\n", "\xff\xfe a@b.co\r\n", "hash_3f9a1c0b7d2e@example.com\n",
-		"000000A10.0.0.0fC00::\n", "0@0.AA@0.AA\n", "ssh user@example.com@bastion.example.org\n",
-		// URL のパスワード(v1.2)
-		"postgres://app:s3cret@db.example.com:5432/app redis://:s3cret@10.0.0.5:6379 ftp://u:a:b@host\n",
-		"https://taro@example.com/ http://u:p@h@x.com password=s3cret\n", "postgres://app:<secret_1>@db/x postgres://app:secret_3f9a1c0b7d2e@db/x\n",
-		"password=https://u:p&q@db.example.com/ token=\"postgres://app:&x@10.0.0.1/\" password=https://u:<secret_1>@<ipv4_private_1>/\n",
-	} {
-		f.Add(s)
-	}
-	for _, s := range awsFuzzSeeds {
-		f.Add(s)
-	}
-	optsList, dets := fuzzOptions(f)
-	f.Fuzz(func(t *testing.T, in string) {
-		for i, opts := range optsList {
-			once, _ := mask(t, opts, in)
-			if strings.Count(once, "\n") != strings.Count(in, "\n") {
-				t.Fatalf("the number of lines changed: %q -> %q", in, once)
-			}
-			if strings.HasSuffix(in, "\n") != strings.HasSuffix(once, "\n") {
-				t.Fatalf("final newline changed: %q -> %q", in, once)
-			}
-			checkSecondPass(t, dets[i], in, once, func(b []byte) []secondPassSpan {
-				var phs []secondPassSpan
-				label.DefaultFormat.Scan(b, func(s, e int, _ string, _ int) { phs = append(phs, secondPassSpan{s, e}) })
-				return phs
-			})
-		}
-	})
-}
-
-// awsFuzzSeeds は、AWS の値(v1.1)を含む、ファズテストの種。
+// awsFuzzSeeds は、AWS の値(v1.1)を含む、ファズテスト(往復)の種と、冪等性の表のテスト(TestMaskAndHashStableOnExamples)の例。
 var awsFuzzSeeds = []string{
 	"&X-Amz-Signature=fe5f80f77d5fa3beca038a248ff027d0445342fe2855ddc963176630326f1024&\n",
 	"[ec2-user@ip-10-0-1-23 ~]$ ec2-54-250-1-2.compute-1.amazonaws.com 54.250.1.2\n",
@@ -159,7 +120,7 @@ var awsFuzzSeeds = []string{
 
 // fuzzOptions は、ファズテストで試す検出の設定(v1.0 の既定 + uuid と、v1.1 の `--types default,aws`)と、
 // それぞれの Detector を返す。
-func fuzzOptions(f *testing.F) ([]detect.Options, []*detect.Detector) {
+func fuzzOptions(tb testing.TB) ([]detect.Options, []*detect.Detector) {
 	optsList := []detect.Options{
 		{Kinds: detect.DefaultKinds.With(detect.KindUUID)},
 		{Kinds: detect.DefaultKinds.With(detect.KindAWSAccount).With(detect.KindAWSS3Bucket).With(detect.KindAWSHost)},
@@ -168,7 +129,7 @@ func fuzzOptions(f *testing.F) ([]detect.Options, []*detect.Detector) {
 	for i, o := range optsList {
 		d, err := detect.New(o)
 		if err != nil {
-			f.Fatal(err)
+			tb.Fatal(err)
 		}
 		dets[i] = d
 	}
