@@ -281,7 +281,7 @@ func TestRestoreLimitationWithLabelLikeSource(t *testing.T) {
 		t.Fatalf("masked = %q", masked)
 	}
 	if restored == source {
-		t.Error("the round trip succeeded; update the README limitation if this is now handled")
+		t.Error("the round trip succeeded; update LIMITATIONS.md if this is now handled")
 	}
 }
 
