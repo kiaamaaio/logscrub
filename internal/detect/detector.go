@@ -101,7 +101,7 @@ func builtinFinders(o Options) []finder {
 		fs = append(fs, ipv6Finder{})
 	}
 	if o.Kinds.Has(KindSecret) {
-		fs = append(fs, secretFinder{})
+		fs = append(fs, secretFinder{format: o.Format})
 	}
 	if o.Kinds.Has(KindUUID) {
 		fs = append(fs, uuidFinder{versions: o.UUIDVersions})

@@ -1110,18 +1110,170 @@ func TestAWSAccountS3Control(t *testing.T) {
 
 // 受け入れ基準(仕様 9 章「URL のパスワード」。v1.2): パスワードの部分だけが <secret_N> になり、メールアドレスとして
 // 置換されない。既定の動作の変更(v1.1 までは <email_N> になる、またはパスワードが残る)。
+// hash の出力(`email_<16 進数>`)の後ろに `://` が続いても、16 進数の部分を URL のスキームとして読まない(Q64)。
+// 読むと、2 回目に URL のパスワードとして置換され直す(冪等性の違反。ファズテストで見つかった)。
+func TestURLPasswordAfterHashOutput(t *testing.T) {
+	in := "0@0.ZA://:0@0\nfrom a@b.example.com://u:p@db\nx_https://u:p@h\n"
+	env := map[string]string{keyEnv: "test-key"}
+	for _, mode := range [][]string{{"--mode", "mask"}, {"--mode", "hash"}, {"--mode", "hash", "--email-hash", "local"}} {
+		once := run(t, in, env, append([]string{"mask"}, mode...)...)
+		if once.code != 0 {
+			t.Fatalf("%v: %+v", mode, once)
+		}
+		if again := run(t, once.stdout, env, append([]string{"mask"}, mode...)...); again.stdout != once.stdout {
+			t.Errorf("%v is not idempotent:\n%s\n%s", mode, once.stdout, again.stdout)
+		}
+	}
+	// スキームの直前が `_` の形は、URL のパスワードとして扱わない(`p@h` は、ドメインに `.` がないのでメールアドレスでもない)
+	if r := run(t, "x_https://u:p@h\n", nil, "mask"); r.stdout != "x_https://u:p@h\n" {
+		t.Errorf("underscore before scheme: %q", r.stdout)
+	}
+}
+
+// `::` を 2 つ含む連なりの直後にメールアドレスが続く形(Q67)。hash の出力が 16 進数の英字で始まっても、
+// 2 回目に IPv6 として置換しないこと。
+func TestIPv6RunBeforeHashOutput(t *testing.T) {
+	in := "::1::0@0.AA\nfe80::1::a@b.example.com\n::1::x\n"
+	env := map[string]string{keyEnv: "test-key"}
+	for _, args := range [][]string{{"--mode", "mask"}, {"--mode", "hash"}, {"--mode", "hash", "--email-hash", "local"}} {
+		once := run(t, in, env, append([]string{"mask"}, args...)...)
+		if once.code != 0 || strings.Contains(once.stdout, "ipv6") {
+			t.Fatalf("%v: %+v", args, once)
+		}
+		if again := run(t, once.stdout, env, append([]string{"mask"}, args...)...); again.stdout != once.stdout {
+			t.Errorf("%v is not idempotent:\n%s\n%s", args, once.stdout, again.stdout)
+		}
+	}
+	// v1.1 までは `<ipv6_private_1>::x` になっていた
+	if r := run(t, "::1::x\n", nil, "mask"); r.stdout != "::1::x\n" {
+		t.Errorf("mask: %q", r.stdout)
+	}
+}
+
+// 置換される値の直後にキー名の語が続く形(Q66)。2 回流しても変わらないこと(mask・hash・別の書式・aws の種別)。
+// キー名ベースの値が、パスワードが置換されていない URL で、ユーザーの部分か `@` の直後が置換済みの形なら、値全体を
+// キー名ベースの値として置換する。パスワードが出力に残らない(Q68)。
+func TestKeyedURLWithReplacedParts(t *testing.T) {
+	in := "password=https://u:s3cret@<aws_host_1>.ap-northeast-1.rds.amazonaws.com/\n" +
+		`"password": "https://u:s3cret@<ipv4_private_1>:5432/app"` + "\n" +
+		"password=https://<uuid_1>:s3cret@db-host/app\n"
+	want := "password=<secret_1>\n" + `"password": "<secret_2>"` + "\n" + "password=<secret_3>\n"
+	if r := run(t, in, nil, "mask"); r.code != 0 || r.stdout != want {
+		t.Errorf("mask: %+v\nwant %q", r, want)
+	}
+	env := map[string]string{keyEnv: "test-key"}
+	for _, args := range [][]string{{"--mode", "mask"}, {"--mode", "hash"}, {"--types", "default,aws"}} {
+		once := run(t, in, env, append([]string{"mask"}, args...)...)
+		if once.code != 0 || strings.Contains(once.stdout, "s3cret") {
+			t.Fatalf("%v: %+v", args, once)
+		}
+		if again := run(t, once.stdout, env, append([]string{"mask"}, args...)...); again.stdout != once.stdout {
+			t.Errorf("%v is not idempotent:\n%s\n%s", args, once.stdout, again.stdout)
+		}
+	}
+}
+
+// 区切りなしで続くメールアドレスは、どのモードでも、再度流しても変わらない(Q69)。
+func TestAdjacentEmails(t *testing.T) {
+	in := "0@0.AA%@0.AA@0.AA\nfrom a@b.example.com-@c.example.com@d.example.com\n"
+	env := map[string]string{keyEnv: "test-key"}
+	for _, args := range [][]string{
+		{"--mode", "mask"}, {"--mode", "hash"}, {"--mode", "hash", "--email-hash", "local"},
+		{"--mask-format", "{type}_{n}"}, {"--mask-format", "{type}-{n}"},
+	} {
+		once := run(t, in, env, append([]string{"mask"}, args...)...)
+		if once.code != 0 || strings.Contains(once.stdout, "a@b.") {
+			t.Fatalf("%v: %+v", args, once)
+		}
+		if again := run(t, once.stdout, env, append([]string{"mask"}, args...)...); again.stdout != once.stdout {
+			t.Errorf("%v is not idempotent:\n%s\n%s", args, once.stdout, again.stdout)
+		}
+	}
+	// 1 回目の結果は v1.1 と同じ
+	want := "email_1email_2@0.AA\nfrom email_3email_4@d.example.com\n"
+	if r := run(t, in, nil, "mask", "--mask-format", "{type}_{n}"); r.stdout != want {
+		t.Errorf("mask: %q, want %q", r.stdout, want)
+	}
+}
+
+// URL のユーザー・パスワードは `@` を含んでよい。ホストの手前の最後の `@` で、ユーザー情報とホストを分ける(Q70)。
+func TestURLPasswordAtInUserinfo(t *testing.T) {
+	in := "azure postgres://myadmin@mydemoserver:s3cret@10.0.0.5:5432/db\n" +
+		"azure postgres://myadmin@mydemoserver:s3cret@mydemoserver.postgres.database.azure.com:5432/db\n" +
+		"git https://bob@example.com:pw@10.0.0.1/repo\n" +
+		"keyed password=postgres://myadmin@srv:s3cret@10.0.0.6/db\n"
+	want := "azure postgres://myadmin@mydemoserver:<secret_1>@<ipv4_private_1>:5432/db\n" +
+		"azure postgres://myadmin@mydemoserver:<secret_1>@mydemoserver.postgres.database.azure.com:5432/db\n" +
+		"git https://<email_1>:<secret_2>@<ipv4_private_2>/repo\n" +
+		"keyed password=postgres://myadmin@srv:<secret_1>@<ipv4_private_3>/db\n"
+	if r := run(t, in, nil, "mask"); r.code != 0 || r.stdout != want {
+		t.Errorf("mask: %+v\nwant %q", r, want)
+	}
+	dir := t.TempDir()
+	src := writeFile(t, dir, "app.log", in)
+	env := map[string]string{keyEnv: "test-key"}
+	for _, types := range []string{"default", "default,aws"} {
+		masked := run(t, "", nil, "mask", "--types", types, src)
+		if back := run(t, masked.stdout, nil, "restore", "--source", src, "--types", types); back.code != 0 || back.stdout != in {
+			t.Errorf("restore (%s): %+v", types, back)
+		}
+		if again := run(t, masked.stdout, nil, "mask", "--types", types); again.stdout != masked.stdout {
+			t.Errorf("mask (%s) is not idempotent: %q", types, again.stdout)
+		}
+		h := run(t, in, env, "mask", "--mode", "hash", "--types", types)
+		if h.code != 0 || strings.Contains(h.stdout, "s3cret") || strings.Contains(h.stdout, ":pw@") {
+			t.Fatalf("hash (%s): %+v", types, h)
+		}
+		if again := run(t, h.stdout, env, "mask", "--mode", "hash", "--types", types); again.stdout != h.stdout {
+			t.Errorf("hash (%s) is not idempotent:\n%s\n%s", types, h.stdout, again.stdout)
+		}
+	}
+}
+
+func TestKeyNameAfterReplacedValue(t *testing.T) {
+	in := "0.0.0.1passwd=0\nclient 10.0.0.1passwd=s3cret\n10.0.0.1.password=x\n"
+	env := map[string]string{keyEnv: "test-key"}
+	for _, args := range [][]string{
+		{"--mode", "mask"}, {"--mode", "hash"}, {"--mode", "hash", "--email-hash", "local"},
+		{"--mask-format", "[{type}:{n}]"}, {"--types", "default,aws"},
+	} {
+		once := run(t, in, env, append([]string{"mask"}, args...)...)
+		if once.code != 0 {
+			t.Fatalf("%v: %+v", args, once)
+		}
+		if again := run(t, once.stdout, env, append([]string{"mask"}, args...)...); again.stdout != once.stdout {
+			t.Errorf("%v is not idempotent:\n%s\n%s", args, once.stdout, again.stdout)
+		}
+	}
+	// 1 回目の結果は v1.1 と同じ(キー名が数字とくっついた形は、キー名として読まない)
+	want := "<ipv4_global_1>passwd=0\nclient <ipv4_private_1>passwd=s3cret\n<ipv4_private_1>.password=<secret_1>\n"
+	if r := run(t, in, nil, "mask"); r.stdout != want {
+		t.Errorf("mask: %q, want %q", r.stdout, want)
+	}
+	// ラベルの直後のキー名の値は、置換しない
+	if r := run(t, "<email_1>password=abc <email_1> password=abc\n", nil, "mask"); r.stdout != "<email_1>password=abc <email_1> password=<secret_1>\n" {
+		t.Errorf("label before key: %q", r.stdout)
+	}
+}
+
 func TestURLPassword(t *testing.T) {
 	in := "db postgres://app:s3cret@db.example.com:5432/app\n" +
 		"rds postgres://app:s3cret@mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432/app\n" +
 		"cache redis://:other@10.0.0.5:6379 ftp://u:a:b@host.example.org\n" +
 		"web https://user:pass@10.0.0.1/ and https://taro@example.com/ and password=s3cret\n" +
-		`{"origin":"https://app.example.com","email":"bob@example.com"}` + "\n"
+		`{"origin":"https://app.example.com","email":"bob@example.com"}` + "\n" +
+		"scheme passwd://u:&x@db.example.com/ token://abc password: //x\n" +
+		`keyed password=https://u:p&q@db.example.com/ token="postgres://app:s3cret@db/" secret=redis://:&x@10.0.0.6 token=https://hooks.example.com/T000/XXXX` + "\n"
 	wantDefault := "db postgres://app:<secret_1>@db.example.com:5432/app\n" +
 		"rds postgres://app:<secret_1>@mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432/app\n" +
 		"cache redis://:<secret_2>@<ipv4_private_1>:6379 ftp://u:<secret_3>@host.example.org\n" +
 		"web https://user:<secret_4>@<ipv4_private_2>/ and https://<email_1>/ and password=<secret_1>\n" +
 		// パスのない URL の後ろの JSON の値は、ユーザー情報として読まない(Q60)
-		`{"origin":"https://app.example.com","email":"<email_2>"}` + "\n"
+		`{"origin":"https://app.example.com","email":"<email_2>"}` + "\n" +
+		// キー名と同じ語のスキームは、キーと値の組として読まない(Q63)。区切りの後ろに空白があれば、キー名ベース
+		"scheme passwd://u:<secret_5>@db.example.com/ token://abc password: <secret_6>\n" +
+		// キー名ベースの値が URL のパスワードの形で始まるものは、パスワードだけ(Q65)。ユーザー情報のない URL は、値全体
+		`keyed password=https://u:<secret_7>@db.example.com/ token="postgres://app:<secret_1>@db/" secret=redis://:<secret_5>@<ipv4_private_3> token=<secret_8>` + "\n"
 	if r := run(t, in, nil, "mask"); r.code != 0 || r.stdout != wantDefault {
 		t.Errorf("default: %+v\nwant %q", r, wantDefault)
 	}
@@ -1148,7 +1300,7 @@ func TestURLPassword(t *testing.T) {
 		}
 		env := map[string]string{keyEnv: "test-key"}
 		h := run(t, in, env, "mask", "--mode", "hash", "--types", types)
-		if h.code != 0 || strings.Contains(h.stdout, "s3cret") || strings.Contains(h.stdout, "pass@") || strings.Contains(h.stdout, "bob@") || !strings.Contains(h.stdout, ":secret_") {
+		if h.code != 0 || strings.Contains(h.stdout, "s3cret") || strings.Contains(h.stdout, "pass@") || strings.Contains(h.stdout, "bob@") || strings.Contains(h.stdout, "&q@") || !strings.Contains(h.stdout, ":secret_") {
 			t.Fatalf("hash (%s): %+v", types, h)
 		}
 		if again := run(t, h.stdout, env, "mask", "--mode", "hash", "--types", types); again.stdout != h.stdout {
@@ -1156,7 +1308,7 @@ func TestURLPassword(t *testing.T) {
 		}
 	}
 	// --stats
-	if r := run(t, in, nil, "mask", "--stats"); !strings.Contains(r.stderr, "logscrub: secret=6\n") || !strings.Contains(r.stderr, "logscrub: email=2\n") {
+	if r := run(t, in, nil, "mask", "--stats"); !strings.Contains(r.stderr, "logscrub: secret=12\n") || !strings.Contains(r.stderr, "logscrub: email=2\n") {
 		t.Errorf("--stats: %q", r.stderr)
 	}
 	// 対応形式の一覧

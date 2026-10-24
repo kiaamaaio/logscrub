@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/base64"
 	"regexp"
+
+	"github.com/kiaamaaio/logscrub/internal/label"
 )
 
 // secretFinder は、トークン類(secret)の検出器(仕様 4.1、決定事項 15)。
@@ -15,7 +17,12 @@ import (
 //   - URL のパスワード: `<スキーム>://<ユーザー>:<パスワード>@<ホスト>` のパスワード部分(v1.2。Q48)
 //   - キー名ベース: `password=<値>`、`"api_key": "<値>"`、`Authorization: Bearer <値>` などの値の部分
 //     (Q15、Q16。JSON の文法を壊さない。決定事項 15)
-type secretFinder struct{}
+type secretFinder struct {
+	// format は、置換済みのラベルの書式(ゼロ値は、ラベルを見ない)。キー名ベースで使う。値が URL のパスワードの形で
+	// 始まるかの判定で、置換済みのラベルを、ユーザー・パスワード・ホスト名の部分として読むため(Q65)と、
+	// キー名の直前がラベルの終わりかを見るため(Q66)
+	format label.Format
+}
 
 func (secretFinder) kind() Kind { return KindSecret }
 
@@ -32,7 +39,7 @@ func isASCIIAlnum(c byte) bool {
 
 // ---- 固定形式 ----
 
-// fixedRe は、固定形式の正規表現(仕様 4.1 の表)。位置は、fixedLiterals の接頭辞で絞る。
+// fixedRe は、固定形式の正規表現(仕様 4.1 の表)。位置は、fixedPrefixes の接頭辞で絞る。
 // 前後が英数字でないこと(Q14)は、呼び出し側で確認する。
 var fixedRe = regexp.MustCompile(`^(?:` +
 	`(?:AKIA|ASIA)[A-Z0-9]{16}` + // AWS アクセスキー ID
@@ -45,31 +52,80 @@ var fixedRe = regexp.MustCompile(`^(?:` +
 	`|eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*` + // JWT(署名部は空でもよい)
 	`)`)
 
-// fixedLiterals は、固定形式の接頭辞(の先頭部分)。どれかを含まない行は、正規表現を当てない。
-var fixedLiterals = [...][]byte{
-	[]byte("AKIA"), []byte("ASIA"), []byte("AIza"), []byte("gh"), []byte("github_pat_"),
-	[]byte("xox"), []byte("sk"), []byte("rk"), []byte("eyJ"),
+// fixedPrefix は、固定形式の接頭辞(の先頭部分)のまとまり。lits は、どれも off の位置に同じバイト(手がかり)を持つ。
+type fixedPrefix struct {
+	lits [][]byte
+	off  int
+}
+
+// fixedPrefixes は、固定形式の接頭辞を、手がかりのバイトごとにまとめたもの。どれも含まない行は、正規表現を当てない。
+//
+// 接頭辞を bytes.Index で探すと、先頭の文字が文中に多い場合(`sk` の `s`、`rk` の `r` など)に、遅い経路になる
+// (DEVELOPMENT.md 3.4 節)。接頭辞の中の、文中に少ない 1 バイトを bytes.IndexByte で探してから、前後を照合する。
+// 手がかりが同じ接頭辞は、1 回の走査でまとめて探す(plans/v1.2.0.md 段階 7 の実測)。
+var fixedPrefixes = []fixedPrefix{
+	{lits: [][]byte{[]byte("AKIA"), []byte("ASIA"), []byte("AIza")}, off: 0}, // `A`
+	{lits: [][]byte{[]byte("gh"), []byte("github_pat_")}, off: 0},             // `g`
+	{lits: [][]byte{[]byte("xox")}, off: 0},                                   // `x`
+	{lits: [][]byte{[]byte("sk"), []byte("rk")}, off: 1},                      // `k`
+	{lits: [][]byte{[]byte("eyJ")}, off: 2},                                   // `J`
+}
+
+// maxFixedPrefixes は、fixedPrefixes のまとまりの数の上限(fixed の作業領域を、配列で持つため)。
+const maxFixedPrefixes = 8
+
+func init() {
+	if len(fixedPrefixes) > maxFixedPrefixes {
+		panic("too many fixed prefix groups")
+	}
+	for _, g := range fixedPrefixes {
+		for _, l := range g.lits {
+			if g.off >= len(l) || l[g.off] != g.lits[0][g.off] {
+				panic("fixed prefixes in a group must share the hint byte: " + string(l))
+			}
+		}
+	}
+}
+
+// nextFixedPrefix は、line[pos:] の中で、g の接頭辞のどれかが始まる最初の位置を返す。なければ -1。
+func nextFixedPrefix(line []byte, pos int, g *fixedPrefix) int {
+	hint := g.lits[0][g.off]
+	for q := pos + g.off; q < len(line); {
+		j := bytes.IndexByte(line[q:], hint)
+		if j < 0 {
+			return -1
+		}
+		p := q + j - g.off // 接頭辞の先頭
+		q += j + 1
+		for _, l := range g.lits {
+			if bytes.HasPrefix(line[p:], l) {
+				return p
+			}
+		}
+	}
+	return -1
 }
 
 func (secretFinder) fixed(line []byte, dst []Match) []Match {
 	n := len(line)
-	var next [len(fixedLiterals)]int // 各接頭辞の次の出現位置。-1: 未計算、n: これ以上ない
+	var nextBuf [maxFixedPrefixes]int
+	next := nextBuf[:len(fixedPrefixes)] // まとまりごとの、接頭辞の次の出現位置。-1: 未計算、n: これ以上ない
 	for i := range next {
 		next[i] = -1
 	}
 	for pos := 0; pos < n; {
 		best := n
-		for i, lit := range fixedLiterals {
+		for i := range fixedPrefixes {
 			if next[i] == n {
 				continue
 			}
 			if next[i] < pos {
-				j := bytes.Index(line[pos:], lit)
+				j := nextFixedPrefix(line, pos, &fixedPrefixes[i])
 				if j < 0 {
 					next[i] = n
 					continue
 				}
-				next[i] = pos + j
+				next[i] = j
 			}
 			if next[i] < best {
 				best = next[i]
@@ -170,42 +226,98 @@ func isURLUserInfoStop(c byte) bool {
 // isURLHostChar は、`@` の後ろのホスト名の文字(英数字・`.`・`-`・`[`)。
 func isURLHostChar(c byte) bool { return isASCIIAlnum(c) || c == '.' || c == '-' || c == '[' }
 
+// isURLUserInfoBreak は、URL のユーザー情報の続きを切る文字(isURLUserInfoStop のうち `@` 以外)。
+// ユーザー・パスワードは `@` を含んでよい(ホストの手前の最後の `@` で、ユーザー情報とホストを分ける。v1.2。Q70)。
+func isURLUserInfoBreak(c byte) bool { return c != '@' && isURLUserInfoStop(c) }
+
 // urlPasswordStart は、line[at] の `@` が、URL のユーザー情報の `@` なら、パスワードの先頭を返す(仕様 4.1)。
-//
-// `@` の手前を遡り、ユーザー情報(isURLUserInfoStop でない文字の続き)を求める。その中の最初の `:` より後ろ
-// (1 文字以上)がパスワード、手前がユーザー(0 文字以上)。ユーザー情報の直前が `://` で、その前がスキーム
-// (英数字・`+`・`.`・`-` の続きで、英字で始まる)、`@` の後ろがホスト名の文字であること。
-// 遡る範囲は、手前の `@`・`/` などで止まるので、`@` ごとに呼んでも、遡る長さの合計は行の長さ以内に収まる。
-// secret のパスワードの検出と、email の検出器の「この `@` はメールアドレスとして扱わない」の判定が共用する。
+// 1 回だけ調べる場合の形。同じ行の `@` を左から順に調べる場合は、userInfoRun.passwordStart を使う。
 func urlPasswordStart(line []byte, at int) (int, bool) {
+	var r userInfoRun
+	return r.passwordStart(line, at)
+}
+
+// userInfoRun は、URL のユーザー情報の候補(isURLUserInfoBreak でない文字の続き)を遡った結果を覚える。
+// ユーザー情報は `@` を含んでよいので、`@` ごとに `://` まで遡り直すと、`@` の多い行で、行の長さの 2 乗の時間がかかる。
+// 同じ行の `@` を左から順に調べる間、覚えた範囲の後ろだけを読み足して、読む長さの合計を行の長さ以内に収める(Q70)。
+type userInfoRun struct {
+	valid  bool
+	end    int // [start, end) は、ユーザー情報の候補の続き
+	start  int
+	colon  int // [start, end) の中の最初の `:`(なければ -1)
+	scheme int // start の手前のスキームの判定(0: 未判定、1: スキームの形、-1: でない)
+}
+
+// passwordStart は、line[at] の `@` が、URL のユーザー情報の `@` なら、パスワードの先頭を返す(仕様 4.1)。
+//
+// `@` の手前を遡り、ユーザー情報(isURLUserInfoBreak でない文字の続き。`@` を含んでよい)を求める。その中の最初の `:` より
+// 後ろ(1 文字以上)がパスワード、手前がユーザー(0 文字以上)。ユーザー情報の直前が `://` で、その前がスキーム
+// (英数字・`+`・`.`・`-` の続きで、英字で始まり、直前が `_` でない。Q64)、`@` の後ろがホスト名の文字であること。
+// ユーザー情報の中に `@` が複数あれば、それぞれの `@` で真になりうる(`https://u:p@q@host` の `p` と `p@q`)。
+// 範囲の重なりの解決で、長いほう(最後の `@` まで)が採られる。
+// secret のパスワードの検出と、email の検出器の「この `@` はメールアドレスとして扱わない」の判定が共用する。
+func (r *userInfoRun) passwordStart(line []byte, at int) (int, bool) {
 	if at+1 >= len(line) || !isURLHostChar(line[at+1]) {
 		return 0, false
 	}
+	r.extend(line, at)
+	if r.colon < 0 || r.colon+1 >= at || !r.schemeBefore(line) {
+		return 0, false
+	}
+	return r.colon + 1, true
+}
+
+// extend は、ユーザー情報の候補の続きを、at の手前まで求める。at から手前を、区切りの文字(isURLUserInfoBreak)か、
+// 前に遡った範囲の終わりまで遡る。前の範囲の終わりまで切れずに続けば、前の範囲とつなげる。遡る範囲は呼び出しごとに
+// 重ならないので、左から順に呼べば、合計は行の長さ以内に収まる(区切りの文字は文中に多いので、たいていすぐ止まる)。
+func (r *userInfoRun) extend(line []byte, at int) {
+	cont := r.valid && r.end <= at
+	lo := 0
+	if cont {
+		lo = r.end
+	}
 	p, colon := at, -1
-	for p > 0 && !isURLUserInfoStop(line[p-1]) {
+	for p > lo && !isURLUserInfoBreak(line[p-1]) {
 		p--
 		if line[p] == ':' {
 			colon = p
 		}
 	}
-	if colon < 0 || colon+1 >= at || p < 3 || line[p-3] != ':' || line[p-2] != '/' || line[p-1] != '/' {
-		return 0, false
+	if cont && p == lo {
+		if r.colon < 0 {
+			r.colon = colon
+		}
+		r.end = at
+		return
 	}
-	q := p - 3
-	for q > 0 && isURLSchemeChar(line[q-1]) {
-		q--
+	*r = userInfoRun{valid: true, end: at, start: p, colon: colon}
+}
+
+// schemeBefore は、ユーザー情報の候補の直前が `<スキーム>://` かを返す。
+func (r *userInfoRun) schemeBefore(line []byte) bool {
+	if r.scheme == 0 {
+		r.scheme = -1
+		if p := r.start; p >= 3 && line[p-3] == ':' && line[p-2] == '/' && line[p-1] == '/' {
+			q := p - 3
+			for q > 0 && isURLSchemeChar(line[q-1]) {
+				q--
+			}
+			// スキームの直前が `_` なら対象にしない。hash の出力(`email_<16 進数>`)の 16 進数の部分を、スキームとして
+			// 読まないため(`email_fde789562e9a://:0@0` の `0` を再度置換しない。仕様 4.1。Q64)
+			if q < p-3 && (line[q] >= 'a' && line[q] <= 'z' || line[q] >= 'A' && line[q] <= 'Z') && (q == 0 || line[q-1] != '_') {
+				r.scheme = 1
+			}
+		}
 	}
-	if q == p-3 || !(line[q] >= 'a' && line[q] <= 'z' || line[q] >= 'A' && line[q] <= 'Z') {
-		return 0, false
-	}
-	return colon + 1, true
+	return r.scheme > 0
 }
 
 // urlPasswords は、URL のユーザー情報のパスワードの範囲を追記する(仕様 4.1)。
 //
 // 前処理: `@` を bytes.IndexByte で探し(email も同じ手がかり。`@` のない行はここで終わる)、見つけた `@` ごとに
-// urlPasswordStart で手前を調べる。`://` を手がかりにすると、`:` が文中に多く(時刻など)、探す回数が増える。
+// 手前を調べる。`://` を手がかりにすると、`:` が文中に多く(時刻など)、探す回数が増える。
 func (secretFinder) urlPasswords(line []byte, dst []Match) []Match {
+	var run userInfoRun
 	for pos := 0; ; {
 		j := bytes.IndexByte(line[pos:], '@')
 		if j < 0 {
@@ -213,7 +325,7 @@ func (secretFinder) urlPasswords(line []byte, dst []Match) []Match {
 		}
 		at := pos + j
 		pos = at + 1
-		if s, ok := urlPasswordStart(line, at); ok {
+		if s, ok := run.passwordStart(line, at); ok {
 			dst = append(dst, Match{Start: s, End: at, Kind: KindSecret})
 		}
 	}
@@ -443,10 +555,97 @@ func bareValueEnd(line []byte, vs int) int {
 	return e
 }
 
+// startsWithURLPassword は、line[s:] が URL のパスワードの形(`<スキーム>://<ユーザー>:<パスワード>@<ホスト名の文字>`)
+// で始まるかを返す(キー名ベースの値の先頭の判定。仕様 4.1。Q65)。
+//
+// パスワードが置換されていない形は、`@` に urlPasswordStart を当てて真になるもの(urlPasswords が置換するもの)だけ。
+// キー名ベースの値の先頭の手前は、区切り・空白・引用符で、スキームの文字でも `_` でもないので、スキームは s から始まる。
+// 加えて、パスワードの部分が置換済みのラベル 1 つだけのものも、この形とする。そのときは、ユーザーの部分がラベル 1 つ
+// だけでも、`@` の直後がラベルでもよい。置換後の `https://u:<secret_1>@<aws_host_1>.…` を再度流したときに、
+// キー名ベースの値として読まないため(冪等性)。パスワードが置換されていないのに、ユーザーの部分や `@` の直後がラベルの
+// 形(`https://u:p@<aws_host_1>.…`)は、urlPasswords が置換しないので、この形としない(パスワードを残さないため。Q68)。
+// hash の出力形(`secret_<16 進数>` など)は、もともとユーザー情報・ホスト名の文字だけでできている。
+func (f secretFinder) startsWithURLPassword(line []byte, s int) bool {
+	n := len(line)
+	if s >= n || !(line[s] >= 'a' && line[s] <= 'z' || line[s] >= 'A' && line[s] <= 'Z') {
+		return false
+	}
+	if s > 0 && (isURLSchemeChar(line[s-1]) || line[s-1] == '_') {
+		return false
+	}
+	p := s + 1
+	for p < n && isURLSchemeChar(line[p]) {
+		p++
+	}
+	if !bytes.HasPrefix(line[p:], schemeSep) {
+		return false
+	}
+	// ユーザー情報: 最初の `:` の前がユーザー(0 文字以上)、後ろがパスワード。どちらも `@` を含んでよく、`@` ごとに、
+	// そこでユーザー情報が終わる形かを調べる(Q70)。ユーザー・パスワードは、ユーザー情報の文字の続きか、ラベル 1 つだけ
+	// (ラベルは、部分の先頭から、部分の終わり(`:`・`@` の直前)までのものだけ)
+	var run userInfoRun
+	colon := -1
+	pwLabel := false // パスワードの部分が、ラベル 1 つだけか
+	segStart := true // 今の位置が、ユーザーかパスワードの先頭か
+	for x := p + len(schemeSep); x < n; {
+		if segStart {
+			segStart = false
+			if e, ok := f.format.MatchAt(line, x); ok && e < n && (line[e] == '@' || colon < 0 && line[e] == ':') {
+				pwLabel = colon >= 0
+				x = e
+				continue
+			}
+		}
+		c := line[x]
+		if c == '@' {
+			if colon >= 0 && f.userInfoEndsAt(line, x, pwLabel, &run) {
+				return true
+			}
+			pwLabel = false // パスワードが `@` の後ろに続くなら、ラベル 1 つだけではない
+			x++
+			continue
+		}
+		if isURLUserInfoStop(c) {
+			return false
+		}
+		if c == ':' && colon < 0 {
+			colon, segStart = x, true
+		}
+		x++
+	}
+	return false
+}
+
+// userInfoEndsAt は、startsWithURLPassword で、line[at] の `@` でユーザー情報が終わる形かを返す。
+// パスワードが置換されていなければ、urlPasswords が置換するもの(passwordStart が真)だけ(Q68)。
+// パスワードがラベル 1 つだけなら、`@` の後ろはホスト名の文字か、ラベル。
+func (f secretFinder) userInfoEndsAt(line []byte, at int, pwLabel bool, run *userInfoRun) bool {
+	if !pwLabel {
+		_, ok := run.passwordStart(line, at)
+		return ok
+	}
+	if at+1 >= len(line) {
+		return false
+	}
+	if isURLHostChar(line[at+1]) {
+		return true
+	}
+	_, ok := f.format.MatchAt(line, at+1)
+	return ok
+}
+
 // keyed は、キー名ベースの値の範囲を追記する(仕様 4.1、決定事項 15)。
 //
 // '=' または ':' の手前が、対象のキー名(引用符、または `\"` で囲まれていてもよい)なら、その後ろの値が対象になる。
 //   - 区切りの前後の空白(スペース・タブ)は、任意個を許す(Q15)
+//   - キー名の直前が置換済みのラベルの終わりなら、対象にしない(v1.2。Q66)。`0.0.0.1passwd=0` の 1 回目は、
+//     キー名が `0.0.0.1passwd`(末尾の単位 `1passwd` は対象でない)だが、2 回目はラベルの終わりで切れて `passwd` になるため
+//   - `:` の直後が `//` なら、区切りとして扱わない(`<キー名>://` は URL のスキーム。v1.2。Q63)。
+//     キー名と値として読むと、URL のパスワードと置換の範囲が隣り合い、置換で値の区切り(`&` など)が消えて、
+//     2 回目に置換済みのラベルごと再度置換されることがあった(`passwd://u:&x@host`)
+//   - 値(引用符で始まる場合は、引用符の次)が URL のパスワードの形で始まるなら、対象にしない(v1.2。Q65)。
+//     パスワードは urlPasswords が拾う。キー名ベースの値として読むと、値が `&` などで終わるため、
+//     置換の範囲が隣り合って 2 回目に再度置換されたり、パスワードの残りが出力に残ったりした(`password=https://u:p&q@h`)
 //   - 値が `Bearer ` / `Basic ` で始まる場合は、方式名の後ろの値だけが対象
 //     (後ろが値として読めなければ、何も置換しない)。キー名が Authorization で、方式名がなければ対象でない
 //   - 値が引用符(" または ')で始まる場合は、閉じ引用符の手前まで。`\` の次の文字は、値の一部。
@@ -459,7 +658,7 @@ func bareValueEnd(line []byte, vs int) int {
 //   - 値が空なら、置換しない
 //
 // 値の範囲だけを返す(キー名・区切り・引用符は残す)。
-func (secretFinder) keyed(line []byte, dst []Match) []Match {
+func (f secretFinder) keyed(line []byte, dst []Match) []Match {
 	n := len(line)
 	ne, nc := -1, -1 // 次の '='、':' の位置(-1: 未計算、n: これ以上ない)
 	// 直前に求めた引用符なしの値の範囲 [bareStart, bareEnd)。この中から始まる値は、同じ位置で終わる
@@ -486,6 +685,9 @@ func (secretFinder) keyed(line []byte, dst []Match) []Match {
 			break
 		}
 		pos = i + 1
+		if bytes.HasPrefix(line[i:], schemeSep) {
+			continue // `<キー名>://` は、キーと値の組ではなく URL のスキーム(仕様 4.1。Q63)
+		}
 
 		// キー名: 区切りの手前の空白、閉じ引用符(`\"` を含む)を除いた、英数字と `_` `-` `.` の連なり
 		j := i
@@ -510,6 +712,9 @@ func (secretFinder) keyed(line []byte, dst []Match) []Match {
 		ok, authOnly := classifyKey(line[k:j])
 		if !ok {
 			continue
+		}
+		if f.format.EndsAt(line, k) {
+			continue // キー名の直前が置換済みのラベルの終わり(`<ipv4_global_1>passwd=0`)。仕様 4.1。Q66
 		}
 
 		// 値
@@ -537,6 +742,9 @@ func (secretFinder) keyed(line []byte, dst []Match) []Match {
 		}
 		if authOnly {
 			continue
+		}
+		if f.startsWithURLPassword(line, cs) {
+			continue // パスワードは、URL のパスワードとして置換する(仕様 4.1。Q65)
 		}
 		s, e := cs, n
 		switch {

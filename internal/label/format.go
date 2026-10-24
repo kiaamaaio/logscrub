@@ -19,6 +19,15 @@ var Types = []string{"email", "ipv4_global", "ipv4_private", "ipv6_global", "ipv
 // (TestTypesAreTheDocumentedSet で、len(Types) と一致することを確認している)。
 const NumTypes = 10
 
+// maxTypeLen は、Types の最も長い種別名の長さ。
+var maxTypeLen = func() int {
+	n := 0
+	for _, t := range Types {
+		n = max(n, len(t))
+	}
+	return n
+}()
+
 var typeBytes = func() [][]byte {
 	bs := make([][]byte, len(Types))
 	for i, s := range Types {
@@ -209,6 +218,32 @@ func TypeIndex(typ string) int {
 		}
 	}
 	return -1
+}
+
+// MatchAt は、line[i:] がラベル(現在の書式、既知の種別名、先頭 0 のない 1 以上の連番)で始まるなら、
+// その終わりの位置と true を返す。ゼロ値の書式では、常に false。
+func (f Format) MatchAt(line []byte, i int) (int, bool) {
+	if !f.ok || i < 0 || i >= len(line) {
+		return 0, false
+	}
+	end, _, _, ok := f.matchAt(line, i)
+	return end, ok
+}
+
+// EndsAt は、line の中に、e の位置で終わるラベル(MatchAt と同じ条件)があるかを返す。ゼロ値の書式では、常に false。
+// 連番は桁の続く限り読むので、`<email_12>` の途中や、書式 `{type}_{n}` の `email_12` の `email_1` では終わらない。
+// ラベルの長さには上限がある(リテラルと、最も長い種別名と、maxDigits 桁)ので、手前の決まった範囲だけを試す。
+func (f Format) EndsAt(line []byte, e int) bool {
+	if !f.ok || e <= 0 || e > len(line) || !bytes.HasSuffix(line[:e], f.post) {
+		return false
+	}
+	maxLen := len(f.pre) + len(f.mid) + len(f.post) + maxTypeLen + maxDigits
+	for i := max(0, e-maxLen); i < e; i++ {
+		if end, ok := f.MatchAt(line, i); ok && end == e {
+			return true
+		}
+	}
+	return false
 }
 
 // IsLabel は、b 全体が、ちょうど 1 つのラベル(現在の書式、既知の種別名、先頭 0 のない 1 以上の連番)かを返す。

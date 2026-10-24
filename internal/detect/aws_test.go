@@ -1147,6 +1147,41 @@ func TestAWSHostMatchesRegexpReference(t *testing.T) {
 	}
 }
 
+// 終端が行の端にある場合と、終端の途中で行が終わる場合(段階 9 の、手がかりの次の 1 バイトの比較)。
+func TestAWSHostTerminalAtLineEdges(t *testing.T) {
+	for _, tc := range []struct {
+		line string
+		want []string
+	}{
+		{"x.cloudfront.net", []string{"aws_host=x"}},
+		{"x.amplifyapp.com", []string{"aws_host=x"}},
+		{"x.elasticbeanstalk.com", []string{"aws_host=x"}},
+		{"x.us-east-1.elasticbeanstalk.com", []string{"aws_host=x"}},
+		{"x.awsglobalaccelerator.com", []string{"aws_host=x"}},
+		{"x.us-east-1.awsapprunner.com", []string{"aws_host=x"}},
+		{"x.lambda-url.us-east-1.on.aws", []string{"aws_host=x"}},
+		{"x.us-east-1.ip.aws", []string{"aws_host=x"}},
+		{"x.auth.us-east-1.amazoncognito.com", []string{"aws_host=x"}},
+		{"x.us-east-1.rds.amazonaws.com", []string{"aws_host=x"}},
+		{"x.cloudfront.net x.cloudfront.net", []string{"aws_host=x", "aws_host=x"}},
+		{"l", nil}, {".l", nil}, {".cl", nil}, {"x.cl", nil}, {"x.cloudfront.ne", nil}, {"x.amplifyapp.co", nil},
+		{"x.ip.aw", nil}, {"x.us-east-1.ip.aw", nil}, {"w", nil}, {".aw", nil}, {"z", nil}, {".amaz", nil}, {"x.amazonaws", nil},
+	} {
+		if got := awsValues(t, awsHostKinds, tc.line); !slices.Equal(got, tc.want) {
+			t.Errorf("%q: got %q, want %q", tc.line, got, tc.want)
+		}
+	}
+	// 手がかりが終端の最後のバイトの場合(今の表にはない)は、次の 1 バイトを比べない
+	term := hostTerminal{lit: []byte(".ab"), off: 2}
+	if !term.nextMatches([]byte("x.ab"), 3) {
+		t.Error("hint at the last byte of the terminal must not look past the line")
+	}
+	term = hostTerminal{lit: []byte(".ab"), off: 1}
+	if term.nextMatches([]byte("x.a"), 2) || !term.nextMatches([]byte("x.ab"), 2) || term.nextMatches([]byte("x.ac"), 2) {
+		t.Error("nextMatches compares the byte after the hint")
+	}
+}
+
 // ---- 長い行(手前へ遡る長さの合計が、行の長さ以内に収まること) ----
 
 func TestAWSHostFinderOnLongLines(t *testing.T) {

@@ -1,6 +1,7 @@
 package detect
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"math/rand/v2"
@@ -133,6 +134,92 @@ func TestSecretFixedFormats(t *testing.T) {
 			}
 		})
 	}
+}
+
+// indexFixedLiterals、indexFixed は、v1.2 の段階 7 より前の固定形式の検出(接頭辞を bytes.Index で探す)。
+// 手がかりのバイトで探す今の実装(fixedPrefixes)と、結果が一致することを確かめる参照実装。
+var indexFixedLiterals = [...][]byte{
+	[]byte("AKIA"), []byte("ASIA"), []byte("AIza"), []byte("gh"), []byte("github_pat_"),
+	[]byte("xox"), []byte("sk"), []byte("rk"), []byte("eyJ"),
+}
+
+func indexFixed(line []byte) []Match {
+	var dst []Match
+	n := len(line)
+	var next [len(indexFixedLiterals)]int
+	for i := range next {
+		next[i] = -1
+	}
+	for pos := 0; pos < n; {
+		best := n
+		for i, lit := range indexFixedLiterals {
+			if next[i] == n {
+				continue
+			}
+			if next[i] < pos {
+				j := bytes.Index(line[pos:], lit)
+				if j < 0 {
+					next[i] = n
+					continue
+				}
+				next[i] = pos + j
+			}
+			best = min(best, next[i])
+		}
+		if best >= n {
+			break
+		}
+		p := best
+		if p > 0 && isASCIIAlnum(line[p-1]) {
+			pos = p + 1
+			continue
+		}
+		loc := fixedRe.FindIndex(line[p:])
+		if loc == nil || p+loc[1] < n && isASCIIAlnum(line[p+loc[1]]) {
+			pos = p + 1
+			continue
+		}
+		dst = append(dst, Match{Start: p, End: p + loc[1], Kind: KindSecret})
+		pos = p + loc[1]
+	}
+	return dst
+}
+
+// 固定形式の接頭辞を、手がかりのバイトで探す実装(段階 7)が、bytes.Index で探す参照実装と一致すること。
+// 行は、接頭辞・その一部・形に合う続き・前後の文字を、ランダムに並べて作る。
+func TestSecretFixedMatchesIndexReference(t *testing.T) {
+	alphabet := []string{
+		"AKIA", "ASIA", "AIza", "gh", "github_pat_", "xox", "sk", "rk", "eyJ",
+		"A", "K", "I", "S", "z", "g", "h", "i", "x", "o", "s", "r", "k", "e", "y", "J",
+		"p_", "u_", "b-", "_live_", "_test_", "-", "_", ".", " ", "=", "\"", ":", "/", "@", "あ", "\xff",
+		"IOSFODNN7EXAMPLE", rep("a", 20), rep("b", 22), rep("C", 24), rep("1", 35), rep("d", 36), "hbGci", ".eyJ",
+		// 形に合う値(前後の部品しだいで、一致したり、前後の英数字のため一致しなかったりする)
+		"AKIAIOSFODNN7EXAMPLE", "ghp_" + rep("a", 36), "github_pat_" + rep("b", 22), "xoxb-" + rep("1", 10),
+		"sk_live_" + rep("c", 24), "rk_test_" + rep("c", 24), "AIza" + rep("d", 35), "sk-" + rep("e", 20), "eyJa.eyJb.c",
+	}
+	rng := rand.New(rand.NewPCG(41, 42))
+	f := secretFinder{}
+	matched := 0
+	for iter := 0; iter < 100000; iter++ {
+		var sb strings.Builder
+		for i, n := 0, rng.IntN(12); i < n; i++ {
+			sb.WriteString(alphabet[rng.IntN(len(alphabet))])
+		}
+		line := []byte(sb.String())
+		want := indexFixed(line)
+		got := f.fixed(line, nil)
+		if !slices.Equal(got, want) {
+			t.Fatalf("iter %d, line %q\n got  %v\n want %v", iter, line, got, want)
+		}
+		if len(want) > 0 {
+			matched++
+		}
+	}
+	// 一致する行が少なすぎると、比べた意味がない
+	if matched < 20000 {
+		t.Errorf("only %d lines had fixed-format matches", matched)
+	}
+	t.Logf("%d lines had fixed-format matches", matched)
 }
 
 // ---- AWS の署名(仕様 4.1「AWS の署名」、Q32) ----
@@ -615,27 +702,43 @@ var (
 	refToken68   = regexp.MustCompile(`^[A-Za-z0-9._~+/-]+=*`)
 )
 
-// refURLUserInfo は、URL のユーザー情報の形(仕様 4.1「URL のパスワード」)の正規表現。スキームの先頭に当てる。
-// 1 つ目のグループがパスワード。スキームの前の文字の条件は、refURLPasswords で確かめる。
-var refURLUserInfo = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*://[^:` + refURLUserInfoStops + `]*:([^` + refURLUserInfoStops + `]+)@[A-Za-z0-9.\[-]`)
+// refURLUserInfo は、URL のユーザー情報の形(仕様 4.1「URL のパスワード」)の正規表現。スキームの先頭から、ユーザー情報の
+// 終わりの `@` の手前までに当てる(ユーザー・パスワードは `@` を含んでよい。Q70)。1 つ目のグループがパスワード。
+// スキームの前の文字の条件と、`@` の後ろのホスト名の文字は、refURLUserInfoAt で確かめる。
+var refURLUserInfo = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*://[^:` + refURLUserInfoStops + `]*:([^` + refURLUserInfoStops + `]+)$`)
 
 // refURLUserInfoStops は、ユーザー・パスワードに含まれない文字(文字クラスの中に書く形。仕様 4.1、Q60)。
-var refURLUserInfoStops = " \t" + regexp.QuoteMeta("/?#@\"'`<>\\{}|^")
+var refURLUserInfoStops = " \t" + regexp.QuoteMeta("/?#\"'`<>\\{}|^")
 
-// refURLPasswords は、行のすべての位置で refURLUserInfo を試す参照実装。(パスワードの先頭, `@` の位置)の組を返す。
+// refURLUserInfoAt は、line[p:] がスキームで始まる URL のユーザー情報なら、ユーザー情報が終わりうる `@` ごとに、
+// (パスワードの先頭, `@` の位置)の組を返す。
+func refURLUserInfoAt(line []byte, p int) [][2]int {
+	if p > 0 {
+		c := line[p-1]
+		if refIsAlnum(c) || c == '+' || c == '.' || c == '-' || c == '_' { // `_` は Q64
+			return nil
+		}
+	}
+	var out [][2]int
+	for at := p + 1; at+1 < len(line); at++ {
+		if line[at] != '@' || !(refIsAlnum(line[at+1]) || strings.IndexByte(".-[", line[at+1]) >= 0) {
+			continue
+		}
+		if loc := refURLUserInfo.FindSubmatchIndex(line[p:at]); loc != nil {
+			out = append(out, [2]int{p + loc[2], at})
+		}
+	}
+	return out
+}
+
+// refURLPasswords は、行のすべての位置で refURLUserInfoAt を試す参照実装。(パスワードの先頭, `@` の位置)の組を、
+// `@` の位置の順に返す。
 func refURLPasswords(line []byte) [][2]int {
 	var out [][2]int
 	for p := 0; p < len(line); p++ {
-		if p > 0 {
-			c := line[p-1]
-			if refIsAlnum(c) || c == '+' || c == '.' || c == '-' {
-				continue
-			}
-		}
-		if loc := refURLUserInfo.FindSubmatchIndex(line[p:]); loc != nil {
-			out = append(out, [2]int{p + loc[2], p + loc[3]})
-		}
+		out = append(out, refURLUserInfoAt(line, p)...)
 	}
+	slices.SortFunc(out, func(a, b [2]int) int { return a[1] - b[1] })
 	return out
 }
 
@@ -690,6 +793,9 @@ func refSecrets(line []byte) [][2]int {
 		if line[i] != '=' && line[i] != ':' {
 			continue
 		}
+		if line[i] == ':' && strings.HasPrefix(string(line[i+1:]), "//") {
+			continue // `<キー名>://` は URL のスキーム(Q63)
+		}
 		km := refKeyRun.FindSubmatch(line[:i])
 		if km == nil {
 			continue
@@ -735,6 +841,9 @@ func refSecrets(line []byte) [][2]int {
 		}
 		if schemeOnly {
 			continue
+		}
+		if cs < len(line) && len(refURLUserInfoAt(line, cs)) > 0 {
+			continue // 値の先頭が URL のパスワードの形なら、URL のパスワードとして扱う(Q65)
 		}
 		var s, e int
 		switch {
@@ -1033,7 +1142,43 @@ func TestSecretURLPassword(t *testing.T) {
 		{"two urls", "a://u:p1@h b://v:p2@i", []string{"secret=p1", "secret=p2"}},
 		{"uppercase scheme", "HTTPS://U:P@H", []string{"secret=P"}},
 		{"after non scheme chars", "(http://u:p@h) <ftp://u:q@h>", []string{"secret=p", "secret=q"}},
-		{"at in password", "http://u:p@w@h", []string{"secret=p"}},
+		// ユーザー・パスワードは `@` を含んでよい。ホストの手前の最後の `@` まで(Q70)
+		{"at in password", "http://u:p@w@h", []string{"secret=p@w"}},
+		{"at in user (azure)", "postgres://myadmin@mydemoserver:s3cret@10.0.0.5:5432/db", []string{"secret=s3cret"}},
+		{"email as user", "https://bob@example.com:pw@10.0.0.1/repo", []string{"secret=pw"}},
+		{"ats in user and password", "redis://a@b@c:d@e@cache-host:6379", []string{"secret=d@e"}},
+		{"space before second at", "http://u:p@h @x", []string{"secret=p"}}, // 2 つ目の `@` の手前に空白があれば、そこで切れる
+		{"encoded at in user", "https://bob%40example.com:pw@git.example.com/", []string{"secret=pw"}},
+		// キー名と同じ語のスキーム(`<キー名>://`)は、キーと値の組として読まない(Q63)
+		{"key name as scheme", "passwd://u:&x@db.example.com/", []string{"secret=&x"}},
+		{"key name as scheme, fuzz", "passwd://:&@0", []string{"secret=&"}},
+		{"password scheme", "password://app:s3cret@db/", []string{"secret=s3cret"}},
+		{"quoted key name before slashes", `"token"://u:p@h`, nil}, // URL の形でもない(スキームの直後が `"`)
+		{"key name scheme without password", "token://abc", nil},
+		{"key name scheme without password, in json", `{"url":"secret://vault/path"}`, nil},
+		// スキームの直前が `_` の形は、URL のパスワードとして扱わない(hash の出力の 16 進数を、スキームとして読まない。Q64)
+		{"underscore before scheme", "x_https://u:p@h", nil},
+		{"hash output before slashes", "email_fde789562e9a://:0@0", nil},
+		{"other chars before scheme", "(https://u:p@h =ftp://u:q@h", []string{"secret=p", "secret=q"}},
+		// 区切りの後ろに空白があるもの、`=` のものは、今までどおりキー名ベース
+		{"space after colon", "password: //abc", []string{"secret=//abc"}},
+		{"equals and slashes", "token=//abc", []string{"secret=//abc"}},
+		{"single slash", "token:/abc", []string{"secret=/abc"}},
+		// キー名ベースの値が URL のパスワードの形で始まるものは、パスワードだけ(Q65)
+		{"keyed url, terminator in password", "password=https://u:p&q@db.example.com/", []string{"secret=p&q"}},
+		{"keyed url, password starts with terminator", "password=https://u:&x@db.example.com/", []string{"secret=&x"}},
+		{"keyed url, no terminator", "password=postgres://app:s3cret@db/app", []string{"secret=s3cret"}},
+		{"keyed url, space after separator", "secret: \tredis://:pw@h", []string{"secret=pw"}},
+		{"keyed url, quoted", `"password": "postgres://app:s3cret@db/"`, []string{"secret=s3cret"}},
+		{"keyed url, single quoted", "password='https://u:p&q@h'", []string{"secret=p&q"}},
+		{"keyed url, escaped quotes", `{"msg":"{\"password\":\"https://u:p@h\"}"}`, []string{"secret=p"}},
+		{"keyed url, camel case key", "dbPassword=mysql://root:hunter2@db:3306", []string{"secret=hunter2"}},
+		// 値の先頭が URL のパスワードの形でないものは、今までどおりキー名ベース
+		{"keyed url in the middle", "password=x,https://u:p@h", []string{"secret=x", "secret=p"}},
+		{"keyed url without userinfo", "token=https://hooks.example.com/T000/XXXX", []string{"secret=https://hooks.example.com/T000/XXXX"}},
+		{"keyed url with user only", "token=https://u@h/x", []string{"secret=https://u@h/x"}},
+		{"keyed url with empty password", "token=https://u:@h", []string{"secret=https://u:@h"}},
+		{"keyed underscore before scheme", "token=_https://u:p@h", []string{"secret=_https://u:p@h"}},
 		// 対象外
 		{"user only", "https://taro@example.com/", nil},
 		{"no scheme", "user:pass@host", nil},
@@ -1078,6 +1223,206 @@ func TestSecretURLPassword(t *testing.T) {
 }
 
 // ホスト名の部分は、通常どおり他の種別として検出される。メールアドレスとして扱われない(受け入れ基準)。
+// キー名ベースの値が URL のパスワードの形で始まる場合(Q65)に絞った乱数テスト。参照実装と一致すること。
+// 行は「キー名 + 区切り + 引用符 + URL の部品」の組と、雑多な文字列を、ランダムに並べて作る。
+func TestSecretKeyedURLMatchesRegexpReference(t *testing.T) {
+	keys := []string{"password", "token", "\"secret\"", "dbPassword", "authorization", "user", "x_token", ""}
+	seps := []string{"=", ":", ": ", " =\t", "://", ""}
+	quotes := []string{"", "", "\"", "'", "\\\""}
+	urlParts := []string{
+		"https", "postgres", "git+ssh", "_https", "1x", "://", "://", ":/", "u", "app", "", ":", ":", "p", "s3cret", "&", "&x", ",",
+		";", ")", "}", "]", "\"", "'", "<", "<secret_1>", "@", "@", "db.example.com", "[::1]", " ", "/", "?", "#", "%41", "!$*+=~",
+	}
+	around := []string{"", "", " ", "&", ",", "{", "}", "x", "_", "\t", "あ"}
+	rng := rand.New(rand.NewPCG(65, 66))
+	f := secretFinder{}
+	skipped := 0 // 区切り(`=`・`:`)の後ろの値の先頭が、URL のパスワードの形だった数(キー名の有無は問わない)
+	for iter := 0; iter < 100000; iter++ {
+		var sb strings.Builder
+		for i, n := 0, 1+rng.IntN(3); i < n; i++ {
+			sb.WriteString(around[rng.IntN(len(around))])
+			sb.WriteString(keys[rng.IntN(len(keys))])
+			sb.WriteString(seps[rng.IntN(len(seps))])
+			sb.WriteString(quotes[rng.IntN(len(quotes))])
+			if rng.IntN(3) > 0 {
+				// URL のパスワードの形になりやすい並び
+				sb.WriteString(urlParts[rng.IntN(2)])
+				sb.WriteString("://")
+				for _, part := range []string{"u", ":", "p", "@", "db.example.com"} {
+					if rng.IntN(5) == 0 {
+						part = urlParts[rng.IntN(len(urlParts))]
+					}
+					sb.WriteString(part)
+				}
+			} else {
+				for j, m := 0, rng.IntN(8); j < m; j++ {
+					sb.WriteString(urlParts[rng.IntN(len(urlParts))])
+				}
+			}
+			sb.WriteString(around[rng.IntN(len(around))])
+		}
+		line := []byte(sb.String())
+		want := refSecrets(line)
+		var got [][2]int
+		for _, m := range f.find(line, nil) {
+			got = append(got, [2]int{m.Start, m.End})
+		}
+		slices.SortFunc(got, func(a, b [2]int) int {
+			if a[0] != b[0] {
+				return a[0] - b[0]
+			}
+			return a[1] - b[1]
+		})
+		if !slices.Equal(got, want) {
+			t.Fatalf("iter %d, line %q\n got  %v\n want %v", iter, line, got, want)
+		}
+		for i := range line {
+			if line[i] != '=' && line[i] != ':' {
+				continue
+			}
+			cs := i + 1
+			for cs < len(line) && (line[cs] == ' ' || line[cs] == '\t') {
+				cs++
+			}
+			if strings.HasPrefix(string(line[cs:]), `\"`) {
+				cs += 2
+			} else if cs < len(line) && (line[cs] == '"' || line[cs] == '\'') {
+				cs++
+			}
+			if f.startsWithURLPassword(line, cs) {
+				skipped++
+			}
+		}
+	}
+	// 規則に当たる値が少なすぎると、比べた意味がない
+	if skipped < 20000 {
+		t.Errorf("only %d values started with a URL password", skipped)
+	}
+	t.Logf("%d values started with a URL password", skipped)
+}
+
+// 置換済みのラベルを含む URL の形(Q65)。置換後の出力を再度流しても、キー名ベースの値として読まないこと。
+func TestSecretKeyedURLWithLabels(t *testing.T) {
+	all := DefaultKinds.With(KindAWSAccount).With(KindAWSS3Bucket).With(KindAWSHost)
+	for _, line := range []string{
+		"password=https://u:<secret_1>@db.example.com/",
+		"password=https://u:<secret_1>@<aws_host_1>.ap-northeast-1.rds.amazonaws.com:5432/app",
+		"password=https://u:<secret_1>@<ipv4_private_1>/",
+		"password=https://<ipv4_private_1>:<secret_1>@h",
+		"password=redis://:<secret_1>@h",
+		`"password": "postgres://app:<secret_1>@db/"`,
+		"password=https://u:secret_0123456789ab@db.example.com/",
+	} {
+		if got := awsValues(t, all, line); got != nil {
+			t.Errorf("%q: got %q, want nothing", line, got)
+		}
+	}
+	// パスワードが置換されていないのに、ユーザーの部分や `@` の直後がラベルの形は、URL のパスワードとして置換されない
+	// ので、値全体をキー名ベースの値として置換する(パスワードを残さない。Q68)
+	for _, tc := range []struct {
+		line string
+		want []string
+	}{
+		{"password=https://u:s3cret@<aws_host_1>.ap-northeast-1.rds.amazonaws.com/",
+			[]string{"secret=https://u:s3cret@<aws_host_1>.ap-northeast-1.rds.amazonaws.com/"}},
+		{`"password": "https://u:s3cret@<ipv4_private_1>:5432/app"`,
+			[]string{"secret=https://u:s3cret@<ipv4_private_1>:5432/app"}},
+		{"password=https://<uuid_1>:s3cret@db-host/app", []string{"secret=https://<uuid_1>:s3cret@db-host/app"}},
+	} {
+		if got := awsValues(t, all, tc.line); !slices.Equal(got, tc.want) {
+			t.Errorf("%q: got %q, want %q", tc.line, got, tc.want)
+		}
+	}
+	// ラベルは、ユーザー・パスワード・ホスト名の部分の全体のときだけ。部分の一部なら、URL のパスワードの形ではない
+	f := secretFinder{format: label.DefaultFormat}
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{
+		{"https://u:p@h", true},
+		{"https://u:<secret_1>@h", true},
+		{"https://<secret_2>:<secret_1>@h", true},
+		{"https://:<secret_1>@h", true},
+		{"https://u:<secret_1>@<aws_host_1>.x", true},
+		{"https://u:<secret_1>:x@h", false}, // パスワードの一部
+		{"https://u:x<secret_1>@h", false},
+		{"https://u<secret_2>:p@h", false},
+		{"https://u:<secret_1>", false},
+		{"https://u:<secret_1>@", false},
+		{"https://u:<secret_1>@ h", false},
+		{"https://u:<secret_0>@h", false}, // ラベルの形でない
+		{"https://u:<nope_1>@h", false},
+		{"https://u:@h", false},
+		{"https://u@h", false},
+		{"https://<secret_1>@h", false},
+		// パスワードが置換されていなければ、ユーザーの部分や `@` の直後のラベルは読まない(Q68)
+		{"https://u:p@<aws_host_1>.x", false},
+		{"https://<uuid_1>:p@h", false},
+		{"https://<uuid_1>:<secret_1>@<aws_host_1>.x", true},
+	} {
+		if got := f.startsWithURLPassword([]byte(tc.value), 0); got != tc.want {
+			t.Errorf("%q: got %v, want %v", tc.value, got, tc.want)
+		}
+	}
+	// 書式を指定しない(ゼロ値の)検出器は、ラベルを読まない
+	if (secretFinder{}).startsWithURLPassword([]byte("https://u:<secret_1>@h"), 0) {
+		t.Error("zero format must not read labels")
+	}
+	// 独自の書式(`{type}-{n}`)では、文字列の途中のラベルに似た部分を、ラベルとして読まない
+	cf := secretFinder{format: mustFormat(t, "{type}-{n}")}
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{
+		{"https://u:secret-1@h", true},
+		{"https://u:mysecret-1@h", true}, // ユーザー情報の文字として読む
+		{"https://u:secret-1x<@h", false},
+		{"https://u:p@aws_host-1.x", true},
+		{"https://uuid-1:p@h", true}, // ラベルの形でも、ユーザー情報の文字だけなので、URL のパスワードとして置換される
+		{"https://u:p@<aws_host-1>", false},
+	} {
+		if got := cf.startsWithURLPassword([]byte(tc.value), 0); got != tc.want {
+			t.Errorf("custom format: %q: got %v, want %v", tc.value, got, tc.want)
+		}
+	}
+}
+
+// キー名の直前が置換済みのラベルの終わりなら、キー名として扱わない(Q66)。
+func TestSecretKeyAfterLabel(t *testing.T) {
+	for _, tc := range []struct {
+		line string
+		want []string
+	}{
+		// ファズテストが見つけた形。1 回目は、キー名が `0.0.0.1passwd` で対象でない。2 回目も置換しない
+		{"0.0.0.1passwd=0", []string{"ipv4_global=0.0.0.1"}},
+		{"<ipv4_global_1>passwd=0", nil},
+		// 1 回目から対象のキー名(`.` で切れる)のもの。2 回目は、値が置換済みのラベルなので、結果は同じ
+		{"10.0.0.1.password=x", []string{"ipv4_private=10.0.0.1", "secret=x"}},
+		{"<ipv4_private_1>.password=<secret_1>", nil},
+		{"<email_1>password=abc", nil},
+		{"<email_1>Token: abc", nil},
+		{"<ipv4_global_12>passwd=0", nil},
+		// ラベルとキー名の間に、キー名の文字でないもの(空白・引用符・区切り)があれば、今までどおり
+		{"<email_1> password=abc", []string{"secret=abc"}},
+		{`<email_1>"password":"abc"`, []string{"secret=abc"}},
+		{"<email_1>,token=abc", []string{"secret=abc"}},
+		// ラベルの形でないもの
+		{"<email_0>password=abc", []string{"secret=abc"}},
+		{"<nope_1>password=abc", []string{"secret=abc"}},
+		{"email_1>password=abc", []string{"secret=abc"}},
+		// hash の出力形は英数字で終わるので、後ろの語とつながり、1 回目と同じ単位で切れる
+		{"ipv4_global_0123456789abpasswd=0", nil},
+	} {
+		if got := awsValues(t, DefaultKinds, tc.line); !slices.Equal(got, tc.want) {
+			t.Errorf("%q: got %q, want %q", tc.line, got, tc.want)
+		}
+	}
+	// 書式を指定しない(ゼロ値の)検出器は、ラベルを見ない
+	if got := (secretFinder{}).keyed([]byte("<email_1>password=abc"), nil); len(got) != 1 {
+		t.Errorf("zero format: got %v", got)
+	}
+}
+
 func TestSecretURLPasswordWithOtherKinds(t *testing.T) {
 	all := DefaultKinds.With(KindAWSAccount).With(KindAWSS3Bucket).With(KindAWSHost)
 	for _, tc := range []struct {
@@ -1092,7 +1437,11 @@ func TestSecretURLPasswordWithOtherKinds(t *testing.T) {
 		// ユーザーだけ、パスワードの形に当たらないものは、v1.1 と同じくメールアドレス
 		{"https://taro@example.com/", []string{"email=taro@example.com"}},
 		{"user:pass@example.com", []string{"email=pass@example.com"}},
-		{"http://u:p@h@x.com", []string{"secret=p", "email=h@x.com"}},
+		// ユーザー情報は、ホストの手前の最後の `@` まで(Q70)
+		{"http://u:p@h@x.com", []string{"secret=p@h"}},
+		{"https://bob@example.com:pw@10.0.0.1/repo", []string{"email=bob@example.com", "secret=pw", "ipv4_private=10.0.0.1"}},
+		{"postgres://myadmin@mydemoserver:s3cret@10.0.0.5:5432/db", []string{"secret=s3cret", "ipv4_private=10.0.0.5"}},
+		{"postgres://myadmin@mydemoserver:s3cret@mydemoserver.postgres.database.azure.com:5432/db", []string{"secret=s3cret"}},
 		{"mail admin@mydb.c9akciq32.ap-northeast-1.rds.amazonaws.com", []string{"email=admin@mydb.c9akciq32.ap-northeast-1.rds.amazonaws.com"}},
 		// パスのない URL の後ろの JSON の値は、ユーザー情報として読まない(Q60。読むと `"` が置換されて JSON が壊れ、
 		// メールアドレスのドメインが残る)
@@ -1202,7 +1551,10 @@ func TestURLPasswordOnLongLines(t *testing.T) {
 		{"long scheme", strings.Repeat("a", 1<<20) + "://u:p@h", 1},
 		{"colon runs", "http://" + strings.Repeat(":", 1<<20) + "@h", 1},
 		{"repeated schemes", strings.Repeat("a://b:c@", 100000) + "h", 100000},
-		{"repeated userinfo", "http://" + strings.Repeat("a:b@", 200000) + "h", 1},
+		{"repeated userinfo", "http://" + strings.Repeat("a:b@", 200000) + "h", 200000}, // `@` ごとの候補(重なりの解決で 1 つになる)
+		{"ats in user", "http://" + strings.Repeat("a@", 1<<19) + ":p@h", 1},
+		{"ats in password", "http://u:" + strings.Repeat("p@", 1<<19) + "h", 1 << 19},
+		{"ats without scheme", strings.Repeat("a:b@", 300000) + "h", 0},
 		{"no scheme", strings.Repeat("u:p@h ", 150000), 0},
 		{"scheme chars then at", strings.Repeat("a-", 500000) + "@h", 0},
 		{"slashes", strings.Repeat("://", 300000) + "u:p@h", 0},
@@ -1219,6 +1571,21 @@ func TestURLPasswordOnLongLines(t *testing.T) {
 		_ = (emailFinder{hashLen: 12}).find([]byte(c.line), nil)
 		if d := time.Since(start); d > 5*time.Second {
 			t.Errorf("%s (email): took %v", c.name, d)
+		}
+	}
+	// 重なる候補が多い行でも、検出器全体(重なりの解決)が遅くならない。採られるのは、最後の `@` までのもの(Q70)
+	d, err := New(Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{"http://" + strings.Repeat("a:b@", 200000) + "h", "http://u:" + strings.Repeat("p@", 1<<19) + "h"} {
+		start := time.Now()
+		got, _ := d.Find([]byte(line), nil)
+		if el := time.Since(start); el > 5*time.Second {
+			t.Errorf("Find took %v", el)
+		}
+		if len(got) != 1 || got[0].End != len(line)-2 {
+			t.Errorf("Find: %d matches, want 1 ending at the last '@'", len(got))
 		}
 	}
 }
