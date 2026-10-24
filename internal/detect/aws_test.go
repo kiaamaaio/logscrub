@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // awsValues は、Detector を通して(kinds の種別だけで)検出した結果を、「ラベルの種別名=置換される文字列」の列で返す。
@@ -79,6 +80,17 @@ func TestAWSAccount(t *testing.T) {
 		{"ecr https", "https://" + id + ".dkr.ecr.us-east-1.amazonaws.com/v2/", want},
 		{"ecr end of line", id + ".dkr.ecr.us-east-1.amazonaws.com", want},
 		{"ecr with port", id + ".dkr.ecr.us-east-1.amazonaws.com:443", want},
+		// S3 Control(v1.2)
+		{"s3 control", id + ".s3-control.ap-northeast-1.amazonaws.com", want},
+		{"s3 control dualstack", id + ".s3-control.dualstack.us-east-1.amazonaws.com", want},
+		{"s3 control fips", id + ".s3-control-fips.us-gov-west-1.amazonaws.com", want},
+		{"s3 control fips dualstack", id + ".s3-control-fips.dualstack.us-east-1.amazonaws.com", want},
+		{"s3 control china", id + ".s3-control.cn-north-1.amazonaws.com.cn", want},
+		{"s3 control eusc", id + ".s3-control.eusc-de-east-1.amazonaws.eu", want},
+		{"s3 control https", "https://" + id + ".s3-control.us-east-1.amazonaws.com/v20180820/configuration/publicAccessBlock", want},
+		{"s3 control with port", id + ".s3-control.us-east-1.amazonaws.com:443", want},
+		{"s3 control and ecr", id + ".s3-control.us-east-1.amazonaws.com " + id + ".dkr.ecr.us-east-1.amazonaws.com/a",
+			[]string{"aws_account=" + id, "aws_account=" + id}},
 		// SQS
 		{"sqs", "https://sqs.ap-northeast-1.amazonaws.com/" + id + "/orders", want},
 		{"sqs china", "https://sqs.cn-north-1.amazonaws.com.cn/" + id + "/q", want},
@@ -119,6 +131,19 @@ func TestAWSAccount(t *testing.T) {
 		{"ecr then other domain", id + ".dkr.ecr.us-east-1.amazonaws.com.example.net/a", nil},
 		{"ecr then letter", id + ".dkr.ecr.us-east-1.amazonaws.comx", nil},
 		{"ecr uppercase", id + ".DKR.ECR.us-east-1.amazonaws.com/a", nil},
+		{"s3 control 11 digits", "12345678901.s3-control.us-east-1.amazonaws.com", nil},
+		{"s3 control 13 digits", "1123456789012.s3-control.us-east-1.amazonaws.com", nil},
+		{"s3 control after letter", "x" + id + ".s3-control.us-east-1.amazonaws.com", nil},
+		{"s3 control after hyphen", "a-" + id + ".s3-control.us-east-1.amazonaws.com", nil},
+		{"s3 control after dot", "a." + id + ".s3-control.us-east-1.amazonaws.com", nil},
+		{"s3 control without region", id + ".s3-control.amazonaws.com", nil},
+		{"s3 control other domain", id + ".s3-control.us-east-1.example.com", nil},
+		{"s3 control then other domain", id + ".s3-control.us-east-1.amazonaws.com.example.net", nil},
+		{"s3 control then letter", id + ".s3-control.us-east-1.amazonaws.comx", nil},
+		{"s3 control uppercase", id + ".S3-CONTROL.us-east-1.amazonaws.com", nil},
+		{"s3 control unknown variant", id + ".s3-control-xx.us-east-1.amazonaws.com", nil},
+		{"s3 control api endpoint", "s3-control.us-east-1.amazonaws.com", nil},
+		{"s3 control api endpoint with path", "https://s3-control.us-east-1.amazonaws.com/v20180820/" + id, nil},
 		// 置換しない: SQS の形
 		{"sqs 11 digits", "https://sqs.us-east-1.amazonaws.com/12345678901/q", nil},
 		{"sqs 13 digits", "https://sqs.us-east-1.amazonaws.com/1234567890123/q", nil},
@@ -150,6 +175,8 @@ func TestAWSAccountAlreadyReplaced(t *testing.T) {
 	for _, line := range []string{
 		"arn:aws:iam::<aws_account_1>:role/x",
 		"<aws_account_1>.dkr.ecr.us-east-1.amazonaws.com/a",
+		"<aws_account_1>.s3-control.us-east-1.amazonaws.com",
+		"aws_account_3f9a1c0b7d2e.s3-control.dualstack.us-east-1.amazonaws.com",
 		"https://sqs.us-east-1.amazonaws.com/<aws_account_1>/q",
 		"arn:aws:iam::aws_account_3f9a1c0b7d2e:role/x",
 		"aws_account_3f9a1c0b7d2e.dkr.ecr.us-east-1.amazonaws.com/a",
@@ -184,6 +211,16 @@ var (
 		regexp.MustCompile(`^([0-9]{12})\.dkr\.ecr-fips\.[a-z0-9-]+\.amazonaws\.com\.cn`),
 		regexp.MustCompile(`^([0-9]{12})\.dkr\.ecr-fips\.[a-z0-9-]+\.amazonaws\.eu`),
 	}
+	// refS3ControlAccountForms は、S3 Control(v1.2)。仕様 4.4 の 4 つの語 × 3 つのドメイン
+	refS3ControlAccountForms = func() []*regexp.Regexp {
+		var out []*regexp.Regexp
+		for _, w := range []string{`s3-control`, `s3-control\.dualstack`, `s3-control-fips`, `s3-control-fips\.dualstack`} {
+			for _, d := range []string{`amazonaws\.com`, `amazonaws\.com\.cn`, `amazonaws\.eu`} {
+				out = append(out, regexp.MustCompile(`^([0-9]{12})\.`+w+`\.[a-z0-9-]+\.`+d))
+			}
+		}
+		return out
+	}()
 	refSQSAccountForms = []*regexp.Regexp{
 		regexp.MustCompile(`^sqs\.[a-z0-9-]+\.(?:amazonaws\.com|amazonaws\.com\.cn|amazonaws\.eu)/([0-9]{12})/`),
 		regexp.MustCompile(`^[a-z0-9-]+\.queue\.amazonaws\.com/([0-9]{12})/`),
@@ -206,7 +243,7 @@ func refAWSAccounts(line []byte) [][2]int {
 		if !hostStart(p) {
 			continue
 		}
-		for _, re := range refECRAccountForms {
+		for _, re := range append(slices.Clone(refECRAccountForms), refS3ControlAccountForms...) {
 			if loc := re.FindSubmatchIndex(line[p:]); loc != nil && refHostEnd.Match(line[p+loc[1]:]) {
 				seen[[2]int{p + loc[2], p + loc[3]}] = true
 			}
@@ -246,7 +283,8 @@ func TestAWSAccountMatchesRegexpReference(t *testing.T) {
 				sb.WriteString(pick([]string{"arn:", "arn:", "ARN:", "xarn:"}) + pick(partitions) + ":" + pick(services) + ":" +
 					pick(regions) + ":" + pick(ids) + pick([]string{":role/x", ":", "/x", ""}))
 			case 1:
-				sb.WriteString(pick(ids) + pick([]string{".dkr.ecr.", ".dkr.ecr-fips.", ".dkr.ecr", ".DKR.ECR."}) + pick(regions) + "." +
+				sb.WriteString(pick(ids) + pick([]string{".dkr.ecr.", ".dkr.ecr-fips.", ".dkr.ecr", ".DKR.ECR.", ".s3-control.", ".s3-control.dualstack.",
+					".s3-control-fips.", ".s3-control-fips.dualstack.", ".s3-control.dualstack", ".S3-CONTROL.", ".s3-control-fips"}) + pick(regions) + "." +
 					pick(domains) + pick([]string{"/app", "", ":443", "."}))
 			case 2:
 				sb.WriteString("sqs." + pick(regions) + "." + pick(domains) + "/" + pick(ids) + pick([]string{"/q", "", "/"}))
@@ -286,6 +324,8 @@ func TestAWSAccountFinderOnLongLines(t *testing.T) {
 		strings.Repeat("arn:", 300000),
 		strings.Repeat("arn:aws:iam::", 100000),
 		strings.Repeat(".dkr.ecr", 150000),
+		strings.Repeat(".s3-control.dualstack", 100000),
+		strings.Repeat("1", 1<<20) + ".s3-control.us-east-1.amazonaws.com",
 		strings.Repeat("1", 1<<20) + ".dkr.ecr.us-east-1.amazonaws.com",
 		strings.Repeat("sqs.", 300000),
 		strings.Repeat("queue.amazonaws.com", 60000),
@@ -678,6 +718,520 @@ func BenchmarkAWSS3BucketFinder(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		for _, line := range lines {
 			dst = (awsS3BucketFinder{}).find(line, dst[:0])
+		}
+	}
+}
+
+// ---- aws_host(仕様 4.5、9 章「AWS のホスト名」) ----
+
+var awsHostKinds = KindSet(0).With(KindAWSHost)
+
+func TestAWSHostFinderKind(t *testing.T) {
+	if k := (awsHostFinder{}).kind(); k != KindAWSHost {
+		t.Errorf("kind = %v", k)
+	}
+}
+
+// 仕様 4.5 の表の各サービスの例(利用者ごとの部分、末尾の形)。
+var awsHostExamples = []struct{ user, tail string }{
+	{"my-alb-1234567890", ".ap-northeast-1.elb.amazonaws.com"},
+	{"my-nlb-0123456789abcdef", ".elb.ap-northeast-1.amazonaws.com"},
+	{"a1b2c3d4e5", ".execute-api.ap-northeast-1.amazonaws.com"},
+	{"abcdefghij0123456789klmnop", ".lambda-url.ap-northeast-1.on.aws"},
+	{"d111111abcdef8", ".cloudfront.net"},
+	{"a1234567890abcdef", ".awsglobalaccelerator.com"},
+	{"0123456789ABCDEF0123456789ABCDEF.gr7", ".ap-northeast-1.eks.amazonaws.com"},
+	{"mydb.cluster-c9akciq32", ".ap-northeast-1.rds.amazonaws.com"},
+	{"my-cluster.c9akciq32", ".ap-northeast-1.redshift.amazonaws.com"},
+	{"default.123456789012", ".ap-northeast-1.redshift-serverless.amazonaws.com"},
+	{"search-my-domain-abcdefghij", ".ap-northeast-1.es.amazonaws.com"},
+	{"abcdefghij0123456789", ".ap-northeast-1.aoss.amazonaws.com"},
+	{"b-1-public.my-cluster.abc123.c2", ".kafka.ap-northeast-1.amazonaws.com"},
+	{"b-1234abcd-12ab-34cd-56ef-1234567890ab-1", ".mq.ap-northeast-1.amazonaws.com"},
+	{"b-1234abcd-12ab-34cd-56ef-1234567890ab-1", ".mq.ap-northeast-1.on.aws"},
+	{"s-0123456789abcdef0", ".server.transfer.ap-northeast-1.amazonaws.com"},
+	{"abcdefghijklmnopqrstuvwxyz", ".appsync-api.ap-northeast-1.amazonaws.com"},
+	{"abcdefghijklmnopqrstuvwxyz", ".appsync-realtime-api.ap-northeast-1.amazonaws.com"},
+	{"my-app", ".auth.ap-northeast-1.amazoncognito.com"},
+	{"a1b2c3d4e5f6g7-ats", ".iot.ap-northeast-1.amazonaws.com"},
+	// 除外する名前(Q57、Q61)そのものでなければ、置換する(Jobs の `<接頭辞>.jobs`、認証情報の `<接頭辞>.credentials` など)
+	{"a1b2c3d4e5f6g7.jobs", ".iot.ap-northeast-1.amazonaws.com"},
+	{"data.jobs", ".iot.ap-northeast-1.amazonaws.com"},
+	{"c1a2b3d4e5f6g7.credentials", ".iot.ap-northeast-1.amazonaws.com"},
+	{"x.api.tunneling", ".iot.ap-northeast-1.amazonaws.com"},
+	{"tunneling", ".iot.ap-northeast-1.amazonaws.com"},
+	{"abcdefghij", ".ap-northeast-1.awsapprunner.com"},
+	{"main.d1a2b3c4d5e6f7", ".amplifyapp.com"},
+	{"my-env", ".ap-northeast-1.elasticbeanstalk.com"},
+	{"f5lnz-0khrm-nt2u3-gyqqt-nbdl5", ".ap-southeast-2.ip.aws"},
+	{"f5lnz-0khrm-nt2u3-gyqqt-nbdl5-q3cdpO", ".ap-southeast-2.ip.aws"},
+}
+
+func TestAWSHost(t *testing.T) {
+	for _, ex := range awsHostExamples {
+		line := "conn " + ex.user + ex.tail + " ok"
+		want := []string{"aws_host=" + ex.user}
+		if got := awsValues(t, awsHostKinds, line); !slices.Equal(got, want) {
+			t.Errorf("%q: got %q, want %q", line, got, want)
+		}
+	}
+	// リージョン・ドメインの組み合わせ(Q40)
+	for _, tc := range []struct{ line, want string }{
+		{"x.us-gov-west-1.rds.amazonaws.com", "x"},
+		{"x.cn-north-1.rds.amazonaws.com.cn", "x"},
+		{"x.eusc-de-east-1.rds.amazonaws.eu", "x"},
+		{"x.mars-1.rds.amazonaws.com", "x"},
+		{"x.elb.cn-north-1.amazonaws.com.cn", "x"},
+		{"x.kafka.eusc-de-east-1.amazonaws.eu", "x"},
+		{"x.ap-northeast-1.rds.amazonaws.com:5432/app", "x"},
+	} {
+		if got := awsValues(t, awsHostKinds, tc.line); !slices.Equal(got, []string{"aws_host=" + tc.want}) {
+			t.Errorf("%q: got %q", tc.line, got)
+		}
+	}
+	// 置換する範囲は、利用者ごとの部分だけ(サービス名・リージョン・ドメインは残る)
+	d, err := New(Options{Kinds: awsHostKinds})
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := "host=mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com port=5432"
+	got, _ := d.Find([]byte(line), nil)
+	if len(got) != 1 || got[0].Start != 5 || line[got[0].Start:got[0].End] != "mydb.cluster-c9akciq32" || got[0].Kind != KindAWSHost {
+		t.Errorf("got %+v", got)
+	}
+}
+
+// 複数の末尾の形が当てはまる場合は、長いほうの形を採る(`.<リージョン>.elasticbeanstalk.com`)。
+// 長い形の利用者ごとの部分が規則に合わないときは、短い形に戻る。
+func TestAWSHostLongerTailWins(t *testing.T) {
+	for _, tc := range []struct{ line, want string }{
+		{"my-env.ap-northeast-1.elasticbeanstalk.com", "my-env"},
+		{"my-env.elasticbeanstalk.com", "my-env"},
+		{"ap-northeast-1.elasticbeanstalk.com", "ap-northeast-1"}, // 長い形は利用者ごとの部分が空
+		{"a.b.ap-northeast-1.elasticbeanstalk.com", "a.b"},
+		{"-x.ap-northeast-1.elasticbeanstalk.com", ""}, // どちらの形も先頭が `-`
+		{"x_.ap-northeast-1.elasticbeanstalk.com", ""},
+	} {
+		var want []string
+		if tc.want != "" {
+			want = []string{"aws_host=" + tc.want}
+		}
+		if got := awsValues(t, awsHostKinds, tc.line); !slices.Equal(got, want) {
+			t.Errorf("%q: got %q, want %q", tc.line, got, want)
+		}
+	}
+}
+
+// 除外: API のエンドポイント、表にない形、大文字の決まった部分、末尾の形の後ろの文字、独自のドメイン。
+func TestAWSHostRejects(t *testing.T) {
+	for _, line := range []string{
+		// AWS 自体の API のエンドポイント(利用者ごとの部分がない)
+		"rds.ap-northeast-1.amazonaws.com",
+		"https://kafka.ap-northeast-1.amazonaws.com/",
+		"https://elasticloadbalancing.ap-northeast-1.amazonaws.com",
+		"https://iot.ap-northeast-1.amazonaws.com",
+		"mq.ap-northeast-1.amazonaws.com",
+		// IoT の AWS 共通のエンドポイント(Q57、Q61)
+		"data-ats.iot.us-east-1.amazonaws.com",
+		"api.tunneling.iot.us-east-1.amazonaws.com", "https://api.tunneling.iot.ap-northeast-1.amazonaws.com/tunnels",
+		"data.tunneling.iot.us-east-1.amazonaws.com", "wss://data.tunneling.iot.ap-northeast-1.amazonaws.com:443/tunnel",
+		// cloudfront.net だけ、表にない形、独自のドメイン
+		"cloudfront.net", ".cloudfront.net", "https://cloudfront.net/x",
+		"x.ap-northeast-1.cache.amazonaws.com", "mydb.example.com", "db.example.com",
+		"x.rds.amazonaws.com", "x.ap-northeast-1.rds.example.com", "x.ap-northeast-1.rds.amazonaws.org",
+		// VPC の中からしかアクセスできないサービス、api.aws の形、v1.2 の対象外の新しい形(Q49、Q50、Q59)
+		"x.ap-northeast-1.api.aws", "vpce-0123456789abcdef0-abcdefgh.sqs.ap-northeast-1.vpce.amazonaws.com",
+		"abcdefghij.aoss.ap-northeast-1.on.aws", "my-app.auth-fips.us-east-1.amazoncognito.com",
+		// 決まった部分が大文字
+		"X.CLOUDFRONT.NET", "x.ap-northeast-1.RDS.amazonaws.com", "x.AP-NORTHEAST-1.rds.amazonaws.com", "x.ap-northeast-1.rds.AMAZONAWS.com",
+		// 末尾の形の後ろ(Q41)
+		"x.cloudfront.net.example.org", "x.cloudfront.netx", "x.cloudfront.net-x", "x.cloudfront.net_x",
+		"x.ap-northeast-1.rds.amazonaws.com.example.net", "x.ap-northeast-1.rds.amazonaws.comx",
+		// 利用者ごとの部分の条件
+		".d111111abcdef8.cloudfront.net.cloudfront.net", "-x.cloudfront.net", "x-.cloudfront.net", "a..b.cloudfront.net",
+		"_x.cloudfront.net", "aws_host_3f9a1c0b7d2e.ap-northeast-1.rds.amazonaws.com",
+		"<aws_host_1>.ap-northeast-1.rds.amazonaws.com",
+		// 他の種別のホスト名(EC2、S3、ECR、SQS、S3 Control)
+		"ec2-54-250-1-2.ap-northeast-1.compute.amazonaws.com", "ec2-54-250-1-2.compute-1.amazonaws.com",
+		"ip-10-0-0-5.ap-northeast-1.compute.internal",
+		"my-bucket.s3.ap-northeast-1.amazonaws.com", "s3.ap-northeast-1.amazonaws.com", "my-bucket.s3.amazonaws.com",
+		"123456789012.dkr.ecr.ap-northeast-1.amazonaws.com", "sqs.ap-northeast-1.amazonaws.com",
+		"123456789012.s3-control.ap-northeast-1.amazonaws.com",
+	} {
+		if got := awsValues(t, awsHostKinds, line); got != nil {
+			t.Errorf("%q: got %q, want nothing", line, got)
+		}
+	}
+}
+
+// 利用者ごとの部分の境界: 前の文字、`.` の連続、先頭・末尾の `-`、英大文字。
+func TestAWSHostUserPartBoundaries(t *testing.T) {
+	for _, tc := range []struct{ line, want string }{
+		{"https://d111111abcdef8.cloudfront.net/x.js", "d111111abcdef8"},
+		{"host=d111111abcdef8.cloudfront.net", "d111111abcdef8"},
+		{"\"d111111abcdef8.cloudfront.net\"", "d111111abcdef8"},
+		{"[d111111abcdef8.cloudfront.net]", "d111111abcdef8"},
+		{"さd111111abcdef8.cloudfront.net", "d111111abcdef8"},
+		{"d111111abcdef8.cloudfront.net.", "d111111abcdef8"}, // 文末の `.`
+		{"d111111abcdef8.cloudfront.net. next", "d111111abcdef8"},
+		{"d111111abcdef8.cloudfront.net.-x", "d111111abcdef8"},
+		{"A-B.C-d.cloudfront.net", "A-B.C-d"}, // 英大文字
+		{"My-ALB-1.ap-northeast-1.elb.amazonaws.com", "My-ALB-1"},
+		{"a-b.c-d.e.cloudfront.net", "a-b.c-d.e"},
+		{"x-y.cloudfront.net", "x-y"},
+		{"a.cloudfront.net", "a"},
+		{"-x.y.cloudfront.net", ""}, // 先頭が `-`
+		{"y-.cloudfront.net", ""},   // 末尾が `-`
+		{"x..y.cloudfront.net", ""}, // `.` の連続
+		{"x.-y.cloudfront.net", "x.-y"},
+		{".y.cloudfront.net", ""},    // 先頭が `.`
+		{"_y.cloudfront.net", ""},    // 前が `_`
+		{"x_y.cloudfront.net", ""},   // 途中の `_`(英数字・`-`・`.` の続きの前が `_`)
+		{"a.x_y.cloudfront.net", ""}, // 同上
+		{".cloudfront.net.cloudfront.net", ""},
+	} {
+		var want []string
+		if tc.want != "" {
+			want = []string{"aws_host=" + tc.want}
+		}
+		if got := awsValues(t, awsHostKinds, tc.line); !slices.Equal(got, want) {
+			t.Errorf("%q: got %q, want %q", tc.line, got, want)
+		}
+	}
+}
+
+// 同じホスト名は同じ値として検出され、違うホスト名は別の値になる(ラベルの割り当ては transform のテスト)。
+func TestAWSHostSeveralInOneLine(t *testing.T) {
+	line := "a.cloudfront.net b.cloudfront.net a.cloudfront.net db1.ap-northeast-1.rds.amazonaws.com," +
+		"db2.ap-northeast-1.rds.amazonaws.com;x.mq.us-east-1.on.aws"
+	want := []string{"aws_host=a", "aws_host=b", "aws_host=a", "aws_host=db1", "aws_host=db2", "aws_host=x"}
+	if got := awsValues(t, awsHostKinds, line); !slices.Equal(got, want) {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// 他の種別との分担(仕様 4.5「範囲が重なった場合」、2.5 節): EC2・S3・ECR・SQS・S3 Control は aws_host にならず、
+// `admin@<RDS のホスト名>` は長いメールアドレスが優先される。
+func TestAWSHostWithOtherKinds(t *testing.T) {
+	all := DefaultKinds.With(KindAWSAccount).With(KindAWSS3Bucket).With(KindAWSHost)
+	for _, tc := range []struct {
+		line string
+		want []string
+	}{
+		{"admin@mydb.c9akciq32.ap-northeast-1.rds.amazonaws.com", []string{"email=admin@mydb.c9akciq32.ap-northeast-1.rds.amazonaws.com"}},
+		{"mydb.c9akciq32.ap-northeast-1.rds.amazonaws.com", []string{"aws_host=mydb.c9akciq32"}},
+		{"ec2-54-250-1-2.ap-northeast-1.compute.amazonaws.com", []string{"ipv4_global=54-250-1-2"}},
+		{"my-bucket.s3.ap-northeast-1.amazonaws.com", []string{"aws_s3_bucket=my-bucket"}},
+		{"123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/app", []string{"aws_account=123456789012"}},
+		{"https://sqs.ap-northeast-1.amazonaws.com/123456789012/q", []string{"aws_account=123456789012"}},
+		{"https://my-bucket.s3.amazonaws.com/ db.ap-northeast-1.rds.amazonaws.com", []string{"aws_s3_bucket=my-bucket", "aws_host=db"}},
+	} {
+		if got := awsValues(t, all, tc.line); !slices.Equal(got, tc.want) {
+			t.Errorf("%q: got %q, want %q", tc.line, got, tc.want)
+		}
+	}
+}
+
+// 置換済みの形(mask のラベル、hash の出力)は、再度は検出されない(2.5 節)。
+func TestAWSHostAlreadyReplaced(t *testing.T) {
+	d, err := New(Options{Kinds: DefaultKinds | awsHostKinds})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{
+		"<aws_host_1>.ap-northeast-1.rds.amazonaws.com",
+		"<aws_host_12>.cloudfront.net",
+		"aws_host_3f9a1c0b7d2e.ap-northeast-1.rds.amazonaws.com",
+		"aws_host_3f9a1c0b7d2e.cloudfront.net",
+		"https://aws_host_3f9a1c0b7d2e.ap-northeast-1.elb.amazonaws.com/x",
+	} {
+		got, kept := d.Find([]byte(line), nil)
+		if len(got) != 0 || kept != 1 {
+			t.Errorf("Find(%q) = %+v kept=%d, want nothing and 1 kept", line, got, kept)
+		}
+	}
+}
+
+// 既定の種別では、aws_host は検出しない(受け入れ基準)。
+func TestAWSHostDisabledByDefault(t *testing.T) {
+	if got := awsValues(t, 0, "db.ap-northeast-1.rds.amazonaws.com"); got != nil {
+		t.Errorf("default kinds: %q", got)
+	}
+}
+
+// 表の各行は、規則に合っている(終端は文中に少ない手がかりを持つ、末尾の形は `.` で始まる、など)。
+func TestAWSHostTable(t *testing.T) {
+	n := 0
+	for _, f := range awsHostForms {
+		if f.service == "" || len(f.tails) == 0 {
+			t.Errorf("bad form %+v", f)
+		}
+		for _, s := range f.tails {
+			n++
+			if !strings.HasPrefix(s, ".") || s != strings.ToLower(s) && !strings.Contains(s, "{") {
+				t.Errorf("bad tail %q", s)
+			}
+		}
+	}
+	if n != 25 {
+		t.Errorf("%d tails, want 25 (4.5 の表の末尾の形の数)", n)
+	}
+	// 手がかりのバイトごとのまとまり: z(`.amazonaws.` と cognito)を含む
+	hints := map[byte]bool{}
+	for _, g := range awsHostTable.groups {
+		if hints[g.hint] {
+			t.Errorf("duplicate group %q", g.hint)
+		}
+		hints[g.hint] = true
+	}
+	if !hints['z'] || !awsHostTable.groups[0].amazonaws {
+		t.Errorf("groups: %+v", awsHostTable.groups)
+	}
+	// 実測で決めた手がかり(hostHintRank): 走査は z(`.amazonaws.`、cognito)、w(`.aws` で始まる・終わる形)、
+	// l(cloudfront.net、amplifyapp.com、elasticbeanstalk.com)の 3 回
+	if len(hints) != 3 || !hints['w'] || !hints['l'] {
+		t.Errorf("hint bytes = %v, want z, w, l", hints)
+	}
+}
+
+// ---- 正規表現の参照実装との一致 ----
+
+// refAWSHostTails は、仕様 4.5 の表の末尾の形を、実装の表を使わずに正規表現で書いたもの(`DOM` は対象のドメイン)。
+var refAWSHostTails = []struct {
+	re      string
+	exclude []string
+}{
+	{`\.[a-z0-9-]+\.elb\.DOM`, nil},
+	{`\.elb\.[a-z0-9-]+\.DOM`, nil},
+	{`\.execute-api\.[a-z0-9-]+\.DOM`, nil},
+	{`\.lambda-url\.[a-z0-9-]+\.on\.aws`, nil},
+	{`\.cloudfront\.net`, nil},
+	{`\.awsglobalaccelerator\.com`, nil},
+	{`\.[a-z0-9-]+\.eks\.DOM`, nil},
+	{`\.[a-z0-9-]+\.rds\.DOM`, nil},
+	{`\.[a-z0-9-]+\.redshift\.DOM`, nil},
+	{`\.[a-z0-9-]+\.redshift-serverless\.DOM`, nil},
+	{`\.[a-z0-9-]+\.es\.DOM`, nil},
+	{`\.[a-z0-9-]+\.aoss\.DOM`, nil},
+	{`\.kafka\.[a-z0-9-]+\.DOM`, nil},
+	{`\.mq\.[a-z0-9-]+\.DOM`, nil},
+	{`\.mq\.[a-z0-9-]+\.on\.aws`, nil},
+	{`\.server\.transfer\.[a-z0-9-]+\.DOM`, nil},
+	{`\.appsync-api\.[a-z0-9-]+\.DOM`, nil},
+	{`\.appsync-realtime-api\.[a-z0-9-]+\.DOM`, nil},
+	{`\.auth\.[a-z0-9-]+\.amazoncognito\.com`, nil},
+	{`\.iot\.[a-z0-9-]+\.DOM`, []string{"data-ats", "api.tunneling", "data.tunneling"}},
+	{`\.[a-z0-9-]+\.awsapprunner\.com`, nil},
+	{`\.amplifyapp\.com`, nil},
+	{`\.[a-z0-9-]+\.elasticbeanstalk\.com`, nil},
+	{`\.elasticbeanstalk\.com`, nil},
+	{`\.[a-z0-9-]+\.ip\.aws`, nil},
+}
+
+type refAWSHostTail struct {
+	re      *regexp.Regexp
+	exclude []string
+}
+
+// refAWSHostForms は、refAWSHostTails の DOM を、対象のドメインごとに展開した正規表現(1 つずつ試す)。
+var refAWSHostForms = func() []refAWSHostTail {
+	var out []refAWSHostTail
+	for _, t := range refAWSHostTails {
+		if !strings.Contains(t.re, "DOM") {
+			out = append(out, refAWSHostTail{regexp.MustCompile(`^` + t.re), t.exclude})
+			continue
+		}
+		for _, d := range []string{`amazonaws\.com\.cn`, `amazonaws\.com`, `amazonaws\.eu`} {
+			out = append(out, refAWSHostTail{regexp.MustCompile(`^` + strings.Replace(t.re, "DOM", d, 1)), t.exclude})
+		}
+	}
+	return out
+}()
+
+var refHostUserPart = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$`)
+
+// refAWSHosts は、前処理を使わず、行のすべての位置で、末尾の形を 1 つずつ試す参照実装。
+// 末尾の形が同じ位置で終わる場合は、先頭が最も前の(利用者ごとの部分が最も短い)有効なものを採る。
+// 利用者ごとの部分の範囲を、開始位置の順(重複なし)で返す。
+func refAWSHosts(line []byte) [][2]int {
+	best := map[int][2]int{} // 末尾の形の終わり → (利用者ごとの部分の先頭, 末尾の形の先頭)
+	bestS := map[int]int{}
+	for s := 1; s < len(line); s++ {
+		for _, f := range refAWSHostForms {
+			loc := f.re.FindIndex(line[s:])
+			if loc == nil || !refHostEnd.Match(line[s+loc[1]:]) {
+				continue
+			}
+			e := s + loc[1]
+			for u := 0; u < s; u++ {
+				part := line[u:s]
+				if !refHostUserPart.Match(part) || strings.Contains(string(part), "..") ||
+					u > 0 && refHostChar.Match(line[u-1:u]) || slices.Contains(f.exclude, string(part)) {
+					continue
+				}
+				if old, ok := bestS[e]; !ok || s < old {
+					bestS[e] = s
+					best[e] = [2]int{u, s}
+				}
+			}
+		}
+	}
+	var out [][2]int
+	for _, r := range best {
+		out = append(out, r)
+	}
+	slices.SortFunc(out, cmpRange)
+	return slices.Compact(out)
+}
+
+// 乱数で作った行で、aws_host の検出が、参照実装と一致すること。
+// 行は「前の文字 + 利用者ごとの部分 + 末尾の形 + 後ろの文字」の組を並べて作る。
+func TestAWSHostMatchesRegexpReference(t *testing.T) {
+	users := []string{"mydb", "mydb", "my-alb-1234567890", "a.b", "a-b.c", "A1-B2", "0123456789ABCDEF.gr7", "x", "ab", "a..b", "-x", "x-", ".x", "x.",
+		"a.-b", "a_b", "aws_host_3f9a1c0b7d2e", "<aws_host_1>", "data-ats", "api.tunneling", "data.tunneling", "x.api.tunneling", "tunneling", "b-1-public.cl.abc.c2", "", "ap-northeast-1", "elb", "x.us-east-1", "あ"}
+	regions := []string{"ap-northeast-1", "ap-northeast-1", "us-east-1", "cn-north-1", "eusc-de-east-1", "a", "0", "-", "", "US-EAST-1", "a.b", "x_y"}
+	domains := []string{"amazonaws.com", "amazonaws.com", "amazonaws.com.cn", "amazonaws.eu", "amazonaws.org", "example.com", "amazonaws.comx", "AMAZONAWS.COM"}
+	labels := []string{"elb", "execute-api", "lambda-url", "eks", "rds", "redshift", "redshift-serverless", "es", "aoss", "kafka", "mq", "server.transfer",
+		"appsync-api", "appsync-realtime-api", "auth", "iot", "cache", "RDS", "s3", "dkr.ecr"}
+	fixed := []string{".cloudfront.net", ".awsglobalaccelerator.com", ".amplifyapp.com", ".elasticbeanstalk.com", ".CLOUDFRONT.NET", ".cloudfront.org"}
+	around := []string{"", "", " ", "/", "\"", ":", ".", "-", "_", "x", "0", "@", "https://", "あ", "\xff"}
+	after := []string{"", "", "/x", ":443", ".", ". ", ".-", "..", "-", "_", "x", ".x", ".example.org", " ", "\""}
+	rng := rand.New(rand.NewPCG(71, 72))
+	pick := func(xs []string) string { return xs[rng.IntN(len(xs))] }
+	found := 0
+	for iter := 0; iter < 80000; iter++ {
+		var sb strings.Builder
+		for i, n := 0, 1+rng.IntN(3); i < n; i++ {
+			sb.WriteString(pick(around))
+			sb.WriteString(pick(users))
+			switch rng.IntN(8) {
+			case 0:
+				sb.WriteString("." + pick(regions) + "." + pick(labels) + "." + pick(domains))
+			case 1:
+				sb.WriteString("." + pick(labels) + "." + pick(regions) + "." + pick(domains))
+			case 2:
+				sb.WriteString("." + pick(labels) + "." + pick(regions) + "." + pick([]string{"on.aws", "on.aws", "amazoncognito.com", "awsapprunner.com", "ip.aws", "on.awsx"}))
+			case 3:
+				sb.WriteString("." + pick(regions) + "." + pick([]string{"ip.aws", "awsapprunner.com", "elasticbeanstalk.com", "ip.aws.com", "IP.AWS"}))
+			case 4:
+				sb.WriteString(pick(fixed))
+			case 5:
+				// 末尾の形が 2 つ続く(長いほうの形、重なる形)
+				sb.WriteString("." + pick(regions) + pick(fixed) + pick([]string{"", ".cloudfront.net", "." + pick(regions) + ".elb." + pick(domains)}))
+			case 6:
+				sb.WriteString("." + pick(regions) + "." + pick(labels) + "." + pick(domains) + "." + pick(regions) + "." + pick(labels) + "." + pick(domains))
+			default:
+				sb.WriteString("." + pick([]string{"ap-northeast-1", "us-east-1"}) + ".rds.amazonaws.com")
+			}
+			sb.WriteString(pick(after))
+			sb.WriteString(pick(around))
+		}
+		line := []byte(sb.String())
+		want := refAWSHosts(line)
+		var got [][2]int
+		for _, m := range (awsHostFinder{}).find(line, nil) {
+			if m.Kind != KindAWSHost || m.Class != ClassNone {
+				t.Fatalf("unexpected match %+v", m)
+			}
+			got = append(got, [2]int{m.Start, m.End})
+		}
+		slices.SortFunc(got, cmpRange)
+		got = slices.Compact(got)
+		if !slices.Equal(got, want) {
+			t.Fatalf("iter %d, line %q\n got  %v\n want %v", iter, line, got, want)
+		}
+		found += len(got)
+	}
+	if found < 8000 {
+		t.Errorf("only %d host names were found; the generator does not exercise the rules", found)
+	}
+}
+
+// 終端が行の端にある場合と、終端の途中で行が終わる場合(段階 9 の、手がかりの次の 1 バイトの比較)。
+func TestAWSHostTerminalAtLineEdges(t *testing.T) {
+	for _, tc := range []struct {
+		line string
+		want []string
+	}{
+		{"x.cloudfront.net", []string{"aws_host=x"}},
+		{"x.amplifyapp.com", []string{"aws_host=x"}},
+		{"x.elasticbeanstalk.com", []string{"aws_host=x"}},
+		{"x.us-east-1.elasticbeanstalk.com", []string{"aws_host=x"}},
+		{"x.awsglobalaccelerator.com", []string{"aws_host=x"}},
+		{"x.us-east-1.awsapprunner.com", []string{"aws_host=x"}},
+		{"x.lambda-url.us-east-1.on.aws", []string{"aws_host=x"}},
+		{"x.us-east-1.ip.aws", []string{"aws_host=x"}},
+		{"x.auth.us-east-1.amazoncognito.com", []string{"aws_host=x"}},
+		{"x.us-east-1.rds.amazonaws.com", []string{"aws_host=x"}},
+		{"x.cloudfront.net x.cloudfront.net", []string{"aws_host=x", "aws_host=x"}},
+		{"l", nil}, {".l", nil}, {".cl", nil}, {"x.cl", nil}, {"x.cloudfront.ne", nil}, {"x.amplifyapp.co", nil},
+		{"x.ip.aw", nil}, {"x.us-east-1.ip.aw", nil}, {"w", nil}, {".aw", nil}, {"z", nil}, {".amaz", nil}, {"x.amazonaws", nil},
+	} {
+		if got := awsValues(t, awsHostKinds, tc.line); !slices.Equal(got, tc.want) {
+			t.Errorf("%q: got %q, want %q", tc.line, got, tc.want)
+		}
+	}
+	// 手がかりが終端の最後のバイトの場合(今の表にはない)は、次の 1 バイトを比べない
+	term := hostTerminal{lit: []byte(".ab"), off: 2}
+	if !term.nextMatches([]byte("x.ab"), 3) {
+		t.Error("hint at the last byte of the terminal must not look past the line")
+	}
+	term = hostTerminal{lit: []byte(".ab"), off: 1}
+	if term.nextMatches([]byte("x.a"), 2) || !term.nextMatches([]byte("x.ab"), 2) || term.nextMatches([]byte("x.ac"), 2) {
+		t.Error("nextMatches compares the byte after the hint")
+	}
+}
+
+// ---- 長い行(手前へ遡る長さの合計が、行の長さ以内に収まること) ----
+
+func TestAWSHostFinderOnLongLines(t *testing.T) {
+	type tc struct {
+		name, line string
+		want       int // -1: 件数を確かめない
+	}
+	cases := []tc{
+		{"long user part", strings.Repeat("a", 1<<20) + ".cloudfront.net", 1},
+		{"long dotted user part", strings.Repeat("a.", 1<<19) + "a.cloudfront.net", 1},
+		{"long region", "x." + strings.Repeat("a", 1<<20) + ".rds.amazonaws.com", 1},
+		{"repeated tails, dot dash", strings.Repeat("x.cloudfront.net.-", 60000), -1},
+		{"repeated tails, dot dot", strings.Repeat("x.cloudfront.net..", 60000), -1},
+		{"repeated tails, plain", strings.Repeat("x.cloudfront.net ", 60000), 60000},
+		{"repeated tails, dash", strings.Repeat("-x.cloudfront.net", 60000), -1},
+		{"repeated rds", strings.Repeat("a.ap-northeast-1.rds.amazonaws.com.-", 30000), -1},
+		{"repeated beanstalk", strings.Repeat("a.ap-northeast-1.elasticbeanstalk.com.-", 30000), -1},
+		{"repeated on.aws", strings.Repeat("a.ip.aws.-", 100000), -1},
+		{"dots", strings.Repeat(".", 1<<20) + "cloudfront.net", 0},
+		{"hints only", strings.Repeat("zwfyk", 200000), 0},
+		{"tails only", strings.Repeat(".cloudfront.net", 70000), 0},
+		{"amazonaws only", strings.Repeat(".amazonaws.com", 70000), 0},
+		{"elb regions", strings.Repeat("a.elb.", 100000) + "us-east-1.amazonaws.com", 1},
+	}
+	for _, c := range cases {
+		start := time.Now()
+		got := (awsHostFinder{}).find([]byte(c.line), nil)
+		if d := time.Since(start); d > 5*time.Second {
+			t.Errorf("%s: took %v", c.name, d)
+		}
+		if c.want >= 0 && len(got) != c.want {
+			t.Errorf("%s: %d matches, want %d", c.name, len(got), c.want)
+		}
+	}
+	if got := (awsHostFinder{}).find([]byte(strings.Repeat("db.ap-northeast-1.rds.amazonaws.com ", 30000)), nil); len(got) != 30000 {
+		t.Errorf("many hosts: got %d matches, want 30000", len(got))
+	}
+}
+
+// ---- ベンチマーク ----
+
+func BenchmarkAWSHostFinder(b *testing.B) {
+	lines, size := benchCorpus(b)
+	var dst []Match
+	b.SetBytes(int64(size))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, line := range lines {
+			dst = (awsHostFinder{}).find(line, dst[:0])
 		}
 	}
 }

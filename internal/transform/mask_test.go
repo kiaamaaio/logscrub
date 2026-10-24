@@ -83,7 +83,7 @@ func TestMaskAcceptanceBasics(t *testing.T) {
 		{"secret json", `"api_key": "abc def"` + "\n", `"api_key": "<secret_1>"` + "\n"},
 		{"secret bearer", "Authorization: Bearer xxxxx\n", "Authorization: Bearer <secret_1>\n"},
 		{"ipv4 mapped", "::ffff:10.0.0.1\n", "<ipv6_private_1>\n"},
-		{"userinfo with ip", "https://user:pass@10.0.0.1/\n", "https://user:pass@<ipv4_private_1>/\n"},
+		{"userinfo with ip", "https://user:pass@10.0.0.1/\n", "https://user:<secret_1>@<ipv4_private_1>/\n"},
 		{"port and cidr", "10.0.0.1:8080 10.0.0.0/8 [::1]:8080\n", "<ipv4_private_1>:8080 <ipv4_private_2>/8 [<ipv6_private_1>]:8080\n"},
 		// 特殊アドレスは置換せず、番号も消費しない
 		{"special addresses keep numbers", "0.0.0.0 10.0.0.1 255.255.255.255 ::\n", "0.0.0.0 <ipv4_private_1> 255.255.255.255 ::\n"},
@@ -307,18 +307,18 @@ func TestStatsCountsOccurrencesInTypeOrder(t *testing.T) {
 	}
 }
 
-// 受け入れ基準: `--stats` で、aws_account・aws_s3_bucket の件数が uuid のあとに出る(仕様 6 章)。
+// 受け入れ基準: `--stats` で、aws_account・aws_s3_bucket・aws_host の件数が uuid のあとに出る(仕様 6 章)。
 // 数える順に関係なく、label.Types の順に並ぶ。
 func TestStatsOrderIncludesAWSTypes(t *testing.T) {
 	var st Stats
 	for _, m := range []detect.Match{
-		{Kind: detect.KindAWSS3Bucket}, {Kind: detect.KindAWSAccount}, {Kind: detect.KindAWSS3Bucket},
+		{Kind: detect.KindAWSHost}, {Kind: detect.KindAWSS3Bucket}, {Kind: detect.KindAWSAccount}, {Kind: detect.KindAWSS3Bucket},
 		{Kind: detect.KindUUID}, {Kind: detect.KindSecret}, {Kind: detect.KindEmail},
 		{Kind: detect.KindIPv4, Class: detect.ClassGlobal},
 	} {
 		st.add(m)
 	}
-	want := []TypeCount{{"email", 1}, {"ipv4_global", 1}, {"secret", 1}, {"uuid", 1}, {"aws_account", 1}, {"aws_s3_bucket", 2}}
+	want := []TypeCount{{"email", 1}, {"ipv4_global", 1}, {"secret", 1}, {"uuid", 1}, {"aws_account", 1}, {"aws_s3_bucket", 2}, {"aws_host", 1}}
 	got := st.Types()
 	if len(got) != len(want) {
 		t.Fatalf("Types() = %+v, want %+v", got, want)
@@ -328,7 +328,7 @@ func TestStatsOrderIncludesAWSTypes(t *testing.T) {
 			t.Errorf("Types()[%d] = %+v, want %+v", i, got[i], want[i])
 		}
 	}
-	if st.Total() != 7 || st.Count("aws_s3_bucket") != 2 {
+	if st.Total() != 8 || st.Count("aws_s3_bucket") != 2 {
 		t.Errorf("Total() = %d, Count(aws_s3_bucket) = %d", st.Total(), st.Count("aws_s3_bucket"))
 	}
 }

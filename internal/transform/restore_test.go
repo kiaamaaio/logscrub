@@ -281,7 +281,7 @@ func TestRestoreLimitationWithLabelLikeSource(t *testing.T) {
 		t.Fatalf("masked = %q", masked)
 	}
 	if restored == source {
-		t.Error("the round trip succeeded; update the README limitation if this is now handled")
+		t.Error("the round trip succeeded; update LIMITATIONS.md if this is now handled")
 	}
 }
 
@@ -413,6 +413,8 @@ func FuzzRestoreRoundTrip(f *testing.F) {
 		`{"m":"{\"password\":\"abc\",\"user\":\"a@x.com\"}"}` + "\n", "std::string fmt::Error d::bad\n",
 		"AKIAIOSFODNN7EXAMPLE ghp_" + strings.Repeat("a", 36) + "\n", "接続元 10.0.0.1 から taro@example.com\n",
 		"\xff\xfe a@b.co\r\n", "0@0.AA@0.AA\n", "ssh user@example.com@bastion.example.org\n", "a@b.co a@b.co c@d.co",
+		"postgres://app:s3cret@db.example.com:5432/app redis://:s3cret@10.0.0.5:6379 ftp://u:a:b@host\n",
+		"https://taro@example.com/ http://u:p@h@x.com password=s3cret\n",
 	} {
 		f.Add(s)
 	}

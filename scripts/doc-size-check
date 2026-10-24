@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# 資料(*.md)の長さが上限を超えていないかを確かめる(上限と理由は CLAUDE.md)。
+# 引数なし: HEAD から変更・追加された *.md と、追跡されていない *.md を確かめる
+#           (変更しない記録のファイル、完了した版の docs/plans/ などは対象にならない)。
+# 引数あり: 指定したファイルを確かめる。
+# 上限を超えたファイルがあれば、一覧を stderr に出して終了コード 1 で終える。
+set -uo pipefail
+
+max_lines=400
+max_bytes=40000
+
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo" || exit 1
+
+if [ "$#" -gt 0 ]; then
+  files=("$@")
+else
+  mapfile -t files < <(
+    {
+      git diff --name-only --diff-filter=ACMR HEAD -- '*.md'
+      git ls-files --others --exclude-standard -- '*.md'
+    } | sort -u
+  )
+fi
+
+over=0
+for f in "${files[@]}"; do
+  [ -f "$f" ] || continue
+  lines=$(wc -l <"$f")
+  bytes=$(wc -c <"$f")
+  if [ "$lines" -gt "$max_lines" ] || [ "$bytes" -gt "$max_bytes" ]; then
+    printf '%s: %d 行、%d バイト(上限は %d 行、%d バイト)\n' "$f" "$lines" "$bytes" "$max_lines" "$max_bytes" >&2
+    over=1
+  fi
+done
+
+if [ "$over" -ne 0 ]; then
+  printf '資料を分割してください(分け方は CLAUDE.md の「資料の長さ」)。\n' >&2
+fi
+exit "$over"

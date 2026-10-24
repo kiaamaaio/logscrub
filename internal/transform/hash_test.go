@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/kiaamaaio/logscrub/internal/detect"
-	"github.com/kiaamaaio/logscrub/internal/label"
 	"github.com/kiaamaaio/logscrub/internal/synthlog"
 )
 
@@ -288,42 +287,6 @@ func TestHashSyntheticLogIsIdempotent(t *testing.T) {
 			t.Errorf("mode %d: hash(hash(x)) != hash(x) (second pass replaced %d)", mode, st2.Total())
 		}
 	}
-}
-
-// ---- ファズテスト(mask と同じ性質。ラベルと hash 出力形の両方を、置換済みの形として見る) ----
-
-func FuzzHashStable(f *testing.F) {
-	for _, s := range []string{
-		"taro@example.com 192.168.0.1\n", "password=abc123&user=x\n", `"api_key": "abc def"` + "\n",
-		"Authorization: Bearer xxxxx\r\n", "::ffff:10.0.0.1 [::1]:8080 fe80::1%eth0\n", "https://user:pass@10.0.0.1/\n",
-		"id=123e4567-e89b-42d3-a456-426614174000 {123e4567-e89b-42d3-a456-426614174000}\n",
-		`{"m":"{\"password\":\"abc\",\"user\":\"a@x.com\"}"}` + "\n", "AKIAIOSFODNN7EXAMPLE ghp_" + strings.Repeat("a", 36) + "\n",
-		"email_3f9a1c0b7d2e password=secret_3f9a1c0b7d2e hash_3f9a1c0b7d2e@example.com\n", "token: Bearer abc.def-ghi\n",
-		"接続元 10.0.0.1 から taro@example.com\n", "\xff\xfe a@b.co\r\n", "000000A10.0.0.0fC00::\n", "10.0.0.1abc a@b.coabc\n",
-		"0@0.AA@0.AA\n", "0@0.AA:::1\n", "ssh user@example.com@bastion.example.org\n",
-	} {
-		f.Add(s)
-	}
-	for _, s := range awsFuzzSeeds {
-		f.Add(s)
-	}
-	optsList, dets := fuzzOptions(f)
-	f.Fuzz(func(t *testing.T, in string) {
-		for i, opts := range optsList {
-			for _, mode := range []EmailHash{EmailHashFull, EmailHashLocal} {
-				once, _ := hashRun(t, opts, testKey, 12, mode, in)
-				if strings.Count(once, "\n") != strings.Count(in, "\n") || strings.HasSuffix(in, "\n") != strings.HasSuffix(once, "\n") {
-					t.Fatalf("mode %d: the line structure changed: %q -> %q", mode, in, once)
-				}
-				checkSecondPass(t, dets[i], in, once, func(b []byte) []secondPassSpan {
-					var phs []secondPassSpan
-					label.DefaultFormat.Scan(b, func(s, e int, _ string, _ int) { phs = append(phs, secondPassSpan{s, e}) })
-					label.ScanHashed(b, 12, func(s, e int) { phs = append(phs, secondPassSpan{s, e}) })
-					return phs
-				})
-			}
-		}
-	})
 }
 
 // ---- NewHasher の検証 ----

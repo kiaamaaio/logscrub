@@ -88,7 +88,7 @@ func New(o Options) (*Detector, error) {
 
 // builtinFinders は、種別ごとの検出器を返す。o は normalize 済みでなければならない。
 // 検出器は、段階が進むごとに加わった(email は段階 3、ipv4 / ipv6 は段階 4、secret は段階 5、uuid は段階 6。
-// v1.1 の aws_account は段階 4、aws_s3_bucket は段階 5)。
+// v1.1 の aws_account は段階 4、aws_s3_bucket は段階 5、v1.2 の aws_host は段階 3)。
 func builtinFinders(o Options) []finder {
 	var fs []finder
 	if o.Kinds.Has(KindEmail) {
@@ -101,7 +101,7 @@ func builtinFinders(o Options) []finder {
 		fs = append(fs, ipv6Finder{})
 	}
 	if o.Kinds.Has(KindSecret) {
-		fs = append(fs, secretFinder{})
+		fs = append(fs, secretFinder{format: o.Format})
 	}
 	if o.Kinds.Has(KindUUID) {
 		fs = append(fs, uuidFinder{versions: o.UUIDVersions})
@@ -111,6 +111,9 @@ func builtinFinders(o Options) []finder {
 	}
 	if o.Kinds.Has(KindAWSS3Bucket) {
 		fs = append(fs, awsS3BucketFinder{})
+	}
+	if o.Kinds.Has(KindAWSHost) {
+		fs = append(fs, awsHostFinder{})
 	}
 	return fs
 }

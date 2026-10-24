@@ -3,8 +3,8 @@
 版をまたいで使う、開発環境・パッケージ構成・設計の注意点をまとめる。
 版ごとの実装計画と進捗は [plans/](plans/) にある(この資料の内容は、v1.0.0 の実装計画から移した)。
 
-- 仕様: [SPEC.md](SPEC.md)(以下「仕様」。節番号は仕様のもの)
-- 文中の Q 番号は、Q1〜Q31 が [plans/v1.0.0.md](plans/v1.0.0.md)、Q32〜Q46 が [plans/v1.1.0.md](plans/v1.1.0.md) の 5 章「未確定事項」の項目(すべて確定済み)
+- 仕様: [SPEC.md](SPEC.md)(以下「仕様」。節番号は仕様のもの。SPEC.md は目次で、4〜6 章・9 章の本文は [spec/](spec/) にある)
+- 文中の Q 番号は、Q1〜Q31 が [plans/v1.0.0.md](plans/v1.0.0.md)、Q32〜Q46 が [plans/v1.1.0.md](plans/v1.1.0.md)、Q47〜Q70 が [plans/v1.2.0.md](plans/v1.2.0.md) の 5 章「未確定事項」の項目(すべて確定済み)
 
 ---
 
@@ -40,32 +40,18 @@
 
 ## 2. パッケージ構成と主要な型・関数
 
-仕様 8 章の構成を土台に、3 つのパッケージ(`cli`、`label`、`synthlog`)を追加する。
+パッケージ構成(ディレクトリと、それぞれの役割)は、仕様 8 章が正本。ここには、構成を決めたときの理由を残す。
 
-```
-logscrub/
-├── go.mod                       # 依存なし
-├── README.md
-├── cmd/logscrub/main.go         # os.Exit(cli.Run(...)) だけの薄い入口
-├── internal/
-│   ├── cli/                     # 【追加】サブコマンド振り分け・flag 解析・終了コード
-│   ├── label/                   # 【追加】--mask-format の解析/生成/走査、hash 出力形の走査
-│   ├── detect/                  # 種別ごとの検出、重なりの解決、置換対象外の除外
-│   ├── transform/               # mask.go, hash.go, restore.go, engine.go(行の書き換え)
-│   ├── stream/                  # 行単位の入出力(改行コード・末尾改行の保持)
-│   └── synthlog/                # 【追加】性能測定用の合成ログの生成器(Q29。v1.1 で AWS の値を含める設定を追加。Q39)
-└── (各パッケージの testdata/)   # 往復テスト・E2E 用の入力と期待出力(実際は internal/transform/testdata/。
-                                 #   app.log と、v1.1 の AWS の値の aws.log、それぞれの mask の期待値)
-```
+### 仕様の最初の構成に加えたもの(v1.0 の計画で決めた)
 
-### 仕様 8 章から変える点と理由
-
-| 変更 | 理由 |
+| 追加 | 理由 |
 |---|---|
-| `internal/label` を追加 | ラベルの書式は「mask で生成」「restore で読み取り」「検出時に置換済みとして除外」の 3 か所で使う。`detect` に置くと `transform` → `detect` の依存は良いが、書式の責務が検出に混ざる。`transform` に置くと `detect` → `transform` の循環になる。独立させて両方から使う |
-| `internal/cli` を追加し、`main.go` は薄くする | `cli.Run(args, stdin, stdout, stderr, getenv) int` にすると、終了コード・stdout/stderr の分離・オプション順序などの受け入れ基準を、バイナリを作らずにテストで確認できる |
-| `internal/synthlog` を追加 | ベンチマーク(段階 2〜)と性能測定(段階 11)で同じ合成ログを使うため。テスト以外のコードからは使わない |
-| `transform/engine.go` を追加 | 「行を読む → 検出 → 置換 → 書く」の流れを mask / hash / restore(の対応表作り直し)で共有する。restore が mask と**同じコード経路**で連番を振ることが、連番の決定性(3.3 節)の要になる |
+| `internal/label` | ラベルの書式は「mask で生成」「restore で読み取り」「検出時に置換済みとして除外」の 3 か所で使う。`detect` に置くと `transform` → `detect` の依存は良いが、書式の責務が検出に混ざる。`transform` に置くと `detect` → `transform` の循環になる。独立させて両方から使う |
+| `internal/cli`(`main.go` は薄くする) | `cli.Run(args, stdin, stdout, stderr, getenv) int` にすると、終了コード・stdout/stderr の分離・オプション順序などの受け入れ基準を、バイナリを作らずにテストで確認できる |
+| `internal/synthlog` | ベンチマーク(段階 2〜)と性能測定(段階 11)で同じ合成ログを使うため。テスト以外のコードからは使わない。v1.1 で AWS の値を含める設定を追加(Q39)、v1.2 で AWS のサービスのホスト名と URL のパスワードも含める |
+| `transform/engine.go` | 「行を読む → 検出 → 置換 → 書く」の流れを mask / hash / restore(の対応表作り直し)で共有する。restore が mask と**同じコード経路**で連番を振ることが、連番の決定性(3.3 節)の要になる |
+
+テストの入力と期待値は `internal/transform/testdata/` にある(`app.log`、v1.1 の AWS の値と v1.2 のホスト名・URL のパスワードの `aws.log`、それぞれの mask の期待値、ファズテストの入力)。
 
 ### 主要な型・関数(案)
 
@@ -91,10 +77,10 @@ func Copy(w io.Writer, inputs ...io.Reader) error
 **label**
 
 ```go
-// 置換後の種別名。IP は区別を含む。並びは連番・--stats の出力順にも使う(aws_* は v1.1 で追加)。
+// 置換後の種別名。IP は区別を含む。並びは連番・--stats の出力順にも使う(aws_account・aws_s3_bucket は v1.1、aws_host は v1.2 で追加)。
 var Types = []string{"email", "ipv4_global", "ipv4_private", "ipv6_global", "ipv6_private", "secret", "uuid",
-    "aws_account", "aws_s3_bucket"}
-const NumTypes = 9                                  // len(Types)。統計・連番の表を固定長の配列で持つため
+    "aws_account", "aws_s3_bucket", "aws_host"}
+const NumTypes = 10                                 // len(Types)。統計・連番の表を固定長の配列で持つため
 
 type Format struct { ... }                          // '<{type}_{n}>' を前後・中間のリテラルに分解したもの
 func ParseFormat(s string) (Format, error)          // {type} と {n} を含まなければエラー
@@ -108,7 +94,7 @@ func ScanHashed(line []byte, hexLen int, fn func(start, end int))
 **detect**
 
 ```go
-type Kind uint8   // KindEmail, KindIPv4, KindIPv6, KindSecret, KindUUID, KindAWSAccount, KindAWSS3Bucket(0 は無効)
+type Kind uint8   // KindEmail, KindIPv4, KindIPv6, KindSecret, KindUUID, KindAWSAccount, KindAWSS3Bucket, KindAWSHost(0 は無効)
 type KindSet uint32 // ビット k が Kind k(v1.1 で uint8 から広げた。v1.2 の aws_host で 8 ビットを超えるため)
 type Class uint8  // ClassNone, ClassGlobal, ClassPrivate, ClassSpecial(IP のみ使用)
 
@@ -158,11 +144,16 @@ type finder interface {
 }
 ```
 
-検出器は、種別ごとのファイルにある(`email.go`、`ip.go`、`secret.go`、`uuid.go`、v1.1 の `aws.go`)。
+検出器は、種別ごとのファイルにある(`email.go`、`ip.go`、`secret.go`、`uuid.go`、v1.1 の `aws.go`。v1.2 の `aws_host` も `aws.go`)。
 v1.1 では、既存の検出器に形を加え(`secret` に AWS の署名、`ipv4` に EC2 のホスト名の IPv4。`ipv4Finder` は、
 ドット区切りの `dotted` と、ホスト名の `hosts` に分かれる)、`aws.go` に `aws_account`・`aws_s3_bucket` の検出器と、
 AWS の形の表(パーティション、ドメイン、リージョン、S3 のエンドポイント、ホスト名の末尾の条件)を置いた。
-将来のクラウドや、v1.2 の `aws_host` のホストの表も、同じ形で書き足す。
+将来のクラウドの表も、同じ形で書き足す。
+v1.2 では、`aws.go` に `aws_host` の検出器 `awsHostFinder` と、その「末尾の形」の表 `awsHostForms` を加えた。
+表の 1 行はサービス 1 つで、末尾の形(`.{region}.rds.{domain}` のように、`{region}`・`{domain}` と決まった語の並び)を持つ。
+サービスの追加は、表に行を足すだけで済む(終端ごとの手がかりと、手前の部品の照合は、表から作る)。
+`aws_account` の ECR・S3 Control のホストも、`accountHostMarkers` の表に行を足す形にした。
+`secret` に URL のパスワードを加え(`urlPasswordStart`)、`email` は、その形の `@` を候補にしない。重なりの解決の規則(3.1 節)は変えていない。
 
 前処理(3.4 節)用の `may(line, hint)` と `lineHint` は設けない。各検出器が `find` の先頭で、自分の手がかり
 (email は `'@'` の `bytes.IndexByte` など)を探し、なければすぐ戻る。
@@ -231,6 +222,14 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
   - 同じ長さのとき保護範囲が勝つ(`password=<secret_1>` の値 `<secret_1>` と保護範囲は同じ範囲)
   - この方式は仕様の「置換済みの形の文字列は検出しない」の解釈を含むため、**Q1** で確認する
 - mask の出力が、周囲の文字とつながって新しい候補を生まないことは、例を挙げて確かめきれないため、ファズテスト(`mask(mask(x)) == mask(x)`、hash も同様)で確認する
+- 見つかった問題の振り分け(v1.2 で決めた。仕様 7 章の冪等の但し書き):
+  - 直す: 現実にありうる形で、値が置換されずに残るもの。置換済みのログを流し直す使い方で、結果が変わるもの
+  - 直さず、[LIMITATIONS.md](../LIMITATIONS.md) の「冪等性」に書く: 値どうし・値と記号が区切りなしで密着するなど、手で作らない限り現れない形の冪等性の違反。その入力は `testdata/fuzz/` に加えない(`go test` が失敗し続けるため)
+  - ファズテストの探索(`-fuzz`)は、版のリリース前などに時間を決めて行い、見つかったものをこの基準で振り分ける。普段の `go test` は、`testdata/fuzz/` の入力と種だけを流す。現実的な形は、表のテストや合成ログの断片として加える
+- 冪等性のファズテスト(`FuzzMaskStable`・`FuzzHashStable`。`internal/transform/fuzz_test.go`)の入力は、現実的な断片の組み合わせ(v1.2 で変えた): ファズテストのバイト列を、断片の表(`fuzzFragments`。各種別の値・置換済みの形・文脈の語)と区切りの表(`fuzzSeparators`。空白を含む区切り・改行・JSON の区切り)の選び方として読み、行を組み立てる(`fragmentText`)。区切りなしの密着や、記号だけで断片を直接つなぐ形は作らない
+  - 断片・区切りを足すときは、ログ・テキストに実際に現れる形にする。記号が値に隣り合う形は、断片の中に書く
+  - 往復のファズテスト(`FuzzRestoreRoundTrip`)は、どの入力でも成り立つべき性質なので、任意の文字列のまま
+  - 以前の(任意の文字列を入力にしていた)ファズテストの種と、見つかって直した入力は、表のテスト `TestMaskAndHashStableOnExamples` に移した。今後、断片の組み合わせで見つかって直した入力は、`testdata/fuzz/` に加える(入力はバイト列の形)
 
 ### 3.3 restore が前提とする連番の決定性
 
@@ -249,18 +248,29 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 
 - 入出力: `bufio.Reader`(64KB)の `ReadSlice` で、改行までがバッファに収まる通常の行はコピーしない。`bufio.Writer` で書く。置換のない行は読んだスライスをそのまま書く
 - 前処理: 各検出器が、自分の手がかりを `bytes.IndexByte` / `bytes.Index` で探し、なければ戻る(行ごとに 1 回の走査で作るヒントの集合は、段階 3 の測定で約 14 倍遅かったため採用しない)
-  - email: `@` がある / IPv4: `.` と数字がある / IPv6: `:` がある / uuid: `-` があり、行の長さが 36 以上 / キー名ベース: `=` か `:` がある / 固定形式の secret: 接頭辞リテラルを `bytes.Index` で探す
+  - email: `@` がある / IPv4: `.` と数字がある / IPv6: `:` がある / uuid: `-` があり、行の長さが 36 以上 / キー名ベース: `=` か `:` がある / 固定形式の secret: 接頭辞の中の文中に少ない 1 バイトを `bytes.IndexByte` で探す(v1.2 の段階 7 で変更。下の v1.2 の性能の改善)
   - v1.1 で加えた手がかり:
     - AWS の署名(secret): `=` を探し、手前の 9 バイトが `signature`(大文字・小文字を区別しない)か、さらに手前が `x-amz-` かを照合する
     - EC2 のホスト名の IPv4(ipv4): `-` を探し、手前が `ec2` / `ip`、後ろが数字のときだけ、正規表現を当てる
     - aws_account: ARN は `:` を探し、手前が `arn` か。ECR と SQS は `.amazonaws.` を手がかりにし、手前のリージョンを遡って、その手前が `.dkr.ecr` / `.dkr.ecr-fips` / `sqs` / `queue` かを見る
-    - aws_s3_bucket: `s3://`・`s3a://`・`s3n://` は `://`、バーチャルホスト形式・パス形式は `.amazonaws.`、ARN は `:s3:::`
+    - aws_s3_bucket: `s3://`・`s3a://`・`s3n://` は `://`、バーチャルホスト形式・パス形式は `.amazonaws.`、ARN は `:s3:::`(v1.2 の段階 8 で、`://` と `:s3:::` は `:` の 1 回の走査にまとめた)
     - `.amazonaws.` は、`amazonaws` の中の `z` を `bytes.IndexByte` で探してから前後を照合する(`nextAmazonaws`。aws_account と aws_s3_bucket で共用)
+  - v1.2 で加えた手がかり:
+    - aws_account(S3 Control): ECR と同じ経路。`.amazonaws.` の手前のリージョンを遡り、その手前が `accountHostMarkers`(`.dkr.ecr`、`.dkr.ecr-fips`、`.s3-control`、`.s3-control.dualstack`、`.s3-control-fips`、`.s3-control-fips.dualstack`)かを見る
+    - aws_host: 末尾の形の終端(決まった語で終わる部分)ごとに、`hostHintRank` の順で選んだ文中に少ない 1 バイトを `bytes.IndexByte` で探し、前後を照合する。手がかりが同じ終端は 1 回の走査でまとめる。現在の走査は `z`(`.amazonaws.` と `.amazoncognito.com`)、`w`(`.on.aws`、`.ip.aws`、`.awsglobalaccelerator.com`、`.awsapprunner.com`)、`l`(`.cloudfront.net`、`.amplifyapp.com`、`.elasticbeanstalk.com`)の 3 回。手前の部品(リージョンと決まった語)は後ろから照合し、利用者ごとの部分は、英数字・`-`・`.` の続く範囲を遡る。遡った範囲は覚えておき(`hostRunCache`)、手がかりが続いても同じ範囲を遡り直さない(遡る長さの合計が行の長さ以内)
+    - URL のパスワード(secret)と、email の除外: `@` を探し(email と同じ手がかり)、手前を遡って `<スキーム>://<ユーザー>:<パスワード>` の形かを調べる(`urlPasswordStart`)。遡る範囲は、手前の `@`・`/`・空白などで止まる。`://` や `:` を手がかりにしないのは、`:` が時刻などで文中に多いため
+  - v1.2 の性能の改善(段階 7〜9。検出の結果は変えていない):
+    - 固定形式の secret: 接頭辞を、手がかりのバイトごとのまとまり `fixedPrefixes` にした(`A`: `AKIA`・`ASIA`・`AIza`、`g`: `gh`・`github_pat_`、`x`: `xox`、`k`: `sk`・`rk`、`J`: `eyJ`)。まとまりごとに 1 回走査し、次の出現位置を覚える。変更前は 9 つの接頭辞を `bytes.Index` で探しており、`sk` の `s`、`rk` の `r` などで遅い経路になっていた
+    - aws_s3_bucket: `://` と `:s3:::` を、`:` の `bytes.IndexByte` の 1 回の走査にまとめた(`colonForms`)
+    - aws_host: 終端を `bytes.HasPrefix` で照合する前に、終端の先頭の `.` と、手がかりの次の 1 バイトを比べる(`hostTerminal.nextMatches`)。`l` のように文中に多めの手がかりでも、外れを早く捨てられる
+    - 見送り: `.amazonaws.` の走査(`z`)と `:` の走査を、検出器の間で共有すること。共有しても減るのは数 % で、検出器の間で行ごとの前処理を共有する仕組み(上で採らなかった「行ごとのヒント」に近い)が要るため
   - **手がかりの先頭の文字が、文中に多い文字(英小文字の `a` `e` `i` `s`、`.` など)の場合は、`bytes.Index` で探さない。**
     `bytes.Index` は、先頭の 1 バイトを `bytes.IndexByte` で探して照合する経路で始まり、外れが多いと、遅い汎用の経路に切り替わる。
     手がかりの中の、文中に少ない 1 バイト(`:` `-` `=` `z` など)を `bytes.IndexByte` で探してから、前後を照合する
     - v1.1 の実測(8MB の合成ログ、1 パスあたり): `ec2-` / `ip-` の `bytes.Index` は約 5 倍遅く、既定の種別の `BenchmarkFind` が約 15% 落ちた(段階 3)。
       aws_account は、`arn:`・`.dkr.ecr`・`sqs.`・`queue.amazonaws.com` の `bytes.Index` で約 9.4ms、上の方法で約 1.7ms(段階 6 のあとの改善)
+    - v1.2 の実測(`BenchmarkAWSHostFinder`): 終端ごとに文中に少ない文字を選ぶと走査が 5 回(`z` `w` `f` `y` `k`)で約 1.73 GB/s、`f` に cloudfront.net と amplifyapp.com をまとめると 4 回で約 2.04 GB/s、`l` に 3 つの終端をまとめると 3 回で約 2.2 GB/s。走査の回数を減らすほうが、手がかりの一致の増加より効いた。文字の出現率は、合成ログとリポジトリの資料で確かめた(`z` 0.15〜0.3%、`w` 約 0.5〜0.7%、`l` 約 1.3〜1.6%)
+    - v1.2 の性能の改善の実測(8MB の合成ログ): 固定形式の secret は、`BenchmarkSecretFinder` で約 342 → 578 MB/s(接頭辞ごとに走査すると約 479 MB/s。まとまりごとのほうが速い)、既定の `BenchmarkFind` で約 213 → 297 MB/s。aws_s3_bucket は約 3.1 → 4.8 GB/s、aws_host は約 2.23 → 3.0 GB/s。合成ログの文字の出現率は `:` 約 2%、`s` 約 5%、`k` 約 1.7%、`g` 約 0.35%、`A` 約 0.2%、`x` 約 0.15%(plans/v1.2.0.md 3 章「性能の改善の調査」)
 - 正規表現は「アンカーの周辺だけ」に当てる(例: email は最初の `@` のローカルパートの先頭から、キー名ベースは区切り文字の手前から)。1MB の 1 行でも、手がかりのない区間に正規表現を当てない。段階 3 の測定では、行全体に当てる場合の約 15 倍速かった
 - メモリ割り当て: `Match` のスライス・出力バッファは再利用。map の参照は `m[string(b)]`(Go はこの形で割り当てしない)、新しい値のときだけ文字列を作る
 - 計測: 段階 2 でベンチマーク(`b.SetBytes` で MB/s を出す)と合成ログ生成器を用意し、段階 3 以降は毎回測って実装計画(plans/)の進捗欄に記録する。合成ログの中身(一致を含む行の割合など)は → Q29

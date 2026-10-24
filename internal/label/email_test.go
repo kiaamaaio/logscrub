@@ -1,6 +1,9 @@
 package label
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestEmailDomainEnd(t *testing.T) {
 	tests := []struct {
@@ -99,6 +102,58 @@ func TestIsHashedLocalPart(t *testing.T) {
 	}
 }
 
+func TestHashedAt(t *testing.T) {
+	tests := []struct {
+		in     string
+		i      int
+		hexLen int
+		want   int
+	}{
+		{"hash_3f9a1c0b7d2e", 0, 12, 17},
+		{"email_3f9a1c0b7d2eemail_2ec9724db863", 0, 12, 18},
+		{"email_3f9a1c0b7d2eemail_2ec9724db863", 18, 12, 36},
+		{"xhash_3f9a1c0b7d2e@", 1, 12, 18}, // 前後の文字は見ない
+		{"ipv4_global_3f9a1c0b7d2e", 0, 12, 24},
+		{"email_3f9a1c0b7d2", 0, 12, -1},
+		{"email_3F9A1C0B7D2E", 0, 12, -1},
+		{"foo_3f9a1c0b7d2e", 0, 12, -1},
+		{"hash_3f9a1c0b7d2e", 0, 0, -1},
+		{"hash_3f9a1c0b7d2e", 17, 12, -1},
+		{"hash_3f9a1c0b7d2e", 18, 12, -1},
+	}
+	for _, tt := range tests {
+		if got := HashedAt([]byte(tt.in), tt.i, tt.hexLen); got != tt.want {
+			t.Errorf("HashedAt(%q, %d, %d) = %d, want %d", tt.in, tt.i, tt.hexLen, got, tt.want)
+		}
+	}
+}
+
+// ドメインの末尾が、後ろの `hash_<hex>@` の `hash` に食い込むなら、その手前で終える(Q69)。
+func TestDomainEndBeforeHashed(t *testing.T) {
+	tests := []struct {
+		in   string
+		want int // b[2:] のドメインの末尾
+	}{
+		{"x@0.AAhash_387ee2c18c54@0.AA", 6},
+		{"x@a.example.comhash_387ee2c18c54@0.AA", 15},
+		{"x@a.bhash_387ee2c18c54@0.AA", -1},   // 手前で終えるとドメインにならない
+		{"x@a.co.bhash_387ee2c18c54@0.AA", 6}, // 手前の英字だけのラベルで終える
+		{"x@0.AAhash_387ee2c18c54x@0.AA", 10}, // `@` が続かない
+		{"x@0.AAhash_387ee2c18c5@0.AA", 10},   // 桁数が違う
+		{"x@0.AAhash_387EE2C18C54@0.AA", 10},  // 大文字
+		{"x@0.AAhash_387ee2c18c54", 10},       // 行末
+		{"x@0.AAxhash_387ee2c18c54@0.AA", 7},  // 食い込んだ `hash` の手前
+		{"x@0.AAemail_387ee2c18c54@0.AA", 11}, // `hash_` でない
+		{"x@0.hash_387ee2c18c54@0.AA", -1},    // TLD が `hash` だけ
+	}
+	for _, tt := range tests {
+		b := []byte(tt.in)
+		if got := DomainEndBeforeHashed(b, 2, EmailDomainEnd(b, 2), 12); got != tt.want {
+			t.Errorf("DomainEndBeforeHashed(%q) = %d, want %d", tt.in, got, tt.want)
+		}
+	}
+}
+
 func TestFormatIsLabel(t *testing.T) {
 	for _, tt := range []struct {
 		format string
@@ -128,6 +183,41 @@ func TestFormatIsLabel(t *testing.T) {
 		}
 	}
 	if (Format{}).IsLabel([]byte("<email_1>")) {
+		t.Error("the zero Format matched")
+	}
+}
+
+func TestFormatEndsAt(t *testing.T) {
+	for _, tt := range []struct {
+		format string
+		line   string
+		e      int
+		want   bool
+	}{
+		{"<{type}_{n}>", "<email_1>passwd", 9, true},
+		{"<{type}_{n}>", "x<ipv4_global_12>y", 17, true},
+		{"<{type}_{n}>", "<aws_s3_bucket_" + strings.Repeat("9", 18) + ">", 34, true}, // 最も長い種別名と連番
+		{"<{type}_{n}>", "<email_1>passwd", 8, false},
+		{"<{type}_{n}>", "<email_1>passwd", 10, false},
+		{"<{type}_{n}>", "email_1>", 8, false},
+		{"<{type}_{n}>", "<email_0>", 9, false},
+		{"<{type}_{n}>", "<email_1>", 0, false},
+		{"<{type}_{n}>", "<email_1>", 10, false},
+		{"{type}_{n}", "email_12", 8, true},
+		{"{type}_{n}", "email_12", 7, false}, // 連番の途中
+		{"{type}_{n}", "xemail_1", 8, true},  // 前の文字は見ない(Scan と違い、e で終わるものを探す)
+		{"[{type}-{n}]", "a[secret-3]b", 11, true},
+		{"{n}-{type}", "7-uuid", 6, true},
+	} {
+		f, err := ParseFormat(tt.format)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := f.EndsAt([]byte(tt.line), tt.e); got != tt.want {
+			t.Errorf("%q.EndsAt(%q, %d) = %v, want %v", tt.format, tt.line, tt.e, got, tt.want)
+		}
+	}
+	if (Format{}).EndsAt([]byte("<email_1>"), 9) {
 		t.Error("the zero Format matched")
 	}
 }

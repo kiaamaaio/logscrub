@@ -104,7 +104,7 @@ func TestAppendKeepsExistingBytes(t *testing.T) {
 }
 
 func TestTypesAreTheDocumentedSet(t *testing.T) {
-	want := []string{"email", "ipv4_global", "ipv4_private", "ipv6_global", "ipv6_private", "secret", "uuid", "aws_account", "aws_s3_bucket"}
+	want := []string{"email", "ipv4_global", "ipv4_private", "ipv6_global", "ipv6_private", "secret", "uuid", "aws_account", "aws_s3_bucket", "aws_host"}
 	if !equal(Types, want) {
 		t.Errorf("Types = %q, want %q", Types, want)
 	}

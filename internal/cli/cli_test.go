@@ -358,7 +358,7 @@ func TestInvalidOptionValuesAreErrors(t *testing.T) {
 		{"mask", "--mode", "encrypt"},
 		{"restore", "--source", "x", "--types", "foo"},
 		{"mask", "--types", "AWS"},
-		{"mask", "--types", "default,aws_host"},
+		{"mask", "--types", "default,aws_hosts"},
 		{"restore", "--source", "x", "--types", "aws_"},
 		{"restore", "--source", "x", "--mask-format", "{n}"},
 	} {
@@ -378,7 +378,7 @@ func TestInvalidOptionValuesAreErrors(t *testing.T) {
 func TestOverlapsAndKinds(t *testing.T) {
 	for in, want := range map[string]string{
 		"::ffff:10.0.0.1\n":                               "<ipv6_private_1>\n",
-		"https://user:pass@10.0.0.1/\n":                   "https://user:pass@<ipv4_private_1>/\n",
+		"https://user:pass@10.0.0.1/\n":                   "https://user:<secret_1>@<ipv4_private_1>/\n",
 		"10.0.0.1:8080 [::1]:8080 10.0.0.0/8\n":           "<ipv4_private_1>:8080 [<ipv6_private_1>]:8080 <ipv4_private_2>/8\n",
 		"0.0.0.0 255.255.255.255 :: 224.0.0.1\n":          "0.0.0.0 255.255.255.255 :: 224.0.0.1\n",
 		"999.1.1.1 1.2 1.2.3.4.5\n":                       "999.1.1.1 1.2 1.2.3.4.5\n",
@@ -788,7 +788,7 @@ func TestHelp(t *testing.T) {
 		}
 	}
 	// --types の説明に、種別とまとまりを出す
-	for _, want := range []string{"uuid", "aws_account", "aws_s3_bucket", "default", "aws,", "cloud"} {
+	for _, want := range []string{"uuid", "aws_account", "aws_s3_bucket", "aws_host", "default", "aws,", "cloud"} {
 		if !strings.Contains(r.stdout, want) {
 			t.Errorf("mask --help lacks %q", want)
 		}
@@ -804,7 +804,7 @@ func TestTypesCommand(t *testing.T) {
 	}
 	// 1 行 1 種別(種別 ID、既定、説明)。共通の種別のあとに、クラウドごとにまとめる(仕様 6 章)。
 	wantDefault := map[string]string{
-		"email": "on", "ipv4": "on", "ipv6": "on", "secret": "on", "uuid": "off", "aws_account": "off", "aws_s3_bucket": "off",
+		"email": "on", "ipv4": "on", "ipv6": "on", "secret": "on", "uuid": "off", "aws_account": "off", "aws_s3_bucket": "off", "aws_host": "off",
 	}
 	var order []string
 	for _, line := range strings.Split(r.stdout, "\n") {
@@ -819,7 +819,7 @@ func TestTypesCommand(t *testing.T) {
 			}
 		}
 	}
-	if got := strings.Join(order, ","); got != "email,ipv4,ipv6,secret,uuid,aws_account,aws_s3_bucket" {
+	if got := strings.Join(order, ","); got != "email,ipv4,ipv6,secret,uuid,aws_account,aws_s3_bucket,aws_host" {
 		t.Errorf("type order: %s", got)
 	}
 	if !strings.Contains(r.stdout, "\nAWS:\naws_account ") {
@@ -828,8 +828,8 @@ func TestTypesCommand(t *testing.T) {
 	// 最後に、まとまりと、それぞれに含まれる種別。
 	if !strings.HasSuffix(r.stdout, "\nGroups for --types:\n"+
 		"  default  email, ipv4, ipv6, secret\n"+
-		"  aws      aws_account, aws_s3_bucket\n"+
-		"  cloud    aws_account, aws_s3_bucket\n") {
+		"  aws      aws_account, aws_s3_bucket, aws_host\n"+
+		"  cloud    aws_account, aws_s3_bucket, aws_host\n") {
 		t.Errorf("types lacks the groups:\n%s", r.stdout)
 	}
 	if strings.Contains(r.stdout, "AKIA") {
@@ -1013,3 +1013,308 @@ func TestStdoutOnlyHasTheTransformedText(t *testing.T) {
 }
 
 var _ io.Writer = failingWriter{}
+
+// 受け入れ基準(仕様 9 章「AWS のホスト名」): 利用者ごとの部分だけが <aws_host_N> になり、サービス名・リージョン・
+// ドメインは残る。同じホスト名は同じラベル、違うホスト名は別のラベルになる。既定の種別では置換されない。
+func TestAWSHost(t *testing.T) {
+	in := "db mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432 from 10.0.0.1\n" +
+		"lb my-alb-1234567890.ap-northeast-1.elb.amazonaws.com my-nlb-0123456789abcdef.elb.ap-northeast-1.amazonaws.com\n" +
+		"cdn d111111abcdef8.cloudfront.net again mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com\n" +
+		"env my-env.ap-northeast-1.elasticbeanstalk.com fn abcdefghij0123456789klmnop.lambda-url.ap-northeast-1.on.aws\n" +
+		"mail admin@mydb.c9akciq32.ap-northeast-1.rds.amazonaws.com api https://kafka.ap-northeast-1.amazonaws.com/ data-ats.iot.us-east-1.amazonaws.com api.tunneling.iot.us-east-1.amazonaws.com\n" +
+		"ec2 ec2-54-250-1-2.ap-northeast-1.compute.amazonaws.com bucket my-bucket.s3.ap-northeast-1.amazonaws.com\n"
+	wantHosts := "db <aws_host_1>.ap-northeast-1.rds.amazonaws.com:5432 from 10.0.0.1\n" +
+		"lb <aws_host_2>.ap-northeast-1.elb.amazonaws.com <aws_host_3>.elb.ap-northeast-1.amazonaws.com\n" +
+		"cdn <aws_host_4>.cloudfront.net again <aws_host_1>.ap-northeast-1.rds.amazonaws.com\n" +
+		"env <aws_host_5>.ap-northeast-1.elasticbeanstalk.com fn <aws_host_6>.lambda-url.ap-northeast-1.on.aws\n" +
+		"mail <email_1> api https://kafka.ap-northeast-1.amazonaws.com/ data-ats.iot.us-east-1.amazonaws.com api.tunneling.iot.us-east-1.amazonaws.com\n" +
+		"ec2 ec2-54-250-1-2.ap-northeast-1.compute.amazonaws.com bucket my-bucket.s3.ap-northeast-1.amazonaws.com\n"
+	// 既定の種別では置換されない(IP アドレスとメールアドレスだけ)
+	def := run(t, in, nil, "mask")
+	if def.code != 0 || strings.Contains(def.stdout, "aws_host") || !strings.Contains(def.stdout, "<email_1>") {
+		t.Errorf("default types: %+v", def)
+	}
+	// --types aws_host だけ: ホスト名だけが置換される(メールアドレスのホスト名は、長いメールアドレスが優先されるが、
+	// email が無効なので、この種別だけでは aws_host になる)
+	only := run(t, in, nil, "mask", "--types", "aws_host", "--stats")
+	wantOnly := strings.Replace(wantHosts, "mail <email_1>", "mail admin@<aws_host_7>.ap-northeast-1.rds.amazonaws.com", 1)
+	if only.code != 0 || only.stdout != wantOnly || only.stderr != "logscrub: aws_host=8\n" {
+		t.Errorf("--types aws_host: %+v\nwant stdout %q", only, wantOnly)
+	}
+	// 既定の種別と合わせると、メールアドレスが優先され、EC2 のホスト名の IPv4 は ipv4 として置換される
+	both := run(t, in, nil, "mask", "--types", "default,aws_host")
+	wantBoth := strings.Replace(wantHosts, "from 10.0.0.1", "from <ipv4_private_1>", 1)
+	wantBoth = strings.Replace(wantBoth, "ec2-54-250-1-2.", "ec2-<ipv4_global_1>.", 1)
+	if both.code != 0 || both.stdout != wantBoth {
+		t.Errorf("default,aws_host: %+v\nwant stdout %q", both, wantBoth)
+	}
+	// まとまり aws・cloud にも含まれる。--stats は aws_s3_bucket のあと
+	st := run(t, in, nil, "mask", "--types", "default,aws", "--stats")
+	if st.code != 0 || !strings.HasSuffix(st.stderr, "logscrub: aws_s3_bucket=1\nlogscrub: aws_host=7\n") {
+		t.Errorf("--stats: %q", st.stderr)
+	}
+	if c := run(t, in, nil, "mask", "--types", "cloud"); !strings.Contains(c.stdout, "<aws_host_6>") {
+		t.Errorf("cloud: %+v", c)
+	}
+	// restore の往復、mask・hash の冪等性
+	dir := t.TempDir()
+	src := writeFile(t, dir, "app.log", in)
+	for _, types := range []string{"aws_host", "default,aws"} {
+		masked := run(t, "", nil, "mask", "--types", types, src)
+		if back := run(t, masked.stdout, nil, "restore", "--source", src, "--types", types); back.code != 0 || back.stdout != in {
+			t.Errorf("restore (%s): %+v", types, back)
+		}
+		if again := run(t, masked.stdout, nil, "mask", "--types", types); again.stdout != masked.stdout {
+			t.Errorf("mask (%s) is not idempotent: %q", types, again.stdout)
+		}
+		env := map[string]string{keyEnv: "test-key"}
+		h := run(t, in, env, "mask", "--mode", "hash", "--types", types)
+		if h.code != 0 || strings.Contains(h.stdout, "cluster-c9akciq32") || !strings.Contains(h.stdout, "aws_host_") {
+			t.Fatalf("hash (%s): %+v", types, h)
+		}
+		if again := run(t, h.stdout, env, "mask", "--mode", "hash", "--types", types); again.stdout != h.stdout {
+			t.Errorf("hash (%s) is not idempotent:\n%s\n%s", types, h.stdout, again.stdout)
+		}
+	}
+}
+
+// v1.2 段階 4: S3 Control のホストのアカウント ID(ECR・ARN と同じ値は同じラベル)。既定の種別では置換されない。
+func TestAWSAccountS3Control(t *testing.T) {
+	in := "ctl 123456789012.s3-control.ap-northeast-1.amazonaws.com and 123456789012.s3-control.dualstack.us-east-1.amazonaws.com\n" +
+		"ecr 123456789012.dkr.ecr.us-east-1.amazonaws.com/app arn:aws:iam::210987654321:role/x api s3-control.us-east-1.amazonaws.com\n"
+	want := "ctl <aws_account_1>.s3-control.ap-northeast-1.amazonaws.com and <aws_account_1>.s3-control.dualstack.us-east-1.amazonaws.com\n" +
+		"ecr <aws_account_1>.dkr.ecr.us-east-1.amazonaws.com/app arn:aws:iam::<aws_account_2>:role/x api s3-control.us-east-1.amazonaws.com\n"
+	if r := run(t, in, nil, "mask"); r.code != 0 || r.stdout != in {
+		t.Errorf("default types: %+v", r)
+	}
+	for _, types := range []string{"aws_account", "aws", "cloud"} {
+		if r := run(t, in, nil, "mask", "--types", types); r.code != 0 || r.stdout != want {
+			t.Errorf("--types %s: %+v\nwant %q", types, r, want)
+		}
+	}
+	dir := t.TempDir()
+	src := writeFile(t, dir, "app.log", in)
+	masked := run(t, "", nil, "mask", "--types", "aws_account", src)
+	if back := run(t, masked.stdout, nil, "restore", "--source", src, "--types", "aws_account"); back.code != 0 || back.stdout != in {
+		t.Errorf("restore: %+v", back)
+	}
+	env := map[string]string{keyEnv: "test-key"}
+	h := run(t, in, env, "mask", "--mode", "hash", "--types", "aws_account")
+	if h.code != 0 || strings.Contains(h.stdout, "123456789012") || strings.Count(h.stdout, "aws_account_") != 4 {
+		t.Fatalf("hash: %+v", h)
+	}
+	if again := run(t, h.stdout, env, "mask", "--mode", "hash", "--types", "aws_account"); again.stdout != h.stdout {
+		t.Errorf("hash is not idempotent:\n%s\n%s", h.stdout, again.stdout)
+	}
+}
+
+// 受け入れ基準(仕様 9 章「URL のパスワード」。v1.2): パスワードの部分だけが <secret_N> になり、メールアドレスとして
+// 置換されない。既定の動作の変更(v1.1 までは <email_N> になる、またはパスワードが残る)。
+// hash の出力(`email_<16 進数>`)の後ろに `://` が続いても、16 進数の部分を URL のスキームとして読まない(Q64)。
+// 読むと、2 回目に URL のパスワードとして置換され直す(冪等性の違反。ファズテストで見つかった)。
+func TestURLPasswordAfterHashOutput(t *testing.T) {
+	in := "0@0.ZA://:0@0\nfrom a@b.example.com://u:p@db\nx_https://u:p@h\n"
+	env := map[string]string{keyEnv: "test-key"}
+	for _, mode := range [][]string{{"--mode", "mask"}, {"--mode", "hash"}, {"--mode", "hash", "--email-hash", "local"}} {
+		once := run(t, in, env, append([]string{"mask"}, mode...)...)
+		if once.code != 0 {
+			t.Fatalf("%v: %+v", mode, once)
+		}
+		if again := run(t, once.stdout, env, append([]string{"mask"}, mode...)...); again.stdout != once.stdout {
+			t.Errorf("%v is not idempotent:\n%s\n%s", mode, once.stdout, again.stdout)
+		}
+	}
+	// スキームの直前が `_` の形は、URL のパスワードとして扱わない(`p@h` は、ドメインに `.` がないのでメールアドレスでもない)
+	if r := run(t, "x_https://u:p@h\n", nil, "mask"); r.stdout != "x_https://u:p@h\n" {
+		t.Errorf("underscore before scheme: %q", r.stdout)
+	}
+}
+
+// `::` を 2 つ含む連なりの直後にメールアドレスが続く形(Q67)。hash の出力が 16 進数の英字で始まっても、
+// 2 回目に IPv6 として置換しないこと。
+func TestIPv6RunBeforeHashOutput(t *testing.T) {
+	in := "::1::0@0.AA\nfe80::1::a@b.example.com\n::1::x\n"
+	env := map[string]string{keyEnv: "test-key"}
+	for _, args := range [][]string{{"--mode", "mask"}, {"--mode", "hash"}, {"--mode", "hash", "--email-hash", "local"}} {
+		once := run(t, in, env, append([]string{"mask"}, args...)...)
+		if once.code != 0 || strings.Contains(once.stdout, "ipv6") {
+			t.Fatalf("%v: %+v", args, once)
+		}
+		if again := run(t, once.stdout, env, append([]string{"mask"}, args...)...); again.stdout != once.stdout {
+			t.Errorf("%v is not idempotent:\n%s\n%s", args, once.stdout, again.stdout)
+		}
+	}
+	// v1.1 までは `<ipv6_private_1>::x` になっていた
+	if r := run(t, "::1::x\n", nil, "mask"); r.stdout != "::1::x\n" {
+		t.Errorf("mask: %q", r.stdout)
+	}
+}
+
+// 置換される値の直後にキー名の語が続く形(Q66)。2 回流しても変わらないこと(mask・hash・別の書式・aws の種別)。
+// キー名ベースの値が、パスワードが置換されていない URL で、ユーザーの部分か `@` の直後が置換済みの形なら、値全体を
+// キー名ベースの値として置換する。パスワードが出力に残らない(Q68)。
+func TestKeyedURLWithReplacedParts(t *testing.T) {
+	in := "password=https://u:s3cret@<aws_host_1>.ap-northeast-1.rds.amazonaws.com/\n" +
+		`"password": "https://u:s3cret@<ipv4_private_1>:5432/app"` + "\n" +
+		"password=https://<uuid_1>:s3cret@db-host/app\n"
+	want := "password=<secret_1>\n" + `"password": "<secret_2>"` + "\n" + "password=<secret_3>\n"
+	if r := run(t, in, nil, "mask"); r.code != 0 || r.stdout != want {
+		t.Errorf("mask: %+v\nwant %q", r, want)
+	}
+	env := map[string]string{keyEnv: "test-key"}
+	for _, args := range [][]string{{"--mode", "mask"}, {"--mode", "hash"}, {"--types", "default,aws"}} {
+		once := run(t, in, env, append([]string{"mask"}, args...)...)
+		if once.code != 0 || strings.Contains(once.stdout, "s3cret") {
+			t.Fatalf("%v: %+v", args, once)
+		}
+		if again := run(t, once.stdout, env, append([]string{"mask"}, args...)...); again.stdout != once.stdout {
+			t.Errorf("%v is not idempotent:\n%s\n%s", args, once.stdout, again.stdout)
+		}
+	}
+}
+
+// 区切りなしで続くメールアドレスは、どのモードでも、再度流しても変わらない(Q69)。
+func TestAdjacentEmails(t *testing.T) {
+	in := "0@0.AA%@0.AA@0.AA\nfrom a@b.example.com-@c.example.com@d.example.com\n"
+	env := map[string]string{keyEnv: "test-key"}
+	for _, args := range [][]string{
+		{"--mode", "mask"}, {"--mode", "hash"}, {"--mode", "hash", "--email-hash", "local"},
+		{"--mask-format", "{type}_{n}"}, {"--mask-format", "{type}-{n}"},
+	} {
+		once := run(t, in, env, append([]string{"mask"}, args...)...)
+		if once.code != 0 || strings.Contains(once.stdout, "a@b.") {
+			t.Fatalf("%v: %+v", args, once)
+		}
+		if again := run(t, once.stdout, env, append([]string{"mask"}, args...)...); again.stdout != once.stdout {
+			t.Errorf("%v is not idempotent:\n%s\n%s", args, once.stdout, again.stdout)
+		}
+	}
+	// 1 回目の結果は v1.1 と同じ
+	want := "email_1email_2@0.AA\nfrom email_3email_4@d.example.com\n"
+	if r := run(t, in, nil, "mask", "--mask-format", "{type}_{n}"); r.stdout != want {
+		t.Errorf("mask: %q, want %q", r.stdout, want)
+	}
+}
+
+// URL のユーザー・パスワードは `@` を含んでよい。ホストの手前の最後の `@` で、ユーザー情報とホストを分ける(Q70)。
+func TestURLPasswordAtInUserinfo(t *testing.T) {
+	in := "azure postgres://myadmin@mydemoserver:s3cret@10.0.0.5:5432/db\n" +
+		"azure postgres://myadmin@mydemoserver:s3cret@mydemoserver.postgres.database.azure.com:5432/db\n" +
+		"git https://bob@example.com:pw@10.0.0.1/repo\n" +
+		"keyed password=postgres://myadmin@srv:s3cret@10.0.0.6/db\n"
+	want := "azure postgres://myadmin@mydemoserver:<secret_1>@<ipv4_private_1>:5432/db\n" +
+		"azure postgres://myadmin@mydemoserver:<secret_1>@mydemoserver.postgres.database.azure.com:5432/db\n" +
+		"git https://<email_1>:<secret_2>@<ipv4_private_2>/repo\n" +
+		"keyed password=postgres://myadmin@srv:<secret_1>@<ipv4_private_3>/db\n"
+	if r := run(t, in, nil, "mask"); r.code != 0 || r.stdout != want {
+		t.Errorf("mask: %+v\nwant %q", r, want)
+	}
+	dir := t.TempDir()
+	src := writeFile(t, dir, "app.log", in)
+	env := map[string]string{keyEnv: "test-key"}
+	for _, types := range []string{"default", "default,aws"} {
+		masked := run(t, "", nil, "mask", "--types", types, src)
+		if back := run(t, masked.stdout, nil, "restore", "--source", src, "--types", types); back.code != 0 || back.stdout != in {
+			t.Errorf("restore (%s): %+v", types, back)
+		}
+		if again := run(t, masked.stdout, nil, "mask", "--types", types); again.stdout != masked.stdout {
+			t.Errorf("mask (%s) is not idempotent: %q", types, again.stdout)
+		}
+		h := run(t, in, env, "mask", "--mode", "hash", "--types", types)
+		if h.code != 0 || strings.Contains(h.stdout, "s3cret") || strings.Contains(h.stdout, ":pw@") {
+			t.Fatalf("hash (%s): %+v", types, h)
+		}
+		if again := run(t, h.stdout, env, "mask", "--mode", "hash", "--types", types); again.stdout != h.stdout {
+			t.Errorf("hash (%s) is not idempotent:\n%s\n%s", types, h.stdout, again.stdout)
+		}
+	}
+}
+
+func TestKeyNameAfterReplacedValue(t *testing.T) {
+	in := "0.0.0.1passwd=0\nclient 10.0.0.1passwd=s3cret\n10.0.0.1.password=x\n"
+	env := map[string]string{keyEnv: "test-key"}
+	for _, args := range [][]string{
+		{"--mode", "mask"}, {"--mode", "hash"}, {"--mode", "hash", "--email-hash", "local"},
+		{"--mask-format", "[{type}:{n}]"}, {"--types", "default,aws"},
+	} {
+		once := run(t, in, env, append([]string{"mask"}, args...)...)
+		if once.code != 0 {
+			t.Fatalf("%v: %+v", args, once)
+		}
+		if again := run(t, once.stdout, env, append([]string{"mask"}, args...)...); again.stdout != once.stdout {
+			t.Errorf("%v is not idempotent:\n%s\n%s", args, once.stdout, again.stdout)
+		}
+	}
+	// 1 回目の結果は v1.1 と同じ(キー名が数字とくっついた形は、キー名として読まない)
+	want := "<ipv4_global_1>passwd=0\nclient <ipv4_private_1>passwd=s3cret\n<ipv4_private_1>.password=<secret_1>\n"
+	if r := run(t, in, nil, "mask"); r.stdout != want {
+		t.Errorf("mask: %q, want %q", r.stdout, want)
+	}
+	// ラベルの直後のキー名の値は、置換しない
+	if r := run(t, "<email_1>password=abc <email_1> password=abc\n", nil, "mask"); r.stdout != "<email_1>password=abc <email_1> password=<secret_1>\n" {
+		t.Errorf("label before key: %q", r.stdout)
+	}
+}
+
+func TestURLPassword(t *testing.T) {
+	in := "db postgres://app:s3cret@db.example.com:5432/app\n" +
+		"rds postgres://app:s3cret@mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432/app\n" +
+		"cache redis://:other@10.0.0.5:6379 ftp://u:a:b@host.example.org\n" +
+		"web https://user:pass@10.0.0.1/ and https://taro@example.com/ and password=s3cret\n" +
+		`{"origin":"https://app.example.com","email":"bob@example.com"}` + "\n" +
+		"scheme passwd://u:&x@db.example.com/ token://abc password: //x\n" +
+		`keyed password=https://u:p&q@db.example.com/ token="postgres://app:s3cret@db/" secret=redis://:&x@10.0.0.6 token=https://hooks.example.com/T000/XXXX` + "\n"
+	wantDefault := "db postgres://app:<secret_1>@db.example.com:5432/app\n" +
+		"rds postgres://app:<secret_1>@mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432/app\n" +
+		"cache redis://:<secret_2>@<ipv4_private_1>:6379 ftp://u:<secret_3>@host.example.org\n" +
+		"web https://user:<secret_4>@<ipv4_private_2>/ and https://<email_1>/ and password=<secret_1>\n" +
+		// パスのない URL の後ろの JSON の値は、ユーザー情報として読まない(Q60)
+		`{"origin":"https://app.example.com","email":"<email_2>"}` + "\n" +
+		// キー名と同じ語のスキームは、キーと値の組として読まない(Q63)。区切りの後ろに空白があれば、キー名ベース
+		"scheme passwd://u:<secret_5>@db.example.com/ token://abc password: <secret_6>\n" +
+		// キー名ベースの値が URL のパスワードの形で始まるものは、パスワードだけ(Q65)。ユーザー情報のない URL は、値全体
+		`keyed password=https://u:<secret_7>@db.example.com/ token="postgres://app:<secret_1>@db/" secret=redis://:<secret_5>@<ipv4_private_3> token=<secret_8>` + "\n"
+	if r := run(t, in, nil, "mask"); r.code != 0 || r.stdout != wantDefault {
+		t.Errorf("default: %+v\nwant %q", r, wantDefault)
+	}
+	// aws_host も有効なら、ホスト名の情報が残る
+	wantAWS := strings.Replace(wantDefault, "@mydb.cluster-c9akciq32.ap-northeast-1.rds", "@<aws_host_1>.ap-northeast-1.rds", 1)
+	if r := run(t, in, nil, "mask", "--types", "default,aws"); r.code != 0 || r.stdout != wantAWS {
+		t.Errorf("default,aws: %+v\nwant %q", r, wantAWS)
+	}
+	// secret が無効でも、メールアドレスとして扱わない(Q54)。パスワードは残る
+	wantEmail := strings.NewReplacer("https://taro@example.com/", "https://<email_1>/", `"bob@example.com"`, `"<email_2>"`).Replace(in)
+	if r := run(t, in, nil, "mask", "--types", "email"); r.code != 0 || r.stdout != wantEmail {
+		t.Errorf("email only: %+v\nwant %q", r, wantEmail)
+	}
+	// restore の往復、mask・hash の冪等性
+	dir := t.TempDir()
+	src := writeFile(t, dir, "app.log", in)
+	for _, types := range []string{"default", "default,aws"} {
+		masked := run(t, "", nil, "mask", "--types", types, src)
+		if back := run(t, masked.stdout, nil, "restore", "--source", src, "--types", types); back.code != 0 || back.stdout != in {
+			t.Errorf("restore (%s): %+v", types, back)
+		}
+		if again := run(t, masked.stdout, nil, "mask", "--types", types); again.stdout != masked.stdout {
+			t.Errorf("mask (%s) is not idempotent: %q", types, again.stdout)
+		}
+		env := map[string]string{keyEnv: "test-key"}
+		h := run(t, in, env, "mask", "--mode", "hash", "--types", types)
+		if h.code != 0 || strings.Contains(h.stdout, "s3cret") || strings.Contains(h.stdout, "pass@") || strings.Contains(h.stdout, "bob@") || strings.Contains(h.stdout, "&q@") || !strings.Contains(h.stdout, ":secret_") {
+			t.Fatalf("hash (%s): %+v", types, h)
+		}
+		if again := run(t, h.stdout, env, "mask", "--mode", "hash", "--types", types); again.stdout != h.stdout {
+			t.Errorf("hash (%s) is not idempotent:\n%s\n%s", types, h.stdout, again.stdout)
+		}
+	}
+	// --stats
+	if r := run(t, in, nil, "mask", "--stats"); !strings.Contains(r.stderr, "logscrub: secret=12\n") || !strings.Contains(r.stderr, "logscrub: email=2\n") {
+		t.Errorf("--stats: %q", r.stderr)
+	}
+	// 対応形式の一覧
+	for _, args := range [][]string{{"types", "--verbose"}, {"mask", "--help"}} {
+		if r := run(t, "", nil, args...); r.code != 0 || !strings.Contains(r.stdout, "URL password") {
+			t.Errorf("%v lacks the URL password format", args)
+		}
+	}
+}

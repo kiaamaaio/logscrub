@@ -20,6 +20,8 @@ const secretFormatsHelp = `Supported secret formats:
   AWS access key ID     AKIA or ASIA + 16 uppercase letters or digits
   AWS signature (SigV4) exactly 64 lowercase hex digits after X-Amz-Signature= or
                         Signature= (presigned URLs, AWS4-HMAC-SHA256 Authorization)
+  URL password          the password in scheme://user:password@host (the user may be
+                        empty); the @ is then not treated as an email address
   GitHub                ghp_ gho_ ghu_ ghs_ ghr_ + 36 or more alphanumerics;
                         github_pat_ + 22 or more alphanumerics or _
   Slack                 xoxb- xoxp- xoxa- xoxr- xoxs- + 10 or more alphanumerics or -
@@ -47,10 +49,11 @@ Options (they may be written before or after FILE):
   --mode mask|hash          mask: <email_1> style labels (default).
                             hash: <type>_<hex> using HMAC-SHA256; cannot be restored.
   --types LIST              comma separated types: email, ipv4, ipv6, secret, uuid,
-                            aws_account, aws_s3_bucket; or groups: default, aws,
-                            cloud. Only the listed types are replaced (add
-                            "default" to keep the default ones). Default: default
-                            (email, ipv4, ipv6, secret; uuid and aws_* are off).
+                            aws_account, aws_s3_bucket, aws_host; or groups:
+                            default, aws, cloud. Only the listed types are
+                            replaced (add "default" to keep the default ones).
+                            Default: default (email, ipv4, ipv6, secret; uuid
+                            and aws_* are off).
                             Run "logscrub types" for the list.
   --uuid-versions 4,7       replace only these UUID versions (1-8); enables uuid.
   --ip-scope all|global|private
