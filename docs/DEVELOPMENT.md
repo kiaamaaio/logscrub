@@ -40,32 +40,18 @@
 
 ## 2. パッケージ構成と主要な型・関数
 
-仕様 8 章の構成を土台に、3 つのパッケージ(`cli`、`label`、`synthlog`)を追加する。
+パッケージ構成(ディレクトリと、それぞれの役割)は、仕様 8 章が正本。ここには、構成を決めたときの理由を残す。
 
-```
-logscrub/
-├── go.mod                       # 依存なし
-├── README.md
-├── cmd/logscrub/main.go         # os.Exit(cli.Run(...)) だけの薄い入口
-├── internal/
-│   ├── cli/                     # 【追加】サブコマンド振り分け・flag 解析・終了コード
-│   ├── label/                   # 【追加】--mask-format の解析/生成/走査、hash 出力形の走査
-│   ├── detect/                  # 種別ごとの検出、重なりの解決、置換対象外の除外
-│   ├── transform/               # mask.go, hash.go, restore.go, engine.go(行の書き換え)
-│   ├── stream/                  # 行単位の入出力(改行コード・末尾改行の保持)
-│   └── synthlog/                # 【追加】性能測定用の合成ログの生成器(Q29。v1.1 で AWS の値を含める設定を追加。Q39。v1.2 で AWS のサービスのホスト名と URL のパスワードも含める)
-└── (各パッケージの testdata/)   # 往復テスト・E2E 用の入力と期待出力(実際は internal/transform/testdata/。
-                                 #   app.log と、v1.1 の AWS の値と v1.2 のホスト名・URL のパスワードの aws.log、それぞれの mask の期待値)
-```
+### 仕様の最初の構成に加えたもの(v1.0 の計画で決めた)
 
-### 仕様 8 章から変える点と理由
-
-| 変更 | 理由 |
+| 追加 | 理由 |
 |---|---|
-| `internal/label` を追加 | ラベルの書式は「mask で生成」「restore で読み取り」「検出時に置換済みとして除外」の 3 か所で使う。`detect` に置くと `transform` → `detect` の依存は良いが、書式の責務が検出に混ざる。`transform` に置くと `detect` → `transform` の循環になる。独立させて両方から使う |
-| `internal/cli` を追加し、`main.go` は薄くする | `cli.Run(args, stdin, stdout, stderr, getenv) int` にすると、終了コード・stdout/stderr の分離・オプション順序などの受け入れ基準を、バイナリを作らずにテストで確認できる |
-| `internal/synthlog` を追加 | ベンチマーク(段階 2〜)と性能測定(段階 11)で同じ合成ログを使うため。テスト以外のコードからは使わない |
-| `transform/engine.go` を追加 | 「行を読む → 検出 → 置換 → 書く」の流れを mask / hash / restore(の対応表作り直し)で共有する。restore が mask と**同じコード経路**で連番を振ることが、連番の決定性(3.3 節)の要になる |
+| `internal/label` | ラベルの書式は「mask で生成」「restore で読み取り」「検出時に置換済みとして除外」の 3 か所で使う。`detect` に置くと `transform` → `detect` の依存は良いが、書式の責務が検出に混ざる。`transform` に置くと `detect` → `transform` の循環になる。独立させて両方から使う |
+| `internal/cli`(`main.go` は薄くする) | `cli.Run(args, stdin, stdout, stderr, getenv) int` にすると、終了コード・stdout/stderr の分離・オプション順序などの受け入れ基準を、バイナリを作らずにテストで確認できる |
+| `internal/synthlog` | ベンチマーク(段階 2〜)と性能測定(段階 11)で同じ合成ログを使うため。テスト以外のコードからは使わない。v1.1 で AWS の値を含める設定を追加(Q39)、v1.2 で AWS のサービスのホスト名と URL のパスワードも含める |
+| `transform/engine.go` | 「行を読む → 検出 → 置換 → 書く」の流れを mask / hash / restore(の対応表作り直し)で共有する。restore が mask と**同じコード経路**で連番を振ることが、連番の決定性(3.3 節)の要になる |
+
+テストの入力と期待値は `internal/transform/testdata/` にある(`app.log`、v1.1 の AWS の値と v1.2 のホスト名・URL のパスワードの `aws.log`、それぞれの mask の期待値、ファズテストの入力)。
 
 ### 主要な型・関数(案)
 
@@ -238,7 +224,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 - mask の出力が、周囲の文字とつながって新しい候補を生まないことは、例を挙げて確かめきれないため、ファズテスト(`mask(mask(x)) == mask(x)`、hash も同様)で確認する
 - 見つかった問題の振り分け(v1.2 で決めた。仕様 7 章の冪等の但し書き):
   - 直す: 現実にありうる形で、値が置換されずに残るもの。置換済みのログを流し直す使い方で、結果が変わるもの
-  - 直さず、README の限界に書く: 値どうし・値と記号が区切りなしで密着するなど、手で作らない限り現れない形の冪等性の違反。その入力は `testdata/fuzz/` に加えない(`go test` が失敗し続けるため)
+  - 直さず、[LIMITATIONS.md](../LIMITATIONS.md) の「冪等性」に書く: 値どうし・値と記号が区切りなしで密着するなど、手で作らない限り現れない形の冪等性の違反。その入力は `testdata/fuzz/` に加えない(`go test` が失敗し続けるため)
   - ファズテストの探索(`-fuzz`)は、版のリリース前などに時間を決めて行い、見つかったものをこの基準で振り分ける。普段の `go test` は、`testdata/fuzz/` の入力と種だけを流す。現実的な形は、表のテストや合成ログの断片として加える
 - 冪等性のファズテスト(`FuzzMaskStable`・`FuzzHashStable`。`internal/transform/fuzz_test.go`)の入力は、現実的な断片の組み合わせ(v1.2 で変えた): ファズテストのバイト列を、断片の表(`fuzzFragments`。各種別の値・置換済みの形・文脈の語)と区切りの表(`fuzzSeparators`。空白を含む区切り・改行・JSON の区切り)の選び方として読み、行を組み立てる(`fragmentText`)。区切りなしの密着や、記号だけで断片を直接つなぐ形は作らない
   - 断片・区切りを足すときは、ログ・テキストに実際に現れる形にする。記号が値に隣り合う形は、断片の中に書く

@@ -68,11 +68,7 @@ logscrub restore --source FILE [--source FILE ...] [検出オプション] [ANSW
   - `pbpaste | logscrub restore --source <(grep ERROR app.log)`
 - `--source` のファイルが `mask` のあとに**追記**されただけなら、既存のラベルの対応は変わらない(連番は最初に現れた順のため)。ローテーションや書き換えがあると対応がずれる。
 
-限界(README に明記する):
-
-- 元の入力が手元にない、または変わっていると戻せない。
-- 元の入力に、もともとラベルと同じ形の文字列(`<email_1>` など)が含まれていると、新しく振ったラベルと区別できず、正しく戻らないことがある。
-- AI が回答の中でラベルを書き換えた場合(`\<email_1\>`、`&lt;email_1&gt;`、`email_1` のように括りを外す等)は戻せない。
+限界: 利用者向けの説明は [LIMITATIONS.md](../../LIMITATIONS.md) の「restore」が正本。この節の規則を変えたら、そちらも合わせて直す。
 
 ## 6. CLI
 
