@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# 配布用のバイナリと SHA256SUMS を dist/ に作る(docs/DEVELOPMENT.md 4 章)。
+# 版はタグから入るので、変更のない作業ツリーで、HEAD がタグちょうどのときだけ動く。
+set -euo pipefail
+
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo"
+
+if [ -n "$(git status --porcelain)" ]; then
+  echo "build-release: 作業ツリーに変更があります" >&2
+  exit 1
+fi
+if ! tag="$(git describe --exact-match --tags HEAD 2>/dev/null)"; then
+  echo "build-release: HEAD がタグの位置にありません" >&2
+  exit 1
+fi
+
+rm -rf dist
+mkdir dist
+for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+  os="${target%/*}"
+  arch="${target#*/}"
+  name="logscrub-$tag-$os-$arch"
+  [ "$os" = windows ] && name="$name.exe"
+  GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 \
+    ./scripts/go build -trimpath -ldflags="-s -w" -o "dist/$name" ./cmd/logscrub
+done
+(cd dist && sha256sum logscrub-* >SHA256SUMS)
+
+# 手元で動かせる linux/amd64 で、タグの版が入っていることを確かめる。
+got="$("dist/logscrub-$tag-linux-amd64" --version)"
+if [ "$got" != "logscrub $tag" ]; then
+  echo "build-release: 版が違います: $got(タグは $tag)" >&2
+  exit 1
+fi
+ls -l dist
