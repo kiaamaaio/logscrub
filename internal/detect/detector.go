@@ -52,6 +52,7 @@ type Detector struct {
 	cands   []cand
 	scratch []cand
 	chosen  []cand
+	taken   []bool
 }
 
 // source は、候補の由来。
@@ -260,12 +261,17 @@ func (d *Detector) resolve(dst []Match) ([]Match, int) {
 			d.scratch = append(d.scratch[:0], cs[i:j]...)
 			slices.SortFunc(d.scratch, cmpPriority)
 			d.chosen = d.chosen[:0]
-		pick:
+			// 候補は長い順なので、採用済みの範囲(候補以上の長さ)と重なるなら、候補の両端のどちらかが、その範囲に入る。
+			// 両端だけを見れば、連鎖して重なる候補が多い塊(`--deny "--"` と長い `-` の連なりなど)でも、2 乗の時間にならない。
+			base := cs[i].Start
+			d.taken = slices.Grow(d.taken[:0], end-base)[:end-base]
+			clear(d.taken)
 			for _, c := range d.scratch {
-				for _, w := range d.chosen {
-					if c.Start < w.End && w.Start < c.End {
-						continue pick
-					}
+				if d.taken[c.Start-base] || d.taken[c.End-1-base] {
+					continue
+				}
+				for p := c.Start; p < c.End; p++ {
+					d.taken[p-base] = true
 				}
 				d.chosen = append(d.chosen, c)
 			}
