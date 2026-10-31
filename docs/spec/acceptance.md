@@ -165,7 +165,7 @@ URL のパスワード(v1.2 で追加):
 - `\<email_1>`・`&lt;email_1>`・`email_1` は戻らない(`\<email_1>` の `<email_1>` は戻り、`\` は残る)
 - `--mask-format '[{type}-{n}]'` で `\[email-1\]` が、`--mask-format '<{type}:{n}>'` で `&lt;email:1&gt;` が戻る
 - 対応のない `&lt;email_9&gt;` はそのまま残り、`<email_9>` として通知される。`<email_9>` と同時に現れても 1 件に数える
-- 元の入力が `\\10.0.0.5\share`、`\taro@example.com\>`、`literal &lt;email_1&gt; here`、`&lt;taro@example.com&gt;` でも、mask の出力の restore は 1 バイトも違わずに戻る
+- 元の入力が `\\10.0.0.5\share`、`\taro@example.com\>`、`taro@example.com \<email_1\>`、`taro@example.com &lt;email_1&gt;`、`&lt;taro@example.com&gt;` でも、mask の出力の restore は 1 バイトも違わずに戻る
 
 除外の確認:
 
