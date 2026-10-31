@@ -9,6 +9,8 @@ import "bytes"
 type AnswerScanner struct {
 	f    Format
 	html Format // リテラルを文字参照にした書式。リテラルに対象の文字がなければ、ゼロ値
+	// start は、ラベル(崩れた形を含む)の先頭になりうるバイト。それ以外の位置は、照合せずに読み飛ばす。
+	start [256]bool
 }
 
 // NewAnswerScanner は、書式 f の AnswerScanner を返す。
@@ -17,6 +19,15 @@ func NewAnswerScanner(f Format) *AnswerScanner {
 	pre, mid, post := escapeHTML(f.pre), escapeHTML(f.mid), escapeHTML(f.post)
 	if !bytes.Equal(pre, f.pre) || !bytes.Equal(mid, f.mid) || !bytes.Equal(post, f.post) {
 		a.html = Format{pre: pre, mid: mid, post: post, typeFirst: f.typeFirst, ok: true}
+	}
+	if len(f.pre) == 0 {
+		a.start = f.first
+		return a
+	}
+	a.start[f.pre[0]] = true
+	a.start[pre[0]] = true
+	if isASCIIPunct(f.pre[0]) {
+		a.start['\\'] = true
 	}
 	return a
 }
@@ -125,6 +136,10 @@ func (a *AnswerScanner) Scan(line []byte, skip map[string]struct{}, fn func(star
 		return
 	}
 	for i := 0; i < len(line); {
+		if !a.start[line[i]] {
+			i++
+			continue
+		}
 		end, typ, n, escaped, ok := a.matchAnyAt(line, i)
 		if ok && escaped {
 			_, skipped := skip[string(line[i:end])]
@@ -145,6 +160,10 @@ func (a *AnswerScanner) ScanEscaped(line []byte, fn func(form []byte)) {
 		return
 	}
 	for i := 0; i < len(line); {
+		if !a.start[line[i]] {
+			i++
+			continue
+		}
 		end, _, _, escaped, ok := a.matchAnyAt(line, i)
 		if !ok {
 			i++
