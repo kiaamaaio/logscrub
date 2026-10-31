@@ -415,6 +415,10 @@ func FuzzRestoreRoundTrip(f *testing.F) {
 		"\xff\xfe a@b.co\r\n", "0@0.AA@0.AA\n", "ssh user@example.com@bastion.example.org\n", "a@b.co a@b.co c@d.co",
 		"postgres://app:s3cret@db.example.com:5432/app redis://:s3cret@10.0.0.5:6379 ftp://u:a:b@host\n",
 		"https://taro@example.com/ http://u:p@h@x.com password=s3cret\n",
+		// v1.3: 語・ドメインと、崩れた形に似た入力
+		"Acme acme_prod ACME taro@acme.co.jp db.corp.example.jp\n", "postgres://app:s3cret@DB.Corp.Example.JP/\n",
+		"taro@example.com &lt;email_1&gt;\n", "taro@example.com \\<email_1\\>\n", "\\\\10.0.0.5\\share \\taro@example.com\\>\n",
+		"taro@example.com email\\_1\n",
 	} {
 		f.Add(s)
 	}
@@ -422,13 +426,25 @@ func FuzzRestoreRoundTrip(f *testing.F) {
 		f.Add(s)
 	}
 	optsList, _ := fuzzOptions(f)
-	f.Fuzz(func(t *testing.T, in string) {
-		found := false
-		label.DefaultFormat.Scan([]byte(in), func(int, int, string, int) { found = true })
-		if found {
-			t.Skip("the input contains a label-like string (limitation in SPEC 5.3)")
+	// 崩れた形の作られ方は書式で変わるので、括りのない書式と、終わりのない書式も試す。
+	for _, s := range []string{"{type}_{n}", "<{type}_{n}", "<{type}&{n}>"} {
+		format, err := label.ParseFormat(s)
+		if err != nil {
+			f.Fatal(err)
 		}
+		optsList = append(optsList, detect.Options{Format: format})
+	}
+	f.Fuzz(func(t *testing.T, in string) {
 		for _, opts := range optsList {
+			found := false
+			format := opts.Format
+			if format.IsZero() {
+				format = label.DefaultFormat
+			}
+			format.Scan([]byte(in), func(int, int, string, int) { found = true })
+			if found {
+				continue // the input contains a label-like string (limitation in SPEC 5.3)
+			}
 			masked, restored, res := roundTrip(t, opts, in)
 			if restored != in {
 				t.Fatalf("restore(mask(x)) != x\n x:        %q\n masked:   %q\n restored: %q", in, masked, restored)

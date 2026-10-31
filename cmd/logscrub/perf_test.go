@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -122,6 +123,17 @@ func TestPerfThroughput(t *testing.T) {
 	dir := t.TempDir()
 	log := genLog(t, dir, "big.log", *perfSize, 0)
 	awsLog := genLogWith(t, dir, "big-aws.log", *perfSize, 0, true)
+	words := func(n int) string {
+		p := filepath.Join(dir, fmt.Sprintf("words-%d", n))
+		var sb strings.Builder
+		for i := range n {
+			fmt.Fprintf(&sb, "project-%d-name\n", i)
+		}
+		if err := os.WriteFile(p, []byte(sb.String()), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
 	for _, tc := range []struct {
 		name string
 		log  string
@@ -134,6 +146,9 @@ func TestPerfThroughput(t *testing.T) {
 		{"aws log, default types", awsLog, false, nil},
 		{"aws log, default,aws", awsLog, false, []string{"--types", "default,aws"}},
 		{"aws log, without aws_host", awsLog, false, []string{"--types", "default,aws_account,aws_s3_bucket"}},
+		{"10 words", log, false, []string{"--deny-file", words(10)}},
+		{"1000 words", log, false, []string{"--deny-file", words(1000)}},
+		{"--domain", log, false, []string{"--domain", "example.com"}},
 	} {
 		best := measurement{seconds: 1e9}
 		for i := 0; i < 3; i++ {

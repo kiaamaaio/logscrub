@@ -1,0 +1,9 @@
+2026-11-01T09:00:00Z INFO Acme billing started on acme-prod-1
+2026-11-01T09:00:01Z INFO ACME_REGION=tokyo acmerica is another company
+2026-11-01T09:00:02Z INFO 株式会社アクメの Foo Bar project
+2026-11-01T09:00:03Z INFO curl https://internal.corp.example.jp/api
+2026-11-01T09:00:04Z INFO connecting to db.mycompany.internal:5432
+2026-11-01T09:00:05Z WARN postgres://app:s3cret@db.corp.example.jp/app failed
+2026-11-01T09:00:06Z WARN notify taro@corp.example.jp and taro@acme.co.jp
+2026-11-01T09:00:07Z INFO notcorp.example.jp corp.example.jp.evil.org are other hosts
+2026-11-01T09:00:08Z INFO see DB.CORP.EXAMPLE.JP. and corp.example.jp
