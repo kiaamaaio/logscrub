@@ -17,6 +17,8 @@
 | 4.3 | `ipv4` / `ipv6` の区別(ホスト名に埋め込まれた IPv4 を含む) | [spec/detect.md](spec/detect.md) |
 | 4.4 | AWS の値(`aws_account`、`aws_s3_bucket`) | [spec/aws.md](spec/aws.md) |
 | 4.5 | `aws_host`(AWS のサービスのホスト名) | [spec/aws.md](spec/aws.md) |
+| 4.6 | `custom`(`--deny`、`--deny-file`) | [spec/detect.md](spec/detect.md) |
+| 4.7 | `host`(`--domain`) | [spec/detect.md](spec/detect.md) |
 | 5 | 変換モードと復元(5.1 `mask`、5.2 `hash`、5.3 `restore`) | [spec/modes-cli.md](spec/modes-cli.md) |
 | 6 | CLI(6.1 CLI の実装方針) | [spec/modes-cli.md](spec/modes-cli.md) |
 | 7、8 | 非機能要件、構成 | この文書 |
@@ -93,7 +95,8 @@ logscrub/
 │   ├── stream/        # 行単位の入出力(改行コードの保持を含む)
 │   └── synthlog/      # 性能測定用の合成ログの生成器
 ├── scripts/go         # Go の操作を Docker コンテナ(golang:1.27.2)の中で行うラッパー
-└── docs/              # SPEC.md(この文書。目次と全体の章)、spec/(4〜6 章・9 章)、DEVELOPMENT.md(開発環境・構成・設計の注意点)、plans/(版ごとの実装計画と進捗・判断の記録)
+├── scripts/build-release  # タグの位置で、配布用のバイナリと SHA256SUMS を dist/ に作る
+└── docs/              # SPEC.md(この文書。目次と全体の章)、spec/(4〜6 章・9 章)、detection.md(検出対象の詳細。利用者向け)、DEVELOPMENT.md と development/(開発環境・構成・設計の注意点)、plans/(版ごとの実装計画と進捗・判断の記録)
 ```
 
 ## 10. 決定事項
@@ -121,8 +124,13 @@ logscrub/
 19. `aws_host` を v1.2 で追加する(2026-10-17)。対象は、4.5 の表の「末尾の形」が決まっているサービスのホスト名だけ。あわせて、S3 Control のホストのアカウント ID を `aws_account` に加え、EC2 のパブリックホスト名の IPv6・デュアルスタック形式(`….ip.aws`)を `aws_host` で置換する
 20. `secret` に URL のパスワード(`<スキーム>://<ユーザー>:<パスワード>@<ホスト>`)を加え、この形のときは `@` の前後をメールアドレスとして扱わない(2026-10-17)。既定の種別の動作が変わる(隠せていなかった値を隠す方向の変更)。v1.2 の中で、キー名ベースとの関係と、ユーザー・パスワードの `@` の扱いを補った(2026-10-18。4.1、Q63〜Q65、Q68、Q70)
 21. 限界の利用者向けの説明は、LIMITATIONS.md を正本とし、仕様の各節からはリンクする(2026-10-24)
+22. 利用者が指定した語を種別 `custom`(`--deny`、`--deny-file`)で伏せる(2026-11-01)。大文字・小文字は ASCII だけ区別せず、語の境目を見る。重なりの規則は変えない(4.6、Q71〜Q77)
+23. 指定したドメインのホスト名を、全体を種別 `host`(`--domain`)で伏せる(2026-11-01)。ドメインは残さない。ドメインを残す `--email-hash local` では、指定した値を含むアドレスを全体でハッシュする(4.7、5.2、Q78)
+24. `logscrub version` と `--version` を加え、版は `debug.ReadBuildInfo` から取る(2026-11-01。6 章、Q79)
+25. 配布用のバイナリは、手で実行するスクリプトで作り、圧縮せずに `SHA256SUMS` と一緒に GitHub Releases に置く。GitHub Actions は使わない(2026-11-01。Q80)
+26. `restore` は、HTML と Markdown で崩れたラベルを、始めと終わりの両方が同じ方式で崩れているときだけ戻す。mask の出力に現れた形は除き、どの入力でも往復が成り立つようにする(2026-11-01。5.3、Q81、Q82)
 
 ## 11. 未決事項
 
-なし(v1.1 の細部は [plans/v1.1.0.md](plans/v1.1.0.md) 5 章の Q32〜Q46、v1.2 の細部は [plans/v1.2.0.md](plans/v1.2.0.md) 5 章の Q47〜Q70 で確定済み)
+なし(v1.1 の細部は [plans/v1.1.0.md](plans/v1.1.0.md) 5 章の Q32〜Q46、v1.2 の細部は [plans/v1.2.0.md](plans/v1.2.0.md) 5 章の Q47〜Q70、v1.3 の細部は [plans/v1.3.0.md](plans/v1.3.0.md) 5 章の Q71〜Q84 で確定済み)
 
