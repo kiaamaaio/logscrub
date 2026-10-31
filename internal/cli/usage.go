@@ -106,6 +106,7 @@ Options (they may be written before or after ANSWER_FILE):
   -o, --output FILE         write to FILE instead of stdout.
   -h, --help                show this help.
 
+Labels escaped by an AI as &lt;email_1&gt; or \<email_1\> are restored too.
 Labels that cannot be restored are left as they are and listed on stderr;
 the exit status is still 0. Output of "mask --mode hash" cannot be restored.
 `

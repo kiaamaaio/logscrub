@@ -88,3 +88,36 @@ connect <aws_host_1>.ap-northeast-1.rds.amazonaws.com:5432
 - EC2 のホスト名(`ec2-…`、`ip-…`)は `ipv4`、S3 のホスト名は `aws_s3_bucket`、ECR・S3 Control のホスト名は `aws_account` として置換されます(`aws_host` にはなりません)。
 - `admin@mydb.….rds.amazonaws.com` のように、メールアドレスの一部として読めるホスト名は、長いメールアドレスが優先されます。
 - 表の形は、2026-10-18 に AWS の公式ドキュメントで確認しました。
+
+## 指定した語(`custom`)
+
+形式では判定できない会社名・案件名・社内のサービス名などを、語として指定します。`--deny`・`--deny-file` を指定すると、`custom` が対象に加わります(`--types` を指定していても加わります)。語だけを置換するなら `--types custom` と併用します。
+
+```console
+$ echo "Acme billing on acme-prod" | logscrub mask --deny acme
+<custom_1> billing on <custom_2>-prod
+```
+
+- 英字の大文字・小文字は区別しません。ただし、綴りが違えば別のラベルになります(`restore` で元の綴りに戻すためです)。
+- 語の端が英数字で、その外側も英数字の場合は、一致としません。`acme` は `acmerica`・`AcmeCorp` に一致せず、`acme-prod`・`acme_prod`・`acme.internal`・`Acmeの` に一致します。日本語の語は、前後を問わず一致します。
+- 語は空白を含めます(`--deny "Acme Corp"`)。
+- `--deny-file` は 1 行 1 語です。前後の空白、空行、`#` で始まる行は無視します。Windows のメモ帳で保存したファイル(BOM つき UTF-8、CRLF)も読めます。
+- 語より長い値に含まれる場合は、その値全体が置換されます(`taro@acme.co.jp` は `<email_1>`)。
+- `--allow` が優先します。`--deny acme --allow Acme` は、`Acme` だけを残して `ACME` を置換します。
+
+`--deny` の値はシェルの履歴やプロセスの一覧に残るので、隠したい語は `--deny-file` で渡すことを勧めます。
+
+## 指定したドメインのホスト名(`host`)
+
+`--domain` で指定したドメインと、そのサブドメインのホスト名を、**全体を** `<host_N>` に置換します。ドメインそのもの(`example.co.jp`)も対象です。ホスト名ごとに別のラベルになるので、「同じ接続先か」は読めます。
+
+```console
+$ echo "curl https://internal.corp.example.co.jp/api" | logscrub mask --domain example.co.jp
+curl https://<host_1>/api
+```
+
+- 大文字・小文字は区別しません。ただし、綴りが違えば別のラベルになります。
+- `notexample.co.jp`、`example.co.jp.evil.org` は対象外です。
+- 値は `example.co.jp` の形で指定します(`https://…`、`*.example.co.jp`、`.example.co.jp` はエラーです)。`--domain internal` のような 1 語も指定できます。
+- メールアドレスは、`email` が有効なら全体が `<email_N>` になります。`email` を無効にすると `taro@<host_1>` になります。
+- `--mode hash --email-hash local` は、ドメインを残します。ドメインに指定した語・ドメインを含むアドレスだけは、指定した値が残らないよう、全体をハッシュします(`email_<hex>`)。

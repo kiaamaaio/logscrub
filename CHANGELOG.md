@@ -2,6 +2,18 @@
 
 logscrub の版ごとの変更点。使い方は [README.md](README.md) を見てください。
 
+### v1.3.0
+
+- 利用者が指定した語を伏せる `--deny`・`--deny-file` を加えました。種別は `custom` で、ラベルは `<custom_1>` です([指定した語](docs/detection.md#指定した語custom))。
+- 指定したドメインのホスト名を伏せる `--domain` を加えました。種別は `host` で、ホスト名全体が `<host_1>` になります([指定したドメイン](docs/detection.md#指定したドメインのホスト名host))。
+- `--mode hash --email-hash local` で、ドメインに指定した語・ドメインを含むメールアドレスは、全体をハッシュします(指定した値を出力に残さないためです)。
+- `restore` が、AI の回答でエスケープされたラベル(`&lt;email_1&gt;`、`\<email_1\>`)も戻すようになりました。
+- `logscrub version`、`logscrub --version` を加えました。
+- GitHub Releases に、linux・darwin・windows(amd64・arm64)のバイナリを置くようにしました。導入の手順は [README](README.md#導入) を見てください。
+- 全体のヘルプと `mask --help` の説明を、今の検出対象に合わせました。
+- `<host_1>`、`<custom_1>`、`host_<12 桁の 16 進数>`、`custom_<12 桁の 16 進数>` の形の文字列は、`--deny`・`--domain` を使わない場合も、置換済みの形として扱います。`token=host_3f9a1c0b7d2e` のような値は、置換されなくなります(stderr に通知します)。
+- `logscrub types` の出力と `--stats` の並びに、`host`・`custom` が加わりました。
+
 ### v1.2.0
 
 - **既定の動作が変わります**(どちらも、今まで隠せていなかった値を隠す方向の変更です)。

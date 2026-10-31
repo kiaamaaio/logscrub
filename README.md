@@ -1,6 +1,6 @@
 # logscrub
 
-ログやテキストに含まれる **メールアドレス・IP アドレス・トークン類(URL のパスワードを含む)・UUID・AWS の値(アカウント ID、S3 のバケット名、サービスのホスト名)** を、
+ログやテキストに含まれる **メールアドレス・IP アドレス・トークン類(URL のパスワードを含む)・UUID・AWS の値(アカウント ID、S3 のバケット名、サービスのホスト名)・利用者が指定した語やドメイン** を、
 種別が分かるラベル(`<email_1>`)またはハッシュ値に置き換える CLI です。
 ログ調査の内容を AI に安全に渡すことを、主な用途としています。
 
@@ -16,6 +16,33 @@ $ echo "taro@example.com 192.168.0.1 password=hunter2" | logscrub mask
 
 > **注意**: 検出は完全ではありません(正規表現による形式の一致が基本です)。
 > 外部に出す前に、必ず出力を確認してください。見逃しや誤検出の例は、[LIMITATIONS.md](LIMITATIONS.md) にまとめています。
+
+## 導入
+
+### バイナリを取得する
+
+[Releases](https://github.com/kiaamaaio/logscrub/releases) から、環境に合うファイルを取得します。Go の環境は要りません。
+ファイル名は `logscrub-<版>-<OS>-<CPU>` で、OS は `linux`・`darwin`・`windows`、CPU は `amd64`・`arm64` です(Windows は末尾に `.exe`)。
+
+```console
+$ curl -fLO https://github.com/kiaamaaio/logscrub/releases/download/v1.3.0/logscrub-v1.3.0-linux-amd64
+$ curl -fLO https://github.com/kiaamaaio/logscrub/releases/download/v1.3.0/SHA256SUMS
+$ sha256sum --check --ignore-missing SHA256SUMS
+$ chmod +x logscrub-v1.3.0-linux-amd64
+$ sudo mv logscrub-v1.3.0-linux-amd64 /usr/local/bin/logscrub
+$ logscrub --version
+```
+
+- macOS: `sha256sum` の代わりに `shasum -a 256 --check --ignore-missing SHA256SUMS` を使います。バイナリは署名していないので、ブラウザで取得すると、Gatekeeper に止められます。`curl` で取得するか、`xattr -d com.apple.quarantine logscrub-…` で解除してください。
+- Windows: 署名していないので、SmartScreen の警告が出ることがあります。PowerShell のパイプは文字コードを変えることがあるので、ファイルを引数で渡してください(`logscrub.exe mask app.log -o masked.log`)。
+
+### Go でインストールする
+
+Go 1.27 以上が必要です。
+
+```console
+$ go install github.com/kiaamaaio/logscrub/cmd/logscrub@latest
+```
 
 ## 使い方
 
@@ -43,7 +70,10 @@ $ pbpaste | logscrub restore --source <(grep ERROR app.log)
 ```
 
 **`restore` には、`mask` のときと同じ検出オプション**(`--types`、`--uuid-versions`、`--ip-scope`、
-`--allow`、`--mask-format`)と、同じ入力を、同じ順で指定してください。違うと、連番がずれます。
+`--allow`、`--deny`、`--deny-file`、`--domain`、`--mask-format`)と、同じ入力を、同じ順で指定してください。違うと、連番がずれます。
+`mask` と `restore` は、同じ版で使ってください(`logscrub --version` で確かめられます)。
+
+AI の回答でラベルがエスケープされていても(`&lt;email_1&gt;`、`\<email_1\>`)、元の値に戻します。括りを外した `email_1` は戻しません。
 
 ### hash: 鍵つきのハッシュに置き換える
 
@@ -67,6 +97,9 @@ $ logscrub mask --types default,aws app.log         # 既定の種別に AWS の
 $ logscrub mask --uuid-versions 4,7 app.log         # UUID の v4 と v7 だけ(uuid も有効になる)
 $ logscrub mask --ip-scope global app.log           # グローバルな IP だけ(内部アドレスは残す)
 $ logscrub mask --allow support@example.com app.log # この値は置換しない(複数回指定できる)
+$ logscrub mask --deny acme app.log                 # 会社名などの語を <custom_1> にする(複数回指定できる)
+$ logscrub mask --deny-file words.txt app.log       # 語の一覧のファイルから読む(1 行 1 語)
+$ logscrub mask --domain example.co.jp app.log      # このドメインのホスト名を <host_1> にする(複数回指定できる)
 $ logscrub mask --stats app.log                     # 種別ごとの件数を stderr に出す
 $ logscrub mask --fail-on-detect app.log            # 1 件でも置換したら、終了コード 2
 $ logscrub mask app.log -o masked.log               # ファイルに書く
@@ -87,6 +120,9 @@ $ logscrub types --verbose                          # 対応する種別と、se
 | `--uuid-versions 4,7` | 対象にする UUID のバージョン(1〜8)。これだけで `uuid` が対象に加わる |
 | `--ip-scope all\|global\|private` | 置換する IP アドレスの範囲(既定 `all`) |
 | `--allow VALUE` | 置換しない値(完全一致、複数回指定可) |
+| `--deny VALUE` | 伏せる語(複数回指定可)。`custom` が対象に加わる。[詳細](docs/detection.md#指定した語custom) |
+| `--deny-file FILE` | 語の一覧のファイル(1 行 1 語。空行と `#` の行は無視。複数回指定可) |
+| `--domain DOMAIN` | ホスト名を伏せるドメイン(サブドメインを含む。複数回指定可)。`host` が対象に加わる。[詳細](docs/detection.md#指定したドメインのホスト名host) |
 | `--mask-format FMT` | ラベルの書式。`{type}` と `{n}` をちょうど 1 回ずつ含める(既定 `<{type}_{n}>`) |
 | `--email-hash full\|local` | hash モードのメールアドレス。`full`(既定): 全体、`local`: ローカルパートだけ |
 | `--hash-length N` | hash モードの桁数(8〜64、既定 12) |
@@ -123,6 +159,8 @@ stderr に出します(終了コードは 0)。
 | `aws_account` | AWS アカウント ID(ARN・ECR・SQS・S3 Control の中のもの。[AWS の値](docs/detection.md#aws-の値)) | 無効 |
 | `aws_s3_bucket` | S3 のバケット名(`s3://`・S3 の URL・ARN の中のもの。[AWS の値](docs/detection.md#aws-の値)) | 無効 |
 | `aws_host` | AWS のサービスのホスト名の、利用者ごとの部分(RDS、ELB、CloudFront など。[AWS のサービスのホスト名](docs/detection.md#aws-のサービスのホスト名)) | 無効 |
+| `host` | `--domain` で指定したドメインのホスト名([指定したドメイン](docs/detection.md#指定したドメインのホスト名host)) | `--domain` で有効 |
+| `custom` | `--deny`・`--deny-file` で指定した語([指定した語](docs/detection.md#指定した語custom)) | `--deny` で有効 |
 
 `--types` には、種別名のほかに、次のまとまりを書けます。
 
@@ -148,7 +186,7 @@ IP アドレスだけを隠しても、ホスト名から元の値が読めて�
 | プライベート DNS | `ip-10-0-1-23.ap-northeast-1.compute.internal`、`ip-10-0-1-23.ec2.internal` | `ip-<ipv4_private_1>.ap-northeast-1.compute.internal` |
 | ドメインのない IP 名 | `ip-10-0-1-23`(シェルのプロンプト、Kubernetes のノード名など) | `ip-<ipv4_private_1>` |
 
-詳しい形式は [docs/detection.md](docs/detection.md) にあります([`secret` の対応形式](docs/detection.md#secret-の対応形式)、[AWS の値](docs/detection.md#aws-の値)、[AWS のサービスのホスト名](docs/detection.md#aws-のサービスのホスト名))。
+詳しい形式は [docs/detection.md](docs/detection.md) にあります([`secret` の対応形式](docs/detection.md#secret-の対応形式)、[AWS の値](docs/detection.md#aws-の値)、[AWS のサービスのホスト名](docs/detection.md#aws-のサービスのホスト名)、[指定した語](docs/detection.md#指定した語custom)、[指定したドメイン](docs/detection.md#指定したドメインのホスト名host))。
 
 ## 性質
 
@@ -174,11 +212,13 @@ IP アドレスだけを隠しても、ホスト名から元の値が読めて�
 
 | 実行 | 速度 | 最大メモリ |
 |---|---|---|
-| `logscrub mask < big.log > /dev/null` | 約 229 MB/s | 30 MB |
-| `cat big.log \| logscrub mask > /dev/null` | 約 207 MB/s | 30 MB |
-| 同上(`--types default,uuid`) | 約 218 MB/s | 33 MB |
-| AWS の値(ホスト名、URL のパスワードを含む)を含む合成ログを `--types default,aws` で | 約 173 MB/s | 35 MB |
-| 同上(`aws_host` なし: `--types default,aws_account,aws_s3_bucket`) | 約 197 MB/s | 31 MB |
+| `logscrub mask < big.log > /dev/null` | 約 222 MB/s | 30 MB |
+| `cat big.log \| logscrub mask > /dev/null` | 約 198 MB/s | 32 MB |
+| 同上(`--types default,uuid`) | 約 211 MB/s | 32 MB |
+| AWS の値(ホスト名、URL のパスワードを含む)を含む合成ログを `--types default,aws` で | 約 168 MB/s | 36 MB |
+| 同上(`aws_host` なし: `--types default,aws_account,aws_s3_bucket`) | 約 192 MB/s | 32 MB |
+| 語を 1000 個指定(`--deny-file`) | 約 155 MB/s | 30 MB |
+| `--domain` を指定 | 約 154 MB/s | 30 MB |
 
 - **メモリ**: 対応表(検出した値の種類数に比例)が主です。値の種類数が一定(1,000 種類)なら、入力が
   20MB でも 100MB でも、最大 15MB ほどで変わりません。ほぼすべての値が異なる 100MB のログでは、29.8MB でした。
@@ -200,6 +240,8 @@ $ ./scripts/go test ./...
 $ ./scripts/go vet ./...
 $ ./scripts/go build -o bin/logscrub ./cmd/logscrub
 ```
+
+配布用のバイナリは `scripts/build-release` で作ります(手順は [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) 4 章)。
 
 仕様は [docs/SPEC.md](docs/SPEC.md)(目次。章ごとの本文は [docs/spec/](docs/spec/)。パッケージ構成は 8 章)、開発環境・構成・設計の注意点は [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)、版ごとの実装計画と進捗・判断の記録は [docs/plans/](docs/plans/) にあります。
 

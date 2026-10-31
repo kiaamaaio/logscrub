@@ -79,8 +79,8 @@ func Copy(w io.Writer, inputs ...io.Reader) error
 ```go
 // 置換後の種別名。IP は区別を含む。並びは連番・--stats の出力順にも使う(aws_account・aws_s3_bucket は v1.1、aws_host は v1.2 で追加)。
 var Types = []string{"email", "ipv4_global", "ipv4_private", "ipv6_global", "ipv6_private", "secret", "uuid",
-    "aws_account", "aws_s3_bucket", "aws_host"}
-const NumTypes = 10                                 // len(Types)。統計・連番の表を固定長の配列で持つため
+    "aws_account", "aws_s3_bucket", "aws_host", "host", "custom"}
+const NumTypes = 12                                 // len(Types)。統計・連番の表を固定長の配列で持つため
 
 type Format struct { ... }                          // '<{type}_{n}>' を前後・中間のリテラルに分解したもの
 func ParseFormat(s string) (Format, error)          // {type} と {n} を含まなければエラー
@@ -89,12 +89,18 @@ func (f Format) Append(dst []byte, typ string, n int) []byte
 func (f Format) Scan(line []byte, fn func(start, end int, typ string, n int))
 // ScanHashed は hash の出力形(<種別>_<hex>、hash_<hex>@ドメイン)の位置を返す。
 func ScanHashed(line []byte, hexLen int, fn func(start, end int))
+
+// AnswerScanner は、restore の回答を読む。Format.Scan に加えて、HTML・Markdown で崩れた形も読む(仕様 5.3。v1.3)。
+// Format.Scan は変えない(検出の保護範囲と連番に、崩れた形を混ぜないため)。
+func NewAnswerScanner(f Format) *AnswerScanner
+func (a *AnswerScanner) Scan(line []byte, skip map[string]struct{}, fn func(start, end int, typ string, n int))
+func (a *AnswerScanner) ScanEscaped(line []byte, fn func(form []byte))
 ```
 
 **detect**
 
 ```go
-type Kind uint8   // KindEmail, KindIPv4, KindIPv6, KindSecret, KindUUID, KindAWSAccount, KindAWSS3Bucket, KindAWSHost(0 は無効)
+type Kind uint8   // KindEmail, KindIPv4, KindIPv6, KindSecret, KindUUID, KindAWSAccount, KindAWSS3Bucket, KindAWSHost, KindHost, KindCustom(0 は無効)
 type KindSet uint32 // ビット k が Kind k(v1.1 で uint8 から広げた。v1.2 の aws_host で 8 ビットを超えるため)
 type Class uint8  // ClassNone, ClassGlobal, ClassPrivate, ClassSpecial(IP のみ使用)
 
@@ -102,6 +108,7 @@ type Match struct {
     Start, End int  // 置換する範囲(行内のバイト位置)
     Kind       Kind
     Class      Class
+    HideDomain bool // メールアドレスのドメインに、利用者が指定した値がある(--email-hash local でも全体を置換。仕様 5.2)
 }
 func (m Match) LabelType() string  // "email", "ipv4_private" など
 
@@ -122,6 +129,8 @@ type Options struct {
     UUIDVersions uint16          // ビット i = バージョン i(1〜8)
     IPScope      Scope           // All / Global / Private
     Allow        map[string]struct{}
+    Deny         []string        // --deny・--deny-file の語。指定すると custom が加わる
+    Domains      []string        // --domain のドメイン。指定すると host が加わる
     Format       label.Format    // 置換済みラベルの除外用
     HashLen      int             // hash 出力形の除外用(→ Q10)。ゼロ値は 12、範囲は 8〜64
 }
@@ -154,6 +163,9 @@ v1.2 では、`aws.go` に `aws_host` の検出器 `awsHostFinder` と、その�
 サービスの追加は、表に行を足すだけで済む(終端ごとの手がかりと、手前の部品の照合は、表から作る)。
 `aws_account` の ECR・S3 Control のホストも、`accountHostMarkers` の表に行を足す形にした。
 `secret` に URL のパスワードを加え(`urlPasswordStart`)、`email` は、その形の `@` を候補にしない。重なりの解決の規則(3.1 節)は変えていない。
+v1.3 では、`custom.go` に `customFinder`(`--deny`)と `hostFinder`(`--domain`)を、`literal.go` に、両方が使う照合器 `literalMatcher`(Aho-Corasick。遷移の表は、語に現れるバイトの同値類を列にする)を置いた。
+語の読み込み(`--deny-file`)は `internal/cli` で行い、`detect` には語の一覧だけを渡す。語・ドメインを指定しなければ、検出器を作らない。
+`--email-hash local` のために、`Detector.Find` は、email の一致のドメインの部分を `customFinder`・`hostFinder` で確かめ、`Match.HideDomain` を立てる。
 
 前処理(3.4 節)用の `may(line, hint)` と `lineHint` は設けない。各検出器が `find` の先頭で、自分の手がかり
 (email は `'@'` の `bytes.IndexByte` など)を探し、なければすぐ戻る。
@@ -174,7 +186,8 @@ func LoadKey(getenv func(string) string, keyFile string) ([]byte, error)
 type Stats struct { ... }    // 種別名ごとの件数(→ Q19)
 
 // Engine は入力群を行ごとに検出・置換して w に書く。
-type Engine struct { Det *detect.Detector; Rep Replacer; Stats *Stats }
+// Inspect は任意で、変換した 1 行を受け取り、置換済みの形として数える数を返す(restore が、崩れた形を集めるために使う。Q82)。
+type Engine struct { Det *detect.Detector; Rep Replacer; Stats Stats; Inspect func(out []byte) int }
 func (e *Engine) Run(inputs []io.Reader, w io.Writer) error
 
 // Restore は sources から mask と同じ規則で対応を作り直し、answer 中のラベルを戻して w に書く。
@@ -207,6 +220,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 4. 候補を「長さの降順 → 優先順位(保護範囲 → email → ipv4/ipv6 → secret → uuid)→ 開始位置の昇順」で並べ、先頭から順に、すでに採用した範囲と重ならないものだけ採用する
 5. 採用したもののうち保護範囲を除き、開始位置の順に並べて返す
 
+- 採用の確認は、候補の両端が採用済みの範囲に入っているかだけを見る(候補は長い順なので、採用済みの範囲は候補以上の長さで、重なれば、候補の端のどちらかが入る)。`--deny "--"` と長い `-` の連なりのように、連鎖して重なる候補が 1 つの塊になっても、2 乗の時間にならない(v1.3)
 - 負けた候補は、重なっていない部分も含めて捨てる(仕様「一部だけ重なる場合も 1 つに決める」)。部分を再検出はしない
 - 同じ種別・同じ長さの重なりは開始位置が前のほうを採る(仕様に記述なし。順序が決定的であれば良い点なので、確認事項には入れず、この方針で進める。異論があれば指摘してほしい)
 - ipv4 と ipv6 は同じ優先順位だが、同じ長さで重なることは形式上起きない(IPv6 は必ず `:` を含み、IPv4 は含まない)
@@ -247,3 +261,15 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 ### 3.4 性能目標(50MB/s)のための前処理
 
 本文は [development/performance.md](development/performance.md) に分けた(節番号は変えない)。
+
+---
+
+## 4. リリースの手順
+
+1. `develop` を `main` へ `--no-ff` でマージし、そのマージコミットにタグ(`vX.Y.Z`)を付ける
+2. `main` のタグの位置で `scripts/build-release` を実行する。`dist/` に 6 環境のバイナリと `SHA256SUMS` ができる
+   - 版はタグから入る(`-ldflags` は使わない)。変更のある作業ツリーや、タグの位置でない HEAD では動かない。linux/amd64 のバイナリで版を確かめる
+   - v2 以上のタグでは、`go.mod` のモジュールのパスに `/v2` などを付けないと、タグの版にならない(このスクリプトの確認で止まる)
+   - WSL なら、`dist/logscrub-…-windows-amd64.exe` も実行して確かめられる。darwin と arm64 は、手元ではビルドの確認まで
+3. タグを push して、Release にファイルを置く: `gh release create vX.Y.Z dist/* --title vX.Y.Z --notes-file <CHANGELOG の該当の節>`
+4. README の「導入」の URL の版を更新する
