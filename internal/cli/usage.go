@@ -1,16 +1,18 @@
 package cli
 
-// usageTop は、全体の使い方。
+// usageTop は、全体の使い方。種別は列挙しない(一覧は `logscrub types`。種別を足しても古くならないように)。
 const usageTop = `Usage:
   logscrub mask    [FILE ...] [options]
   logscrub restore --source FILE [--source FILE ...] [ANSWER_FILE] [options]
   logscrub types   [--verbose]
+  logscrub version
 
-mask replaces email addresses, IP addresses, tokens, UUIDs and AWS values
-(account IDs, S3 bucket names) in text with labels such as <email_1> (or with
-keyed hashes). restore puts the original values back into text (for example
-an AI's answer) that contains such labels. The text is read from FILE (stdin
-when FILE is omitted or "-") and written to stdout.
+mask replaces values such as email addresses, IP addresses and secrets (tokens,
+passwords, including the ones in URLs) in text with labels such as <email_1>
+(or with keyed hashes). More types can be enabled; run "logscrub types" for the
+list. restore puts the original values back into text (for example an AI's
+answer) that contains such labels. The text is read from FILE (stdin when FILE
+is omitted or "-") and written to stdout.
 
 Run "logscrub <command> --help" for the options of a command.
 `
@@ -41,9 +43,10 @@ Tokens in any other format are not detected.
 
 const usageMask = `Usage: logscrub mask [FILE ...] [options]
 
-Replace email addresses, IP addresses, tokens, UUIDs and AWS values in FILE
-(stdin when omitted or "-") with labels or hashes. Several FILEs are read in
-the given order as one input (numbering continues across files).
+Replace the values of the selected types in FILE (stdin when omitted or "-")
+with labels or hashes. By default these are email addresses, IP addresses and
+secrets; see --types. Several FILEs are read in the given order as one input
+(numbering continues across files).
 
 Options (they may be written before or after FILE):
   --mode mask|hash          mask: <email_1> style labels (default).
@@ -104,5 +107,13 @@ List the types that can be given to --types.
 
 Options:
   --verbose   also list the supported secret formats.
+  -h, --help  show this help.
+`
+
+const usageVersion = `Usage: logscrub version
+
+Print the version of logscrub. "logscrub --version" does the same.
+
+Options:
   -h, --help  show this help.
 `
