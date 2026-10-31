@@ -62,6 +62,12 @@ Options (they may be written before or after FILE):
   --ip-scope all|global|private
                             which IP addresses to replace (default: all).
   --allow VALUE             never replace this exact value (repeatable).
+  --deny VALUE              replace this word as <custom_N> (repeatable; ASCII case
+                            is ignored; acme does not match acmerica). Enables custom.
+  --deny-file FILE          read words from FILE, one per line; empty lines and lines
+                            starting with # are ignored (repeatable).
+  --domain DOMAIN           replace the host names in this domain and its subdomains
+                            as <host_N> (repeatable). Enables host.
   --mask-format FMT         label format containing {type} and {n} once each
                             (default: <{type}_{n}>).
   --email-hash full|local   hash mode: hash the whole address (email_<hex>, default)
@@ -93,6 +99,9 @@ Options (they may be written before or after ANSWER_FILE):
   --ip-scope all|global|private
                             same as mask.
   --allow VALUE             same as mask (repeatable).
+  --deny VALUE              same as mask (repeatable).
+  --deny-file FILE          same as mask (repeatable).
+  --domain DOMAIN           same as mask (repeatable).
   --mask-format FMT         same as mask.
   -o, --output FILE         write to FILE instead of stdout.
   -h, --help                show this help.

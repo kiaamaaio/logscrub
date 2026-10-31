@@ -217,6 +217,9 @@ type Match struct {
 	Start, End int // 行内のバイト位置。[Start, End)
 	Kind       Kind
 	Class      Class // IP アドレスのときだけ使う
+	// HideDomain は、メールアドレスのドメインに、利用者が指定した値があること。
+	// ドメインを残す出力(`--email-hash local`)でも、全体を置換する(仕様 5.2)。
+	HideDomain bool
 }
 
 // LabelType は、置換後のラベルの種別名(label.Types のいずれか)を返す。

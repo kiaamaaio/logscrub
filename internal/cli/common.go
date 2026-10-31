@@ -1,8 +1,11 @@
 package cli
 
 import (
+	"bytes"
+	"errors"
 	"flag"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/kiaamaaio/logscrub/internal/detect"
@@ -18,6 +21,9 @@ type detectFlags struct {
 	ipScope      string
 	maskFormat   string
 	allow        stringList
+	deny         stringList
+	denyFiles    stringList
+	domains      stringList
 }
 
 func (d *detectFlags) register(fs *flag.FlagSet) {
@@ -26,7 +32,13 @@ func (d *detectFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&d.ipScope, "ip-scope", "all", "ip addresses to replace")
 	fs.StringVar(&d.maskFormat, "mask-format", "<{type}_{n}>", "label format")
 	fs.Var(&d.allow, "allow", "value that is never replaced")
+	fs.Var(&d.deny, "deny", "word to replace")
+	fs.Var(&d.denyFiles, "deny-file", "file with words to replace, one per line")
+	fs.Var(&d.domains, "domain", "domain whose host names are replaced")
 }
+
+// inputFiles は、検出のオプションが読むファイル。出力先と同じファイルを拒むために使う(仕様 4.6)。
+func (d *detectFlags) inputFiles() []string { return d.denyFiles }
 
 // options は、検出のオプションを、detect.Options と、ラベルの書式にする。
 // set は、コマンドラインで指定されたオプションの名前の集合。
@@ -36,6 +48,13 @@ func (d *detectFlags) options(set map[string]bool) (detect.Options, label.Format
 		kinds, err := detect.ParseTypes(d.types)
 		if err != nil {
 			return o, label.Format{}, fmt.Errorf("--types: %w", err)
+		}
+		// 語の指定がなければ、何も置換されないことに気づけないので、エラーにする(Q75)。
+		if kinds.Has(detect.KindCustom) && !set["deny"] && !set["deny-file"] {
+			return o, label.Format{}, errors.New("--types: custom needs --deny or --deny-file")
+		}
+		if kinds.Has(detect.KindHost) && !set["domain"] {
+			return o, label.Format{}, errors.New("--types: host needs --domain")
 		}
 		o.Kinds = kinds
 	}
@@ -62,7 +81,39 @@ func (d *detectFlags) options(set map[string]bool) (detect.Options, label.Format
 			o.Allow[v] = struct{}{}
 		}
 	}
+	o.Deny = d.deny
+	for _, p := range d.denyFiles {
+		words, err := readDenyFile(p)
+		if err != nil {
+			return o, label.Format{}, fmt.Errorf("--deny-file: %w", err)
+		}
+		o.Deny = append(o.Deny, words...)
+	}
+	o.Domains = d.domains
 	return o, f, nil
+}
+
+// readDenyFile は、語の一覧のファイルを読む(仕様 4.6)。エラーに、語の内容は含めない。
+func readDenyFile(path string) ([]string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	b = bytes.TrimPrefix(b, []byte("\xef\xbb\xbf"))
+	var words []string
+	n := 0
+	for line := range bytes.SplitSeq(b, []byte{'\n'}) {
+		n++
+		line = bytes.Trim(bytes.TrimSuffix(line, []byte{'\r'}), " \t")
+		if len(line) == 0 || line[0] == '#' {
+			continue
+		}
+		if bytes.IndexByte(line, '\r') >= 0 {
+			return nil, fmt.Errorf("%s: line %d: a word must not contain a carriage return", path, n)
+		}
+		words = append(words, string(line))
+	}
+	return words, nil
 }
 
 // ---- stderr への出力(値は出さない) ----

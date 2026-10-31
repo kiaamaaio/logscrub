@@ -1,10 +1,12 @@
 package detect
 
 import (
+	"bytes"
 	"cmp"
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/kiaamaaio/logscrub/internal/label"
 )
@@ -30,6 +32,10 @@ type Options struct {
 	IPScope Scope
 	// Allow は、置換しない値(完全一致)。
 	Allow map[string]struct{}
+	// Deny は、`--deny`・`--deny-file` の語(仕様 4.6)。指定すると、Kinds に custom が加わる。
+	Deny []string
+	// Domains は、`--domain` のドメイン(仕様 4.7)。指定すると、Kinds に host が加わる。
+	Domains []string
 	// Format は、置換済みのラベルとみなす書式。ゼロ値は label.DefaultFormat。
 	Format label.Format
 	// HashLen は、置換済みの hash 出力形とみなす 16 進数の桁数(8〜64)。ゼロ値は 12。
@@ -42,7 +48,10 @@ type Options struct {
 // 内部に作業領域を持つため、複数の goroutine から同時に使ってはならない。
 type Detector struct {
 	finders []finder
-	kinds   KindSet
+	// valueFinders は、利用者が指定した値の検出器(finders の一部)。ドメインを残す出力に、指定した値が残らないように、
+	// メールアドレスのドメインの確認にも使う(仕様 5.2)。
+	valueFinders []finder
+	kinds        KindSet
 	scope   Scope
 	allow   map[string]struct{}
 	format  label.Format
@@ -89,7 +98,7 @@ func New(o Options) (*Detector, error) {
 
 // builtinFinders は、種別ごとの検出器を返す。o は normalize 済みでなければならない。
 // 検出器は、段階が進むごとに加わった(email は段階 3、ipv4 / ipv6 は段階 4、secret は段階 5、uuid は段階 6。
-// v1.1 の aws_account は段階 4、aws_s3_bucket は段階 5、v1.2 の aws_host は段階 3)。
+// v1.1 の aws_account は段階 4、aws_s3_bucket は段階 5、v1.2 の aws_host は段階 3、v1.3 の host・custom は段階 5、6)。
 func builtinFinders(o Options) []finder {
 	var fs []finder
 	if o.Kinds.Has(KindEmail) {
@@ -116,6 +125,12 @@ func builtinFinders(o Options) []finder {
 	if o.Kinds.Has(KindAWSHost) {
 		fs = append(fs, awsHostFinder{})
 	}
+	if len(o.Domains) > 0 {
+		fs = append(fs, hostFinder{m: newLiteralMatcher(o.Domains)})
+	}
+	if len(o.Deny) > 0 {
+		fs = append(fs, customFinder{m: newLiteralMatcher(o.Deny)})
+	}
 	return fs
 }
 
@@ -133,11 +148,28 @@ func normalize(o Options) (Options, error) {
 	case o.HashLen < label.MinHashLen || o.HashLen > label.MaxHashLen:
 		return o, fmt.Errorf("hash length must be between %d and %d", label.MinHashLen, label.MaxHashLen)
 	}
+	// 語・ドメインは、エラーに出さない(仕様 4.6)。
+	for _, w := range o.Deny {
+		if w == "" || strings.ContainsAny(w, "\r\n") {
+			return o, errors.New("a --deny value must not be empty or contain a newline")
+		}
+	}
+	for _, d := range o.Domains {
+		if !validDomain(d) {
+			return o, errors.New("a --domain value must be a domain name such as example.co.jp (letters, digits, - and . only)")
+		}
+	}
 	if o.Kinds == 0 {
 		o.Kinds = DefaultKinds
 	}
 	if o.UUIDVersions != 0 {
 		o.Kinds = o.Kinds.With(KindUUID)
+	}
+	if len(o.Deny) > 0 {
+		o.Kinds = o.Kinds.With(KindCustom)
+	}
+	if len(o.Domains) > 0 {
+		o.Kinds = o.Kinds.With(KindHost)
 	}
 	if o.Format.IsZero() {
 		o.Format = label.DefaultFormat
@@ -161,6 +193,9 @@ func newDetector(o Options, finders []finder) (*Detector, error) {
 	for _, f := range finders {
 		if d.kinds.Has(f.kind()) {
 			d.finders = append(d.finders, f)
+			if k := f.kind(); k == KindCustom || k == KindHost {
+				d.valueFinders = append(d.valueFinders, f)
+			}
 		}
 	}
 	return d, nil
@@ -209,7 +244,28 @@ func (d *Detector) Find(line []byte, dst []Match) ([]Match, int) {
 		d.cands = append(d.cands, cand{Match: Match{Start: start, End: end}, src: srcPlaceholder})
 	})
 
-	return d.resolve(dst)
+	base := len(dst)
+	dst, kept := d.resolve(dst)
+	if len(d.valueFinders) > 0 {
+		for i := base; i < len(dst); i++ {
+			if m := &dst[i]; m.Kind == KindEmail {
+				m.HideDomain = d.domainHasValue(line[m.Start:m.End])
+			}
+		}
+	}
+	return dst, kept
+}
+
+// domainHasValue は、メールアドレス email のドメインの部分に、利用者が指定した語・ドメインがあるかを返す(仕様 5.2)。
+func (d *Detector) domainHasValue(email []byte) bool {
+	domain := email[bytes.IndexByte(email, '@')+1:]
+	for _, f := range d.valueFinders {
+		d.raw = f.find(domain, d.raw[:0])
+		if len(d.raw) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // cmpStart は、開始位置の昇順(同じなら、終了位置の降順)。
