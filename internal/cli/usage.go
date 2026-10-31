@@ -52,8 +52,8 @@ Options (they may be written before or after FILE):
   --mode mask|hash          mask: <email_1> style labels (default).
                             hash: <type>_<hex> using HMAC-SHA256; cannot be restored.
   --types LIST              comma separated types: email, ipv4, ipv6, secret, uuid,
-                            aws_account, aws_s3_bucket, aws_host; or groups:
-                            default, aws, cloud. Only the listed types are
+                            host, custom, aws_account, aws_s3_bucket, aws_host;
+                            or groups: default, aws, cloud. Only the listed types are
                             replaced (add "default" to keep the default ones).
                             Default: default (email, ipv4, ipv6, secret; uuid
                             and aws_* are off).

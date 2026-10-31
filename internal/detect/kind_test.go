@@ -56,7 +56,7 @@ func TestParseTypes(t *testing.T) {
 func TestParseTypesRejectsUnknown(t *testing.T) {
 	for _, spec := range []string{
 		"", "foo", "email,foo", "foo,email", "Email", "EMAIL", " email", "email ", "email, uuid",
-		"email,", ",email", "email,,uuid", "all", "ip", "ipv", "phone_jp", "postal_jp", "credit_card", "my_number", "base64", "custom",
+		"email,", ",email", "email,,uuid", "all", "ip", "ipv", "phone_jp", "postal_jp", "credit_card", "my_number", "base64",
 		"ipv4_global", "default,", "defaults",
 		"AWS", "Aws", "aws_", "aws_*", "aws_hosts", "aws_account_id", "s3", "aws-account", "clouds", "gcp", " aws", "aws,",
 	} {
@@ -96,7 +96,7 @@ func TestDefaultKinds(t *testing.T) {
 // 種別の表の性質(仕様 4 章): 種別名は重複せず、クラウドの種別は `<クラウド>_` で始まり、
 // 既定で有効の種別はクラウドの種別でない。並びは、共通の種別のあとに、クラウドごとにまとめる。
 func TestTypesTable(t *testing.T) {
-	want := []string{"email", "ipv4", "ipv6", "secret", "uuid", "aws_account", "aws_s3_bucket", "aws_host"}
+	want := []string{"email", "ipv4", "ipv6", "secret", "uuid", "host", "custom", "aws_account", "aws_s3_bucket", "aws_host"}
 	var got []string
 	seen := map[string]bool{}
 	for i, ti := range Types {
