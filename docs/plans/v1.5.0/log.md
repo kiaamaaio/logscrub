@@ -287,3 +287,31 @@ Q117〜Q120 は 2026-11-01 に、すべて案のとおりと確定した。修�
 | mask、`GOMAXPROCS=2` | 346.1 MB/s | 346.1 MB/s | +0.0% / +2.5% |
 | mask、`\` が多い、`GOMAXPROCS=1` | 75.9 MB/s | 207.6 MB/s | +173.6% / +171.6% |
 | mask、`\` が多い、`GOMAXPROCS=2` | 144.2 MB/s | 402.0 MB/s | +178.8% / +174.6% |
+
+### 版の完了条件の確認
+
+abc993d で実行した。
+
+`./scripts/go test ./internal/transform -run '^$' -fuzz … -fuzztime 90s`: 失敗なし。実行回数が前回より少ないのは、ほかのプロセスでメモリが足りず、swap を使っていたため(空きは約 200MB)。
+
+| 対象 | 実行回数 |
+|---|---|
+| `FuzzMaskStable` | 212,764 |
+| `FuzzHashStable` | 258,383 |
+| `FuzzRestoreRoundTrip` | 351,255 |
+
+`./scripts/go test -run Perf -v -timeout 40m ./cmd/logscrub -perf`(100MB、3 回の最速、2 コア): 3 つのテストが PASS。mask(ファイルから)は 329.6 MB/s、パイプからは 296.6 MB/s、`GOMAXPROCS=1` は 182.6 MB/s、hash は 361.2 MB/s、restore は 290.8 MB/s。README の性能の表は変えない。
+
+`-perf` の 1 回目は、`TestPerfMemoryWithLongLines` が `signal: killed` で失敗し、値も半分ほどだった。原因は測定の手順で、メモリ不足で `-race` の `docker run` のクライアントだけが落ち、残ったコンテナと `-perf` が同時に動いていた。コンテナを止め、単独で実行し直した上の結果を採る。
+
+`-race` は、`./scripts/go test -p 1 -race …` では `detect` と `transform` が OOM で強制終了された(dmesg で確認。テストの失敗ではない)。次の方法で通した。
+
+- `CGO_ENABLED=1 ./scripts/go test -race -c -o .cache/<パッケージ>.race ./internal/<パッケージ>` で作ったバイナリを、ホストで `GOGC=25 GOMEMLIMIT=300MiB`、`-test.count=1 -test.skip '^TestEngineMatchesSequential$'` で実行した
+- `transform`: PASS(19 秒、最大 404MB)。`detect`: PASS(約 21 分、最大 423MB)。`DATA RACE` の報告なし
+- `cli`、`stream`: `-p 1` の実行で ok(キャッシュの結果)
+- **`TestEngineMatchesSequential` は、abc993d の `-race` では実行していない**(`transform` のテスト以外の変更はなく、`internal/transform` の実装も変えていない。ただし `detect` は変えた)
+
+### 残っていること
+
+- 別のセッションで 4 回目の `/code-review` を行う
+- PR の説明は、まだ 3 回目のレビューの時点の内容で、「修正はまだ」と書かれている。push のときに、3 回目の表の扱いと、確かめたことを更新する。abc993d とこのコミットは push していない
