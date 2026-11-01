@@ -33,6 +33,8 @@ const secretFormatsHelp = `Supported secret formats:
   JWT                   eyJ... . eyJ... . ... (three parts)
   Authorization header  the credentials after "Bearer " or "Basic ", when they are the
                         value of Authorization or of one of the key names below
+  PEM private key       the lines between -----BEGIN ... PRIVATE KEY----- and -----END ...
+                        (each line gets its own label), also on one line
   Key-based             the value of password, passwd, secret, token, api_key, apikey,
                         access_key, private_key, client_secret, access_token,
                         refresh_token, auth_token, session_id (case-insensitive;

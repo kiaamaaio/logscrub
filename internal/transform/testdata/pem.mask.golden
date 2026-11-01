@@ -1,0 +1,23 @@
+2026-11-01T12:00:00Z INFO loading key for <email_1>
+-----BEGIN RSA PRIVATE KEY-----
+<secret_1>
+<secret_2>
+<secret_3>
+-----END RSA PRIVATE KEY-----
+-----BEGIN ENCRYPTED PRIVATE KEY-----
+<secret_4>
+<secret_5>
+
+<secret_1>
+-----END ENCRYPTED PRIVATE KEY-----
+-----BEGIN CERTIFICATE-----
+QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5YWJjZGVmZ2hpamts
+-----END CERTIFICATE-----
+{"name":"svc","pem":"-----BEGIN RSA PRIVATE KEY-----<secret_6>-----END RSA PRIVATE KEY-----\n","owner":"<email_2>"}
+KEY=-----BEGIN RSA PRIVATE KEY-----<secret_7>-----END RSA PRIVATE KEY-----
+{"private_key":"<secret_8>"}
+2026-11-01T12:00:01Z ERROR expected "-----BEGIN RSA PRIVATE KEY-----" in the file
+-----BEGIN RSA PRIVATE KEY-----
+<secret_1>
+2026-11-01T12:00:02Z ERROR key is cut here, src=<ipv4_private_1>
+2026-11-01T12:00:03Z INFO done

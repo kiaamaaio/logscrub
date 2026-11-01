@@ -77,6 +77,29 @@ func TestMaskGoldenPaths(t *testing.T) {
 	}
 }
 
+// testdata/pem.log を、既定の種別で mask した結果が、testdata/pem.mask.golden と一致する(期待値は、手で確認したもの)。
+func TestMaskGoldenPEM(t *testing.T) {
+	in, err := os.ReadFile("testdata/pem.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile("testdata/pem.mask.golden")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := detect.Options{}
+	got, st := mask(t, opts, string(in))
+	if got != string(want) {
+		t.Errorf("mask output differs from internal/transform/testdata/pem.mask.golden\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	if st.Unclosed != 1 {
+		t.Errorf("unclosed: %d", st.Unclosed)
+	}
+	if _, restored, _ := roundTrip(t, opts, string(in)); restored != string(in) {
+		t.Errorf("restore(mask(x)) != x:\n%s", restored)
+	}
+}
+
 // 書式が `{type}_{n}` でも、ホームディレクトリのパスのラベルは再度置換されず、戻る。
 func TestUserPathWithBareFormat(t *testing.T) {
 	f, err := label.ParseFormat("{type}_{n}")

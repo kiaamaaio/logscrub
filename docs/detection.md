@@ -25,6 +25,22 @@ JSON などの文法を壊さないよう、キー名が引用符で囲まれて
 `passwd://…` のように `:` の直後が `//` の場合は、キー名ではなく URL のスキームとして扱います(パスワードがあれば、URL のパスワードとして置換します)。
 値が `<スキーム>://<ユーザー>:<パスワード>@<ホスト>` の形で始まる場合(`password=postgres://app:s3cret@db/`)も、キー名ベースの値としては扱わず、パスワードの部分だけを置換します(`password=postgres://app:<secret_1>@db/`)。ユーザー情報のない URL(`token=https://hooks.example.com/…`)は、今までどおり値全体を置換します。
 
+### PEM の秘密鍵
+
+`-----BEGIN … PRIVATE KEY-----`(`RSA`、`EC`、`DSA`、`OPENSSH`、`ENCRYPTED` など)と `-----BEGIN PGP PRIVATE KEY BLOCK-----` のブロックの本文を置換します。印は残ります。`CERTIFICATE`、`PUBLIC KEY` は対象外です。
+
+```console
+$ logscrub mask key.pem
+-----BEGIN RSA PRIVATE KEY-----
+<secret_1>
+<secret_2>
+-----END RSA PRIVATE KEY-----
+```
+
+- 本文は、行ごとに別のラベルになります。行の数と改行コードは変わらず、`restore` で 1 バイトも違わずに戻ります。
+- 1 行に収まった形(`{"pem":"-----BEGIN…\n…\n-----END…\n"}`、改行を空白にした形)は、印の間を 1 つのラベルにします。
+- END の印がなければ、本文の形でない行でブロックを終えて、通常の処理に戻ります。後ろのログは消えません。この場合、BEGIN の行番号を stderr に通知します。
+
 ## AWS の値
 
 AWS アカウント ID と S3 のバケット名は、秘密情報ではありませんが、組織を特定できます。

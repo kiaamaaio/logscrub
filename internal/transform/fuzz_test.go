@@ -58,6 +58,11 @@ var fuzzFragments = []string{
 	`{"path":"C:\\Users\\yamada\\app.log"}`, "C:/Users/yamada/app.log", "/mnt/c/Users/yamada/x", "file:///home/yamada/a.txt",
 	"HOME=/home/yamada", "PWD=/home/user", "/home/ubuntu/x", "/home/$USER/x", "GET /home/dashboard HTTP/1.1",
 	"/home/<user_path_1>/proj", `C:\Users\<user_path_1>\AppData`, "/home/user_path_3f9a1c0b7d2e/proj", "<user_path_1>", "user_path_3f9a1c0b7d2e",
+	// PEM の秘密鍵(v1.5)
+	"-----BEGIN RSA PRIVATE KEY-----\nQUJDREVG\nR0hJSktM\n-----END RSA PRIVATE KEY-----", "-----BEGIN RSA PRIVATE KEY-----\n<secret_1>\n<secret_2>\n-----END RSA PRIVATE KEY-----",
+	"-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\n\nQUJDREVG\n-----END RSA PRIVATE KEY-----", "-----BEGIN CERTIFICATE-----\nQUJDREVG\n-----END CERTIFICATE-----",
+	"{\"pem\":\"-----BEGIN RSA PRIVATE KEY-----\\nQUJD\\n-----END RSA PRIVATE KEY-----\\n\"}", "KEY=-----BEGIN RSA PRIVATE KEY----- QUJDREVGR0hJSktM -----END RSA PRIVATE KEY-----", "-----BEGIN RSA PRIVATE KEY-----<secret_1>-----END RSA PRIVATE KEY-----",
+	"-----BEGIN RSA PRIVATE KEY-----\nQUJDREVG\n", "expected -----BEGIN RSA PRIVATE KEY----- here",
 	// 崩れたラベル(v1.3)
 	"&lt;email_1&gt;", `\<email_1\>`, `\\10.0.0.5\share`, "&lt;taro@example.com&gt;",
 	// 文脈(値でないもの)

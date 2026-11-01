@@ -104,6 +104,7 @@ func runMask(e *env, args []string) int {
 		printStats(e, &eng.Stats)
 	}
 	printUnchanged(e, eng.Stats.Kept, eng.Stats.KeptLineCount, eng.Stats.KeptLines)
+	printUnclosed(e, &eng.Stats)
 	if *failOnDetect && eng.Stats.Total() > 0 {
 		return exitDetected
 	}

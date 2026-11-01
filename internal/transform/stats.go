@@ -30,6 +30,10 @@ type Stats struct {
 	// 通知で、行番号を省略したことを示すために使う。
 	KeptLineCount int
 
+	// Unclosed は、END のない PEM のブロックの数。UnclosedLines は、その BEGIN の行番号(最初の数件だけ。仕様 6 章)。
+	Unclosed      int
+	UnclosedLines []int
+
 	counts [label.NumTypes]int
 }
 

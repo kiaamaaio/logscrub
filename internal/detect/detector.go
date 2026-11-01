@@ -229,9 +229,25 @@ func (d *Detector) Clone() *Detector {
 //  5. 重なりを解決する。範囲が長いほうを優先し、同じ長さなら、保護範囲、種別の優先順位、
 //     開始位置の順で決める。負けた候補は、重なっていない部分も含めて捨てる
 func (d *Detector) Find(line []byte, dst []Match) ([]Match, int) {
+	return d.find(line, nil, dst)
+}
+
+// FindSpans は、Find に、読み取りの段が見つけた PEM の秘密鍵の範囲(1 行分)を、`secret` の候補として加えたもの。
+// 範囲が行全体の本文(Body)なら、ほかの種別の検出を行わない。範囲は、Find の候補と同じ規則で扱う
+// (--allow、保護範囲、重なりの解決)。
+func (d *Detector) FindSpans(line []byte, spans []PEMSpan, dst []Match) ([]Match, int) {
+	return d.find(line, spans, dst)
+}
+
+func (d *Detector) find(line []byte, spans []PEMSpan, dst []Match) ([]Match, int) {
 	d.raw = d.raw[:0]
-	for _, f := range d.finders {
-		d.raw = f.find(line, d.raw)
+	if len(spans) == 0 || !spans[0].Body {
+		for _, f := range d.finders {
+			d.raw = f.find(line, d.raw)
+		}
+	}
+	for _, s := range spans {
+		d.raw = append(d.raw, Match{Start: s.Start, End: s.End, Kind: KindSecret})
 	}
 
 	d.cands = d.cands[:0]

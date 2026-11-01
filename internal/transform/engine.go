@@ -56,9 +56,10 @@ type block struct {
 	data     []byte
 	lines    []lineResult
 	matches  []detect.Match
-	err      error         // 読み取りエラー。これを持つブロックは、データも検出の結果もない
-	detected chan struct{} // 検出が終わると通知する
-	released chan *block   // 長い行のブロックだけ。書き換えが終わると、このブロックを読み取りに返す(容量は 1)
+	pem      []detect.PEMSpan // PEM の秘密鍵の範囲(読み取りの段が求める)
+	err      error            // 読み取りエラー。これを持つブロックは、データも検出の結果もない
+	detected chan struct{}    // 検出が終わると通知する
+	released chan *block      // 長い行のブロックだけ。書き換えが終わると、このブロックを読み取りに返す(容量は 1)
 }
 
 // Run は、inputs を順に読んで(行は入力ごとに区切る。Q22)、変換した結果を w に書く。
@@ -78,7 +79,9 @@ func (e *Engine) Run(inputs []io.Reader, w io.Writer) error {
 	ordered := make(chan *block, n)
 	done := make(chan struct{})
 
-	go readBlocks(inputs, free, work, ordered, done)
+	// 行をまたぐ状態は、読み取りの段だけに持つ(Q98)。ワーカーは、行ごとに独立に検出する。
+	pem := e.Det.NewPEMScanner(e.Stats.Lines)
+	go readBlocks(inputs, pem, free, work, ordered, done)
 	// 長い行のブロックは同時に 1 つなので、長い行の作業領域を、ワーカーの数だけ持たないように 1 つの Detector で検出する。
 	long := e.Det.Clone()
 	var wg sync.WaitGroup
@@ -92,6 +95,10 @@ func (e *Engine) Run(inputs []io.Reader, w io.Writer) error {
 	err := e.writeBlocks(w, ordered, free)
 	close(done)
 	wg.Wait()
+	if err == nil && pem != nil { // err が nil なら、読み取りは終わっている
+		e.Stats.Unclosed += pem.Unclosed
+		e.Stats.UnclosedLines = append(e.Stats.UnclosedLines, pem.UnclosedLines...)
+	}
 	return err
 }
 
@@ -99,7 +106,7 @@ func (e *Engine) Run(inputs []io.Reader, w io.Writer) error {
 //
 // 長い行のブロックは、書き換えが終わるまで次を読まず、そのブロックを次に使う。ブロックの数だけでは、
 // 長い行が続く入力で、メモリが行の長さの何倍にもなるため(メモリは、処理中の最長の行の程度に収める。仕様 7 章)。
-func readBlocks(inputs []io.Reader, free chan *block, work, ordered chan<- *block, done <-chan struct{}) {
+func readBlocks(inputs []io.Reader, pem *detect.PEMScanner, free chan *block, work, ordered chan<- *block, done <-chan struct{}) {
 	defer close(work)
 	defer close(ordered)
 	var long *block // 前の長い行のブロック
@@ -118,12 +125,18 @@ func readBlocks(inputs []io.Reader, free chan *block, work, ordered chan<- *bloc
 			b.data, err = r.Next(b.data)
 			if err == io.EOF {
 				free <- b
+				if pem != nil {
+					pem.Finish()
+				}
 				break
 			}
 			if err != nil {
 				b.err = err
 				ordered <- b
 				return
+			}
+			if pem != nil {
+				b.pem = pem.Scan(b.data, b.pem[:0])
 			}
 			var released chan *block
 			if len(b.data) > largeBlock {
@@ -177,10 +190,20 @@ func detectBlocks(d, long *detect.Detector, work <-chan *block, done <-chan stru
 				det = long
 			}
 			b.lines, b.matches = b.lines[:0], b.matches[:0]
+			pem := b.pem
 			for pos := 0; pos < len(b.data); {
 				var kept int
 				content, eol, _ := stream.NextLine(b.data[pos:])
-				b.matches, kept = det.Find(content, b.matches)
+				if len(pem) > 0 && pem[0].Pos == pos {
+					n := 1
+					for n < len(pem) && pem[n].Pos == pos {
+						n++
+					}
+					b.matches, kept = det.FindSpans(content, pem[:n], b.matches)
+					pem = pem[n:]
+				} else {
+					b.matches, kept = det.Find(content, b.matches)
+				}
 				contentEnd := pos + len(content)
 				pos = contentEnd + len(eol)
 				b.lines = append(b.lines, lineResult{len(b.matches), kept, contentEnd, pos})
@@ -217,7 +240,7 @@ func (e *Engine) writeBlocks(w io.Writer, ordered <-chan *block, free chan<- *bl
 			continue
 		}
 		if cap(b.data) > largeBlock || cap(b.matches) > maxPooledMatches {
-			b.data, b.lines, b.matches = nil, nil, nil
+			b.data, b.lines, b.matches, b.pem = nil, nil, nil, nil
 		}
 		free <- b
 	}

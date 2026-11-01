@@ -148,6 +148,29 @@ func printUnchanged(e *env, kept, keptLineCount int, keptLines []int) {
 	fmt.Fprintf(e.stderr, "logscrub: %s already replaced (%s). Check them before sharing.\n", what, lines)
 }
 
+// printUnclosed は、END のない PEM のブロックの、件数と行番号を通知する(仕様 6 章)。
+func printUnclosed(e *env, st *transform.Stats) {
+	if st.Unclosed == 0 {
+		return
+	}
+	what, pron := fmt.Sprintf("%d private key blocks", st.Unclosed), "them"
+	if st.Unclosed == 1 {
+		what, pron = "1 private key block", "it"
+	}
+	nums := make([]string, len(st.UnclosedLines))
+	for i, n := range st.UnclosedLines {
+		nums[i] = fmt.Sprint(n)
+	}
+	lines := "lines " + strings.Join(nums, ", ")
+	if st.Unclosed == 1 {
+		lines = "line " + nums[0]
+	}
+	if st.Unclosed > len(st.UnclosedLines) {
+		lines += ", ..."
+	}
+	fmt.Fprintf(e.stderr, "logscrub: %s had no END line (%s). Check the lines after %s before sharing.\n", what, lines, pron)
+}
+
 // maxMissingListed は、戻せなかったラベルを、stderr に並べる最大の数(件数は、全体を出す)。
 const maxMissingListed = 50
 
