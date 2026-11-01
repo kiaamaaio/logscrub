@@ -52,3 +52,30 @@
 - `mask --help` の既定で無効の種別に `host`・`custom` を加えた
 - 計画の入口のマージの記述を、CLAUDE.md の PR の運用に合わせた
 - `BenchmarkLiteralMatcher` の記録がないという指摘は誤りで、`docs/development/performance.md` にあった
+
+#### レビューの修正のあとの測定
+
+対象は `058b145`。
+
+- ファズテスト(各 90 秒): `FuzzMaskStable` 約 104 万回、`FuzzHashStable` 約 49 万回、`FuzzRestoreRoundTrip` 約 44 万回。失敗なし
+- `-perf` は 2 つのテストとも PASS。最も遅い測定でも目標の 50MB/s を超えた
+
+| 測定(100MB、3 回の最速) | 速度 | 最大メモリ |
+|---|---|---|
+| mask、ファイルから / パイプから | 204.7 / 173.1 MB/s | 31 MB |
+| uuid あり | 192.4 MB/s | 32 MB |
+| `--types default,aws` | 154.6 MB/s | 33 MB |
+| 語 10 個 / 語 1000 個 / `--domain` | 142.7 / 142.5 / 142.2 MB/s | 30〜32 MB |
+
+- 値の種類が 1000 個のログは、20MB でも 100MB でも最大メモリが 14.3 MB で変わらない
+
+| 測定(同じマシンで develop と交互に比較) | develop | 058b145 |
+|---|---|---|
+| 実バイナリ `logscrub mask`(2 回) | 208.8、209.8 MB/s | 203.4、206.1 MB/s |
+| 実バイナリ `--types default,aws`(2 回) | 158.2、159.4 MB/s | 155.0、153.2 MB/s |
+| `BenchmarkEngineMask`(3 回) | 約 217〜221 MB/s | 約 214〜218 MB/s |
+| `BenchmarkRestore`(3 回) | 約 196〜203 MB/s | 約 187〜189 MB/s |
+
+- 段階 9 の値(約 220 MB/s)より低いのは主に環境の差で、同じマシンの develop も約 209 MB/s だった
+- `BenchmarkRestore` は修正前の `86f05af` でも約 189〜191 MB/s で、レビューの修正による低下は見られない。develop との約 6% の差は、段階 9 の約 218 → 204 MB/s と同じ程度
+- `--types default,aws` の約 3% の低下は、段階 9 の幅より少し大きいが、変動の範囲かは確かめていない
