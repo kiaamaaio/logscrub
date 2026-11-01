@@ -84,7 +84,7 @@ func runMask(e *env, args []string) int {
 		return e.fail("%v", err)
 	}
 	defer in.Close()
-	w, closeOut, err := e.openOutput(output, files)
+	w, closeOut, err := e.openOutput(output, append(files, df.inputFiles()...))
 	if err != nil {
 		return e.fail("%v", err)
 	}

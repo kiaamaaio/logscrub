@@ -1,4 +1,4 @@
-// Package synthlog は、性能測定とベンチマーク用の合成ログを作る(plans/v1.0.0.md の Q29)。
+// Package synthlog は、性能測定とベンチマーク用の合成ログを作る(plans/v1.0.0/README.md の Q29)。
 //
 // 作るログは、1 行が 200 バイト前後で、約 30% の行に検出対象(メールアドレス、IP アドレス、
 // トークン類、UUID)を含み、一定の間隔で 1MB の JSON を 1 行で挟む。
@@ -7,7 +7,7 @@
 //
 // Config.AWS を指定すると、検出対象に AWS の値(署名、EC2 のホスト名、ARN、ECR、SQS、S3)と、
 // v1.2 で加えた AWS のサービスのホスト名(RDS、ELB、CloudFront など)、URL のパスワードを加える
-// (`--types default,aws` の測定用。plans/v1.1.0.md の Q39、plans/v1.2.0.md の段階 6)。
+// (`--types default,aws` の測定用。plans/v1.1.0/README.md の Q39、plans/v1.2.0/README.md の段階 6)。
 // 指定しない場合の出力は、v1.0 と同じ。
 package synthlog
 

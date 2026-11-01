@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kiaamaaio/logscrub/internal/label"
 )
@@ -168,5 +169,22 @@ func TestResolveLongOverlapChainMatchesReference(t *testing.T) {
 	gotOut, _ := d.Find([]byte(line), nil)
 	if !slices.Equal(gotOut, wantOut) {
 		t.Fatalf("got %d matches, want %d\n got  %v\n want %v", len(gotOut), len(wantOut), fmt.Sprint(gotOut[:min(5, len(gotOut))]), fmt.Sprint(wantOut[:min(5, len(wantOut))]))
+	}
+}
+
+// 連鎖して重なる候補が多い塊でも、候補の数の 2 乗の時間にならない(1 行 1MB でも 1 秒かからない)。
+func TestResolveChainedOverlapIsLinear(t *testing.T) {
+	const n = 1 << 20
+	d := &Detector{}
+	for i := 0; i+2 <= n; i++ {
+		d.cands = append(d.cands, cand{Match: Match{Start: i, End: i + 2, Kind: KindCustom}})
+	}
+	start := time.Now()
+	got, _ := d.resolve(nil)
+	if len(got) != n/2 || got[1].Start != 2 {
+		t.Fatalf("got %d matches", len(got))
+	}
+	if el := time.Since(start); el > 5*time.Second {
+		t.Errorf("took %v", el)
 	}
 }

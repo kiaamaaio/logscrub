@@ -14,6 +14,8 @@ var typeDescriptions = map[detect.Kind]string{
 	detect.KindIPv6:        "IPv6 addresses (labels: ipv6_global, ipv6_private; special addresses are kept)",
 	detect.KindSecret:      "tokens and credentials (see --verbose for the formats)",
 	detect.KindUUID:        "UUIDs, versions 1-8 (enable with --types default,uuid or --uuid-versions)",
+	detect.KindHost:        "host names in the domains given with --domain",
+	detect.KindCustom:      "words given with --deny or --deny-file",
 	detect.KindAWSAccount:  "AWS account IDs in ARNs, ECR registries and SQS queue URLs",
 	detect.KindAWSS3Bucket: "S3 bucket names in s3:// URLs, S3 endpoints and ARNs",
 	detect.KindAWSHost:     "customer-specific part of AWS service host names (RDS, ELB, CloudFront, ...)",

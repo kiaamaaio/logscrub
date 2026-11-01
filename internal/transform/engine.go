@@ -18,6 +18,9 @@ type Engine struct {
 	Rep Replacer
 	// Stats は、実行結果の集計。Run は、これに加算する。
 	Stats Stats
+	// Inspect は、任意。変換した 1 行(改行コードを含まない)を受け取り、その行で
+	// 置換済みの形として数える文字列の数を返す。restore が、mask の出力を確かめるために使う。
+	Inspect func(out []byte) int
 }
 
 // Run は、inputs を順に読んで(行は入力ごとに区切る。Q22)、変換した結果を w に書く。
@@ -32,26 +35,26 @@ func (e *Engine) Run(inputs []io.Reader, w io.Writer) error {
 		e.Stats.Lines++
 		var kept int
 		matches, kept = e.Det.Find(content, matches[:0])
+		line := content
+		if len(matches) > 0 {
+			out = out[:0]
+			last := 0
+			for _, m := range matches {
+				out = append(out, content[last:m.Start]...)
+				out = e.Rep.Append(out, content, m)
+				last = m.End
+				e.Stats.add(m)
+			}
+			line = append(out, content[last:]...)
+			out = line
+		}
+		if e.Inspect != nil {
+			kept += e.Inspect(line)
+		}
 		if kept > 0 {
 			e.Stats.addKept(kept, e.Stats.Lines)
 		}
-		if len(matches) == 0 {
-			if _, err := bw.Write(content); err != nil {
-				return err
-			}
-			_, err := bw.Write(eol)
-			return err
-		}
-		out = out[:0]
-		last := 0
-		for _, m := range matches {
-			out = append(out, content[last:m.Start]...)
-			out = e.Rep.Append(out, content, m)
-			last = m.End
-			e.Stats.add(m)
-		}
-		out = append(out, content[last:]...)
-		if _, err := bw.Write(out); err != nil {
+		if _, err := bw.Write(line); err != nil {
 			return err
 		}
 		_, err := bw.Write(eol)

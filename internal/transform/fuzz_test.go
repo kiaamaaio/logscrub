@@ -48,6 +48,13 @@ var fuzzFragments = []string{
 	"<email_1>", "<ipv4_private_1>", "password=<secret_1>", "Bearer <secret_2>", "<uuid_1>", "<aws_host_1>.cloudfront.net",
 	"https://u:<secret_1>@<ipv4_private_1>/", "email_3f9a1c0b7d2e", "hash_3f9a1c0b7d2e@example.com", "password=secret_3f9a1c0b7d2e",
 	"ipv4_global_a1b2c3d4e5f6", "postgres://app:secret_3f9a1c0b7d2e@db/x",
+	// 利用者が指定した語とドメイン(fuzzOptions の 3 つ目)。v1.3
+	"acme", "ACME-prod", "acme_prod", "acmerica", "Foo Bar", "株式会社アクメの", "db.corp.example.jp", "CORP.EXAMPLE.JP:8080",
+	"curl https://internal.corp.example.jp/api", "taro@acme.co.jp", "taro@mail.corp.example.jp", "postgres://app:s3cret@db.mycompany.internal/",
+	"notcorp.example.jp", "corp.example.jp.evil.org", "<custom_1>", "<host_1>", "custom_3f9a1c0b7d2e", "host_3f9a1c0b7d2e", "password=<custom_1>",
+	"https://u:<secret_1>@<host_1>/", "https://u:secret_3f9a1c0b7d2e@host_3f9a1c0b7d2e/",
+	// 崩れたラベル(v1.3)
+	"&lt;email_1&gt;", `\<email_1\>`, `\\10.0.0.5\share`, "&lt;taro@example.com&gt;",
 	// 文脈(値でないもの)
 	"2026-10-18T12:34:56.789Z", "12:34:56", "INFO", "ERROR", "level=warn", "GET /api/v1/users?id=42 HTTP/1.1", "status=200",
 	"std::string", "fmt::Error", "接続元", "から", "ユーザー", "msg=\"login failed\"", "{", "}", `"user":`, "[ec2-user@ip-10-0-1-23 ~]$",

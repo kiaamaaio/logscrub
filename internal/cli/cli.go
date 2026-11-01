@@ -39,6 +39,8 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		return runRestore(e, args[1:])
 	case "types":
 		return runTypes(e, args[1:])
+	case "version", "--version", "-version":
+		return runVersion(e, args[1:])
 	case "-h", "--help", "-help", "help":
 		fmt.Fprint(stdout, usageTop)
 		return exitOK

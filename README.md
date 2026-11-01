@@ -1,6 +1,6 @@
 # logscrub
 
-ログやテキストに含まれる **メールアドレス・IP アドレス・トークン類(URL のパスワードを含む)・UUID・AWS の値(アカウント ID、S3 のバケット名、サービスのホスト名)** を、
+ログやテキストに含まれる **メールアドレス・IP アドレス・トークン類(URL のパスワードを含む)・UUID・AWS の値(アカウント ID、S3 のバケット名、サービスのホスト名)・利用者が指定した語やドメイン** を、
 種別が分かるラベル(`<email_1>`)またはハッシュ値に置き換える CLI です。
 ログ調査の内容を AI に安全に渡すことを、主な用途としています。
 
@@ -16,6 +16,33 @@ $ echo "taro@example.com 192.168.0.1 password=hunter2" | logscrub mask
 
 > **注意**: 検出は完全ではありません(正規表現による形式の一致が基本です)。
 > 外部に出す前に、必ず出力を確認してください。見逃しや誤検出の例は、[LIMITATIONS.md](LIMITATIONS.md) にまとめています。
+
+## 導入
+
+### バイナリを取得する
+
+[Releases](https://github.com/kiaamaaio/logscrub/releases) から、環境に合うファイルを取得します。Go の環境は要りません。
+ファイル名は `logscrub-<版>-<OS>-<CPU>` で、OS は `linux`・`darwin`・`windows`、CPU は `amd64`・`arm64` です(Windows は末尾に `.exe`)。
+
+```console
+$ curl -fLO https://github.com/kiaamaaio/logscrub/releases/download/v1.3.0/logscrub-v1.3.0-linux-amd64
+$ curl -fLO https://github.com/kiaamaaio/logscrub/releases/download/v1.3.0/SHA256SUMS
+$ sha256sum --check --ignore-missing SHA256SUMS
+$ chmod +x logscrub-v1.3.0-linux-amd64
+$ sudo mv logscrub-v1.3.0-linux-amd64 /usr/local/bin/logscrub
+$ logscrub --version
+```
+
+- macOS: `sha256sum` の代わりに `shasum -a 256 --check --ignore-missing SHA256SUMS` を使います。バイナリは署名していないので、ブラウザで取得すると、Gatekeeper に止められます。`curl` で取得するか、`xattr -d com.apple.quarantine logscrub-…` で解除してください。
+- Windows: 署名していないので、SmartScreen の警告が出ることがあります。PowerShell のパイプは文字コードを変えることがあるので、ファイルを引数で渡してください(`logscrub.exe mask app.log -o masked.log`)。
+
+### Go でインストールする
+
+Go 1.27 以上が必要です。
+
+```console
+$ go install github.com/kiaamaaio/logscrub/cmd/logscrub@latest
+```
 
 ## 使い方
 
@@ -43,7 +70,10 @@ $ pbpaste | logscrub restore --source <(grep ERROR app.log)
 ```
 
 **`restore` には、`mask` のときと同じ検出オプション**(`--types`、`--uuid-versions`、`--ip-scope`、
-`--allow`、`--mask-format`)と、同じ入力を、同じ順で指定してください。違うと、連番がずれます。
+`--allow`、`--deny`、`--deny-file`、`--domain`、`--mask-format`)と、同じ入力を、同じ順で指定してください。違うと、連番がずれます。
+`mask` と `restore` は、同じ版で使ってください(`logscrub --version` で確かめられます)。
+
+AI の回答でラベルがエスケープされていても(`&lt;email_1&gt;`、`\<email_1\>`)、元の値に戻します。括りを外した `email_1` は戻しません。
 
 ### hash: 鍵つきのハッシュに置き換える
 
@@ -67,6 +97,9 @@ $ logscrub mask --types default,aws app.log         # 既定の種別に AWS の
 $ logscrub mask --uuid-versions 4,7 app.log         # UUID の v4 と v7 だけ(uuid も有効になる)
 $ logscrub mask --ip-scope global app.log           # グローバルな IP だけ(内部アドレスは残す)
 $ logscrub mask --allow support@example.com app.log # この値は置換しない(複数回指定できる)
+$ logscrub mask --deny acme app.log                 # 会社名などの語を <custom_1> にする(複数回指定できる)
+$ logscrub mask --deny-file words.txt app.log       # 語の一覧のファイルから読む(1 行 1 語)
+$ logscrub mask --domain example.co.jp app.log      # このドメインのホスト名を <host_1> にする(複数回指定できる)
 $ logscrub mask --stats app.log                     # 種別ごとの件数を stderr に出す
 $ logscrub mask --fail-on-detect app.log            # 1 件でも置換したら、終了コード 2
 $ logscrub mask app.log -o masked.log               # ファイルに書く
@@ -87,6 +120,9 @@ $ logscrub types --verbose                          # 対応する種別と、se
 | `--uuid-versions 4,7` | 対象にする UUID のバージョン(1〜8)。これだけで `uuid` が対象に加わる |
 | `--ip-scope all\|global\|private` | 置換する IP アドレスの範囲(既定 `all`) |
 | `--allow VALUE` | 置換しない値(完全一致、複数回指定可) |
+| `--deny VALUE` | 伏せる語(複数回指定可)。`custom` が対象に加わる。[詳細](docs/detection.md#指定した語custom) |
+| `--deny-file FILE` | 語の一覧のファイル(1 行 1 語。空行と `#` の行は無視。複数回指定可) |
+| `--domain DOMAIN` | ホスト名を伏せるドメイン(サブドメインを含む。複数回指定可)。`host` が対象に加わる。[詳細](docs/detection.md#指定したドメインのホスト名host) |
 | `--mask-format FMT` | ラベルの書式。`{type}` と `{n}` をちょうど 1 回ずつ含める(既定 `<{type}_{n}>`) |
 | `--email-hash full\|local` | hash モードのメールアドレス。`full`(既定): 全体、`local`: ローカルパートだけ |
 | `--hash-length N` | hash モードの桁数(8〜64、既定 12) |
@@ -118,11 +154,13 @@ stderr に出します(終了コードは 0)。
 |---|---|---|
 | `email` | メールアドレス(TLD は英字 2 文字以上) | 有効 |
 | `ipv4` / `ipv6` | IP アドレス。グローバルとプライベートを、ラベルで区別する(`<ipv4_global_1>`、`<ipv4_private_1>`) | 有効 |
-| `secret` | トークン類(下の表) | 有効 |
+| `secret` | トークン類([対応形式](docs/detection.md#secret-の対応形式)) | 有効 |
 | `uuid` | UUID(バージョン 1〜8) | 無効 |
-| `aws_account` | AWS アカウント ID(ARN・ECR・SQS・S3 Control の中のもの。[AWS の値](#aws-の値)) | 無効 |
-| `aws_s3_bucket` | S3 のバケット名(`s3://`・S3 の URL・ARN の中のもの。[AWS の値](#aws-の値)) | 無効 |
-| `aws_host` | AWS のサービスのホスト名の、利用者ごとの部分(RDS、ELB、CloudFront など。[AWS のサービスのホスト名](#aws-のサービスのホスト名)) | 無効 |
+| `aws_account` | AWS アカウント ID(ARN・ECR・SQS・S3 Control の中のもの。[AWS の値](docs/detection.md#aws-の値)) | 無効 |
+| `aws_s3_bucket` | S3 のバケット名(`s3://`・S3 の URL・ARN の中のもの。[AWS の値](docs/detection.md#aws-の値)) | 無効 |
+| `aws_host` | AWS のサービスのホスト名の、利用者ごとの部分(RDS、ELB、CloudFront など。[AWS のサービスのホスト名](docs/detection.md#aws-のサービスのホスト名)) | 無効 |
+| `host` | `--domain` で指定したドメインのホスト名([指定したドメイン](docs/detection.md#指定したドメインのホスト名host)) | `--domain` で有効 |
+| `custom` | `--deny`・`--deny-file` で指定した語([指定した語](docs/detection.md#指定した語custom)) | `--deny` で有効 |
 
 `--types` には、種別名のほかに、次のまとまりを書けます。
 
@@ -148,92 +186,7 @@ IP アドレスだけを隠しても、ホスト名から元の値が読めて�
 | プライベート DNS | `ip-10-0-1-23.ap-northeast-1.compute.internal`、`ip-10-0-1-23.ec2.internal` | `ip-<ipv4_private_1>.ap-northeast-1.compute.internal` |
 | ドメインのない IP 名 | `ip-10-0-1-23`(シェルのプロンプト、Kubernetes のノード名など) | `ip-<ipv4_private_1>` |
 
-### `secret` の対応形式
-
-| 区分 | 形式 |
-|---|---|
-| AWS アクセスキー ID | `AKIA` / `ASIA` + 英大文字・数字 16 文字 |
-| URL のパスワード | `<スキーム>://<ユーザー>:<パスワード>@<ホスト>` のパスワード部分(`postgres://app:s3cret@db-host/`、`redis://:s3cret@host`)。その形の `@` は、メールアドレスとして扱わない |
-| AWS の署名(SigV4) | `X-Amz-Signature=` / `Signature=`(語は大文字・小文字を区別しない)の後ろの、小文字の 16 進数ちょうど 64 文字。署名付き URL と、`Authorization: AWS4-HMAC-SHA256 …, Signature=…` の署名。語と `=` は残す |
-| GitHub | `ghp_` `gho_` `ghu_` `ghs_` `ghr_` + 英数字 36 文字以上、`github_pat_` + 英数字・`_` 22 文字以上 |
-| Slack | `xoxb-` `xoxp-` `xoxa-` `xoxr-` `xoxs-` + 英数字・`-` 10 文字以上 |
-| Stripe | `sk_live_` `sk_test_` `rk_live_` `rk_test_` + 英数字 24 文字以上 |
-| Google API キー | `AIza` + 英数字・`-`・`_` 35 文字 |
-| `sk-` 形式の API キー | `sk-` + 英数字・`-`・`_` 20 文字以上 |
-| JWT | `eyJ…` `.` `eyJ…` `.` `…` の 3 部構成 |
-| Authorization ヘッダ | `Bearer <値>` / `Basic <値>` の値部分(`Authorization` などのキー名の値の位置に限る) |
-| キー名ベース | `password` `passwd` `secret` `token` `api_key` `apikey` `access_key` `private_key` `client_secret` `access_token` `refresh_token` `auth_token` `session_id` の値(`key=value`、`key: value`、`"key": "value"`) |
-
-キー名の照合は、大文字・小文字を区別せず、`-` `_` `.` と camelCase の境目を区切りとして、
-キー名の末尾の単位で行います(`X-Auth-Token`、`DB_PASSWORD`、`accessToken` は対象。`max_tokens`、
-`token_count`、`passwordless`、`PWD` は対象外)。値の部分だけを置換し、キー名・区切り・引用符は残します。
-JSON などの文法を壊さないよう、キー名が引用符で囲まれている場合は、文字列の値だけを置換します。
-`passwd://…` のように `:` の直後が `//` の場合は、キー名ではなく URL のスキームとして扱います(パスワードがあれば、URL のパスワードとして置換します)。
-値が `<スキーム>://<ユーザー>:<パスワード>@<ホスト>` の形で始まる場合(`password=postgres://app:s3cret@db/`)も、キー名ベースの値としては扱わず、パスワードの部分だけを置換します(`password=postgres://app:<secret_1>@db/`)。ユーザー情報のない URL(`token=https://hooks.example.com/…`)は、今までどおり値全体を置換します。
-
-### AWS の値
-
-AWS アカウント ID と S3 のバケット名は、秘密情報ではありませんが、組織を特定できます。
-**既定では無効**で、`--types default,aws` のように指定した場合だけ置換します。
-どちらも、**決まった形の中に現れたものだけ**を検出し、値の部分だけを置換します。同じ値は、どの形でも同じラベルになります。
-
-| 種別 | 形 | 例(置換後) |
-|---|---|---|
-| `aws_account` | ARN | `arn:aws:iam::<aws_account_1>:role/deployer` |
-| `aws_account` | ECR のレジストリ | `<aws_account_1>.dkr.ecr.ap-northeast-1.amazonaws.com/app:latest` |
-| `aws_account` | SQS のキュー URL | `https://sqs.ap-northeast-1.amazonaws.com/<aws_account_1>/orders` |
-| `aws_account` | S3 Control のホスト | `<aws_account_1>.s3-control.ap-northeast-1.amazonaws.com` |
-| `aws_s3_bucket` | `s3://`(`s3a://`、`s3n://`) | `s3://<aws_s3_bucket_1>/logs/a.gz` |
-| `aws_s3_bucket` | バーチャルホスト形式 | `https://<aws_s3_bucket_1>.s3.ap-northeast-1.amazonaws.com/a.txt` |
-| `aws_s3_bucket` | パス形式 | `https://s3.ap-northeast-1.amazonaws.com/<aws_s3_bucket_1>/a.txt` |
-| `aws_s3_bucket` | ARN | `arn:aws:s3:::<aws_s3_bucket_1>/logs/*` |
-
-- ARN のパーティションは `aws`、`aws-cn`、`aws-us-gov`、`aws-iso`、`aws-iso-b`、`aws-iso-e`、`aws-iso-f`、`aws-eusc`。
-  ホスト名のドメインは `amazonaws.com`、`amazonaws.com.cn`、`amazonaws.eu` です(ISO リージョンのドメインは対象外)。
-- `.s3-control.`・`.s3-control.dualstack.`・`.s3-control-fips.`・`.s3-control-fips.dualstack.` のホストも対象です。
-- ARN のアカウント ID の欄が空のもの(`arn:aws:s3:::bucket`)や `aws` のもの(`arn:aws:iam::aws:policy/…`)は、置換しません。
-- バケット名は、今の命名規則(英小文字・数字・`.`・`-` の 3〜63 文字など)に合うものだけを置換します。
-- ARN・ホスト名・`s3://` などの決まった部分は、大文字・小文字を区別します(小文字の形だけが対象)。
-
-### AWS のサービスのホスト名
-
-AWS のサービスのホスト名には、DB の名前、ロードバランサの名前、ランダムな ID などの**利用者ごとの部分**が入ります。
-設定によっては AWS の外からアクセスできるため、組織と接続先を特定できる値として扱います。
-**既定では無効**です(`--types default,aws` または `--types aws_host`)。
-下の表の**末尾の形に一致するホスト名だけ**を検出し、末尾の形より前(利用者ごとの部分)をまとめて置換します。
-サービス名とリージョンは残るので、「どのサービスへの接続か」は読めます。
-
-```console
-$ echo "connect mydb.cluster-c9akciq32.ap-northeast-1.rds.amazonaws.com:5432" | logscrub mask --types aws_host
-connect <aws_host_1>.ap-northeast-1.rds.amazonaws.com:5432
-```
-
-| サービス | 末尾の形(`<リージョン>` はホスト名の中のリージョン、`<ドメイン>` は `amazonaws.com`・`amazonaws.com.cn`・`amazonaws.eu`) |
-|---|---|
-| ELB(CLB、ALB / NLB、ALB) | `.<リージョン>.elb.<ドメイン>` / `.elb.<リージョン>.<ドメイン>` |
-| API Gateway | `.execute-api.<リージョン>.<ドメイン>` |
-| Lambda 関数 URL | `.lambda-url.<リージョン>.on.aws` |
-| CloudFront / Global Accelerator | `.cloudfront.net` / `.awsglobalaccelerator.com` |
-| EKS(IPv4 のクラスタ) | `.<リージョン>.eks.<ドメイン>` |
-| RDS・Aurora・RDS Proxy | `.<リージョン>.rds.<ドメイン>` |
-| Redshift | `.<リージョン>.redshift.<ドメイン>`、`.<リージョン>.redshift-serverless.<ドメイン>` |
-| OpenSearch | `.<リージョン>.es.<ドメイン>`、`.<リージョン>.aoss.<ドメイン>` |
-| MSK / Amazon MQ | `.kafka.<リージョン>.<ドメイン>` / `.mq.<リージョン>.<ドメイン>`、`.mq.<リージョン>.on.aws` |
-| Transfer Family | `.server.transfer.<リージョン>.<ドメイン>` |
-| AppSync | `.appsync-api.<リージョン>.<ドメイン>`、`.appsync-realtime-api.<リージョン>.<ドメイン>` |
-| Cognito のドメイン | `.auth.<リージョン>.amazoncognito.com` |
-| IoT Core | `.iot.<リージョン>.<ドメイン>`(AWS 共通の `data-ats.iot.…`・`api.tunneling.iot.…`・`data.tunneling.iot.…` は除く) |
-| App Runner / Amplify Hosting | `.<リージョン>.awsapprunner.com` / `.amplifyapp.com` |
-| Elastic Beanstalk | `.<リージョン>.elasticbeanstalk.com`、`.elasticbeanstalk.com` |
-| EC2 のパブリックホスト名(IPv6・デュアルスタック) | `.<リージョン>.ip.aws` |
-
-- 利用者ごとの部分は、英字(大文字・小文字)・数字・`-`・`.` からなり、先頭と末尾が英数字、`.` が 2 つ続かないもの。
-  その前が、英数字・`-`・`_`・`.` でないこと。`dualstack.`(ELB)、`internal-`(内部向けの ELB)なども、利用者ごとの部分に含めます。
-- 末尾の形の決まった部分は、小文字の形だけが対象です。複数の形が当てはまる場合(`.<リージョン>.elasticbeanstalk.com` と `.elasticbeanstalk.com`)は、長いほうの形を採ります。
-- AWS 自体の API のエンドポイント(`rds.ap-northeast-1.amazonaws.com`、`kafka.ap-northeast-1.amazonaws.com`)は、利用者ごとの部分がないので置換しません。
-- EC2 のホスト名(`ec2-…`、`ip-…`)は `ipv4`、S3 のホスト名は `aws_s3_bucket`、ECR・S3 Control のホスト名は `aws_account` として置換されます(`aws_host` にはなりません)。
-- `admin@mydb.….rds.amazonaws.com` のように、メールアドレスの一部として読めるホスト名は、長いメールアドレスが優先されます。
-- 表の形は、2026-10-18 に AWS の公式ドキュメントで確認しました。
+詳しい形式は [docs/detection.md](docs/detection.md) にあります([`secret` の対応形式](docs/detection.md#secret-の対応形式)、[AWS の値](docs/detection.md#aws-の値)、[AWS のサービスのホスト名](docs/detection.md#aws-のサービスのホスト名)、[指定した語](docs/detection.md#指定した語custom)、[指定したドメイン](docs/detection.md#指定したドメインのホスト名host))。
 
 ## 性質
 
@@ -259,11 +212,13 @@ connect <aws_host_1>.ap-northeast-1.rds.amazonaws.com:5432
 
 | 実行 | 速度 | 最大メモリ |
 |---|---|---|
-| `logscrub mask < big.log > /dev/null` | 約 229 MB/s | 30 MB |
-| `cat big.log \| logscrub mask > /dev/null` | 約 207 MB/s | 30 MB |
-| 同上(`--types default,uuid`) | 約 218 MB/s | 33 MB |
-| AWS の値(ホスト名、URL のパスワードを含む)を含む合成ログを `--types default,aws` で | 約 173 MB/s | 35 MB |
-| 同上(`aws_host` なし: `--types default,aws_account,aws_s3_bucket`) | 約 197 MB/s | 31 MB |
+| `logscrub mask < big.log > /dev/null` | 約 222 MB/s | 30 MB |
+| `cat big.log \| logscrub mask > /dev/null` | 約 198 MB/s | 32 MB |
+| 同上(`--types default,uuid`) | 約 211 MB/s | 32 MB |
+| AWS の値(ホスト名、URL のパスワードを含む)を含む合成ログを `--types default,aws` で | 約 168 MB/s | 36 MB |
+| 同上(`aws_host` なし: `--types default,aws_account,aws_s3_bucket`) | 約 192 MB/s | 32 MB |
+| 語を 1000 個指定(`--deny-file`) | 約 155 MB/s | 30 MB |
+| `--domain` を指定 | 約 154 MB/s | 30 MB |
 
 - **メモリ**: 対応表(検出した値の種類数に比例)が主です。値の種類数が一定(1,000 種類)なら、入力が
   20MB でも 100MB でも、最大 15MB ほどで変わりません。ほぼすべての値が異なる 100MB のログでは、29.8MB でした。
@@ -285,6 +240,8 @@ $ ./scripts/go test ./...
 $ ./scripts/go vet ./...
 $ ./scripts/go build -o bin/logscrub ./cmd/logscrub
 ```
+
+配布用のバイナリは `scripts/build-release` で作ります(手順は [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) 4 章)。
 
 仕様は [docs/SPEC.md](docs/SPEC.md)(目次。章ごとの本文は [docs/spec/](docs/spec/)。パッケージ構成は 8 章)、開発環境・構成・設計の注意点は [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)、版ごとの実装計画と進捗・判断の記録は [docs/plans/](docs/plans/) にあります。
 

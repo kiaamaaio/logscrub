@@ -1,0 +1,2 @@
+# go.mod の require に書いてよいモジュール(1 行に 1 つ)。.githooks/pre-commit が確かめる。
+# 標準ライブラリのみの方針なので、空のままにする。足すときは、仕様と README の変更もあわせて確認する(CLAUDE.md)。

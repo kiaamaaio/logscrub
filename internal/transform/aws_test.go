@@ -10,7 +10,7 @@ import (
 )
 
 // AWS の値(v1.1)と、AWS のサービスのホスト名・URL のパスワード(v1.2)についての、往復・冪等性
-// (plans/v1.1.0.md 段階 6、plans/v1.2.0.md 段階 6。仕様 9 章「AWS」「AWS のホスト名」「URL のパスワード」)。
+// (plans/v1.1.0/README.md 段階 6、plans/v1.2.0/README.md 段階 6。仕様 9 章「AWS」「AWS のホスト名」「URL のパスワード」)。
 
 // awsKinds は、`--types default,aws` に当たる種別。
 var awsKinds = detect.DefaultKinds.With(detect.KindAWSAccount).With(detect.KindAWSS3Bucket).With(detect.KindAWSHost)

@@ -1,0 +1,9 @@
+2026-11-01T09:00:00Z INFO <custom_1> billing started on <custom_2>-prod-1
+2026-11-01T09:00:01Z INFO <custom_3>_REGION=tokyo acmerica is another company
+2026-11-01T09:00:02Z INFO 株式会社<custom_4>の <custom_5> project
+2026-11-01T09:00:03Z INFO curl https://<host_1>/api
+2026-11-01T09:00:04Z INFO connecting to <host_2>:5432
+2026-11-01T09:00:05Z WARN postgres://app:<secret_1>@<host_3>/app failed
+2026-11-01T09:00:06Z WARN notify <email_1> and <email_2>
+2026-11-01T09:00:07Z INFO notcorp.example.jp corp.example.jp.evil.org are other hosts
+2026-11-01T09:00:08Z INFO see <host_4>. and <host_5>

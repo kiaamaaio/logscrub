@@ -1,0 +1,212 @@
+# logscrub v1.3.0 実装計画
+
+- 仕様: [SPEC.md](../../SPEC.md)(以下「仕様」。節番号は仕様のもの。v1.3 の内容は「v1.3 で追加」と書いた箇所と、決定事項 22〜26)
+- 開発環境・パッケージ構成・設計の注意点: [DEVELOPMENT.md](../../DEVELOPMENT.md)
+- 前提: v1.2.0 の構成(種別の表、`resolve` の重なりの解決、`Engine`、`hostRunCache`、`isHostEnd`)をそのまま使う。標準ライブラリのみ
+- ブランチ: `feature/v1.3.0-custom-values`(develop から作成)。段階ごとにコミットし、develop へは、指示があってから、`/code-review` のあとで AI が PR を作り、人がマージする(CLAUDE.md)
+- 各段階の完了条件: `./scripts/go test ./...` と `./scripts/go vet ./...` が通ること(CLAUDE.md)
+- **5 章の回答待ちの項目は、推測で実装しない。** 各段階の「前提となる確認」に挙げた項目が決まるまで、その段階には入らない
+
+---
+
+## 1. 範囲
+
+v1.3.0 は「利用者が指定した値を伏せる」ことを中心に、配布と restore の使いやすさを補う。新しいオプションの追加が中心なので、マイナー版とする。
+
+| issue | 内容 | 段階 |
+|---|---|---|
+| [#7](https://github.com/kiaamaaio/logscrub/issues/7) | `--deny` / `--deny-file`(指定した語を伏せる) | 3〜5、7、9 |
+| [#8](https://github.com/kiaamaaio/logscrub/issues/8) | `--domain`(指定したドメインのホスト名を伏せる) | 3、4、6、7、9 |
+| [#9](https://github.com/kiaamaaio/logscrub/issues/9) | 導入の手順と配布用のバイナリ | 10 |
+| [#10](https://github.com/kiaamaaio/logscrub/issues/10) | `--version` | 1 |
+| [#12](https://github.com/kiaamaaio/logscrub/issues/12) | 全体のヘルプが検出対象に追いついていない | 2 |
+| [#17](https://github.com/kiaamaaio/logscrub/issues/17) | restore で、AI が崩したラベルも戻す | 8 |
+
+オプションを指定しない場合の検出と連番は、次の 1 点を除いて変えない。`label.Types` に `custom`・`host` が加わるので、`<host_1>`・`host_3f9a1c0b7d2e` のような文字列が「置換済みの形」になる(Q83)。
+
+範囲外:
+
+- 正規表現の指定(#18)、設定ファイル(#11)。`--deny-file` の書式と種別名だけ、これらと矛盾しないようにする(Q71、Q76)
+- 括りを外したラベル(`email_1`)の復元(Q81)
+- v1.2.0 以前の版のバイナリの配布(`--version` がなく、`restore` と版をそろえられないため)
+
+---
+
+## 2. 調査の結果(2026-11-01 に実機で確認)
+
+計画に影響する事実だけを書く。
+
+| 確認したこと | 結果 | 影響 |
+|---|---|---|
+| タグ `v1.2.0` の位置で `-trimpath -ldflags="-s -w"` でビルド | `debug.ReadBuildInfo` の版が `v1.2.0`(VCS の情報から自動で入る) | `-ldflags -X` は要らない(Q79) |
+| develop の HEAD でビルド | 版が `v1.0.1-0.20261024143350-c376878ab158` | リリースのタグは `main` のマージコミットにあり、develop の祖先でない(`git describe` は `v1.0.0-57-…`)。開発用のビルドの版は、実際の版より古く見える(Q79) |
+| 6 環境のクロスビルド(`CGO_ENABLED=0`) | すべて成功。1 つ約 2.5MB | 今のコードのまま配布できる |
+| `GOOS=darwin go vet ./...` | 成功 | |
+| `GOOS=windows go vet ./...` | `cmd/logscrub/perf_test.go:114` の `ru.Maxrss` で失敗(テストのファイルだけ。ビルドは通る) | 段階 10 のあとに直した(段階 10 の記録を参照) |
+| windows/amd64 の `.exe` を WSL から実行 | CRLF を保ったまま `<email_1>\r\n` を出力 | stdin・stdout の改行は変わらない。手元で動作を確かめられる |
+| `zip` コマンド | ホストにも `golang:1.27.2` にもない | 配布物を zip にするなら、別の手段が要る(Q80) |
+| GitHub Actions | ワークフローは 0 個。`.github/` もない | Release は、これまで手で作っている(v1.1.0、v1.2.0) |
+| 回答に `&lt;email_1&gt;`・`\<email_1\>`・`email_1` | issue #17 の表のとおり戻らない | |
+| 元の入力が `\\10.0.0.5\share`、`\taro@example.com\>`、`literal &lt;email_1&gt; here` | mask の出力は `\\<ipv4_private_1>\share`、`\<email_1>\>`、変わらず。今は往復で元に戻る | 崩れた形を単純に認めると往復が壊れる(Q82) |
+| `token=host_3f9a1c0b7d2e` を mask | 今は `token=<secret_1>` | `host` を種別にすると、置換されなくなる(Q83) |
+
+---
+
+## 3. 設計の方針
+
+### 3.1 種別の追加(段階 3)
+
+- `detect.Kind` に `KindHost`・`KindCustom` を加え、`detect.Types`(既定は無効、クラウドなし)と `kindPriority`、`Match.LabelType` に加える
+- `label.Types` の末尾に `host`・`custom` を加え、`NumTypes` を 12 にする。`--stats` の既存の種別の並びは変わらない
+- `detect.Types` では、共通の種別の末尾(`uuid` のあと)に置く。`logscrub types` はクラウドごとにまとめるため
+- `Options` に `Deny []string`・`Domains []string` を加える。`normalize` で、指定があれば種別を加える(`UUIDVersions` と同じ形。Q75)
+- `--deny`・`--deny-file`・`--domain` は `detectFlags` に置く。mask と restore の両方に入り、同じ指定で同じ連番を再現できる
+
+### 3.2 語の照合器(段階 4)
+
+- `internal/detect/literal.go` に、多数の語を 1 回の走査で探す Aho-Corasick の照合器を置く。`--deny` と `--domain` で共用する
+- `resolve` が重なりを解決するので、一致は重なりも含めてすべて出す
+- 大文字・小文字は、ASCII だけを小文字に畳んで照合する(Q72)。遷移の表は、語に現れるバイトの同値類で持つ(語が多くてもメモリを抑えるため)
+- 語を指定しないときは、検出器を作らない(既存の速度に影響しない)
+- テスト: `bytes.Index` を全位置に当てる単純な参照実装との乱数テスト
+
+### 3.3 `--deny` の検出器(段階 5)
+
+- `customFinder`: 照合器の結果に、語の境目の判定(Q73)を当てて候補にする
+- 語の読み込みは `internal/cli` で行い、`detect` には語の一覧だけを渡す
+- 語をエラーメッセージに出さない(仕様 7 章)。`--deny-file` の問題は、行番号だけを出す
+- `--deny-file` も、`openOutput` の「入力と同じファイル」の確認の対象にする(`--output` で語の一覧を消さないため)
+
+### 3.4 `--domain` の検出器(段階 6)
+
+- `hostFinder`: 照合器で、指定したドメインの出現を探す。後ろは `isHostEnd`、手前はホスト名の文字を遡って先頭を求め、ラベルの境目(`.` か、ホスト名の文字でない文字)で始まることを確かめる(`notexample.co.jp` を拾わない)
+- 同じ範囲を何度も遡らないよう、`hostRunCache` と同じ考え方で遡った範囲を覚える(`a.example.com.example.com…` の 1 行で 2 乗の時間にしない)
+- 非 ASCII のバイトでは遡りを止める(`接続先はdb.example.co.jpです` の日本語を含めない)
+
+### 3.5 ドメインを残す `--email-hash local`(段階 7)
+
+長い範囲が勝つので、`taro@acme.co.jp` は `--deny acme` でも email として置換される。mask と `--email-hash full` では語が消えるが、`--email-hash local` は `hash_<hex>@acme.co.jp` とドメインを残すので、**指定した語が出力に残る**。次の形で防ぐ(Q78)。
+
+- `Match` に `HideDomain bool` を加え、`Detector.Find` が、email の一致のドメインの部分に、語または指定したドメインがあれば立てる
+- `Hasher` は、`HideDomain` のとき全体をハッシュする(`email_<hex>`)。この処理は `--deny`・`--domain` を指定したときだけ走る
+
+### 3.6 崩れたラベルの復元(段階 8)
+
+- `label` に、回答を読むための走査 `ScanAnswer` を加える。`Format.Scan` は変えない(検出の保護範囲と連番に影響させない)
+- 崩れた形は、書式のリテラルから作る。`--mask-format` を変えても同じ規則で扱える(Q81)
+  - HTML: リテラルの `&` `<` `>` `"` を文字参照にした形(`[{type}-{n}]` は変わらないので、対象外)
+  - Markdown: 始めと終わりのリテラルの ASCII 記号の前に `\` を置いた形(`[{type}-{n}]` は `\[email-1\]`)。間のリテラルと種別名の記号の `\` は任意
+- 往復を守る仕組み(Q82): `--source` を通すときの mask の出力に現れた崩れた形を集め、その形は崩れたラベルとして扱わない
+  - `Engine` に、1 行の出力を受け取る任意の関数を加える(mask・hash では使わない)
+  - 集めた形は、`--source` の通知(仕様 6 章の「置換済みの形」)の件数に含める
+
+---
+
+## 4. 実装の段階
+
+### 段階 0: 確定の反映と資料の分割
+
+前提となる確認: Q71〜Q84 すべて
+
+- 仕様に書く: 4 章(種別の表、`--types`、優先順位)、新しい節 4.6 `custom`・4.7 `host`(`spec/detect.md`)、5.2、5.3、6 章、6.1、9 章、10 章(決定事項 22 以降)、11 章。`spec/detect.md` の「`custom` 正規表現」の行も直す
+- Q84 の分割を行う(書き足す前に行う決まりのため)
+- `scripts/doc-size-check` で確かめる
+
+### 段階 1: `--version`(#10)
+
+前提となる確認: Q79
+
+- `internal/cli/version.go`。`debug.ReadBuildInfo` の `Main.Version`。取れないときは `(devel)`
+- テスト: サブコマンドと `--version` が同じ出力で、stdout に出て、終了コード 0。余分な引数はエラー
+
+### 段階 2: ヘルプ(#12)
+
+- `usageTop`・`usageMask` の説明を、今の検出対象(URL のパスワード、`aws_host`)に合わせる。`usageRestore`・`usageTypes`・`secretFormatsHelp` も見直す
+- テスト: `detect.Types` のすべての種別名が `mask --help` に載っていることを確かめる(同じずれの再発を防ぐ)
+- 全体のヘルプは、種別を列挙せず `logscrub types` へ案内する形にする(文面が再び古くならないように)
+
+### 段階 3: 種別 `host`・`custom` の枠組み
+
+前提となる確認: Q71、Q74、Q83
+
+- 3.1 節。`logscrub types`、`--stats`、`mask --help` の表示。この段階では、語の指定はまだ受け付けない
+- テスト: 新しい形が保護範囲になること、指定しない場合の既存のゴールデンが変わらないこと
+
+### 段階 4: 語の照合器
+
+前提となる確認: Q72
+
+- 3.2 節。`BenchmarkLiteralMatcher`(語が 1・10・1000 個)を加え、DEVELOPMENT.md の性能の資料に記録する
+
+### 段階 5: `--deny` / `--deny-file`(#7)
+
+前提となる確認: Q73、Q75、Q76、Q77
+
+- 3.3 節。テスト: 境目、大文字・小文字(綴りごとに別のラベル)、日本語の語、空白を含む語、`--types` との関係、`--allow` との関係、ファイルの書式(BOM、CRLF、空行、コメント)、エラーに語が出ないこと
+
+### 段階 6: `--domain`(#8)
+
+前提となる確認: Q74、Q77、Q78
+
+- 3.4 節。テスト: issue の 2 例、URL・ポート・文末の `.`・FQDN の `.`、`example.co.jp` そのもの、`notexample.co.jp`・`example.co.jp.evil.org` の除外、大文字、日本語の隣、`aws_host`・`ipv4`(`ip-10-0-1-23.corp.example.co.jp`)・URL のパスワードとの重なり、1 行の長い連なり
+
+### 段階 7: `--email-hash local` との組み合わせ
+
+前提となる確認: Q78
+
+- 3.5 節。テスト: 語・ドメインを含むメールアドレスが `email_<hex>` になり、再度流しても変わらないこと。含まないメールアドレスは `hash_<hex>@ドメイン` のままであること
+
+### 段階 8: 崩れたラベルの復元(#17)
+
+前提となる確認: Q81、Q82
+
+- 3.6 節。テスト: 各形、`--mask-format` を変えた場合、対応のないラベルの通知(崩れた形も元の形で 1 件に数える)、2 節の表の 3 つの入力の往復
+
+### 段階 9: 往復・冪等性・性能
+
+- `FuzzRestoreRoundTrip` と、断片の表(`fuzzFragments`)に、`--deny`・`--domain` を指定した場合を加える。崩れた形の断片も加える
+- サンプルログと期待値に行を加える(期待値は手で 1 行ずつ確認する)
+- 実バイナリの測定(既定、`--types default,aws`、語 10 個、語 1000 個、`--domain` あり)。**既定の種別が v1.2.0 の記録から落ちないこと**、語 1000 個でも目標の 50MB/s を超えることを確かめる
+- ファズテストの探索(各 90 秒)を行い、結果を DEVELOPMENT.md 3.2 節の基準で振り分ける
+
+### 段階 10: 配布(#9)
+
+前提となる確認: Q80
+
+- `scripts/go` に、`GOOS`・`GOARCH`・`CGO_ENABLED` を渡せるようにする
+- `scripts/build-release`: 6 環境のバイナリと `SHA256SUMS` を `dist/` に作る。作業ツリーが変更なしで、HEAD がタグちょうどのときだけ動く。`.gitignore` に `dist/` を加える
+- README に「導入」の節を加える(`go install`、Releases、チェックサムの確かめ方、macOS・Windows の注意)
+- windows/amd64 と linux/amd64 は実際に動かす。darwin と arm64 は手元で動かせないので、ビルドの確認までになることを記録に残す
+
+### 段階 11: 資料の仕上げ
+
+- README(オプションの表、`--deny`・`--domain` の説明、性能の表)、CHANGELOG(v1.3.0。Q83 の互換の注意を含む)、LIMITATIONS.md(`custom`・`host` の節。restore の節の書き換え。全般の `custom` の語の見直し)、DEVELOPMENT.md(型の説明、Q 番号の範囲、前処理の手がかり)
+- リリースの手順を DEVELOPMENT.md に書く(`main` へのマージ、タグ、`scripts/build-release`、`gh release`)
+
+---
+
+## 5. 未確定事項
+
+別のファイルに移した: [未確定事項](questions.md)
+
+---
+
+## 6. 進捗
+
+| 段階 | 状態 | メモ |
+|---|---|---|
+| 計画 | 完了 | 2026-11-01 作成。Q71〜Q84 は案どおりで確定 |
+| 0. 確定の反映と資料の分割 | 完了 | 2026-11-01。仕様に反映し、README と DEVELOPMENT.md を分割した |
+| 1. `--version`(#10) | 完了 | 2026-11-01。`internal/cli/version.go` |
+| 2. ヘルプ(#12) | 完了 | 2026-11-01。全体のヘルプは `logscrub types` へ案内する形にした |
+| 3. 種別の枠組み | 完了 | 2026-11-01。`KindHost`・`KindCustom`、`NumTypes`=12 |
+| 4. 語の照合器 | 完了 | 2026-11-01。`literal.go`。あわせて `resolve` の連鎖を線形にした |
+| 5. `--deny` / `--deny-file`(#7) | 完了 | 2026-11-01。`custom.go`。段階 6・7 と 1 つのコミット |
+| 6. `--domain`(#8) | 完了 | 2026-11-01。`custom.go` の `hostFinder` |
+| 7. `--email-hash local` との組み合わせ | 完了 | 2026-11-01。`Match.HideDomain` |
+| 8. 崩れたラベルの復元(#17) | 完了 | 2026-11-01。`label/answer.go`、`Engine.Inspect`。Markdown の規則を実装時に補正 |
+| 9. 往復・冪等性・性能 | 完了 | 2026-11-01。restore の速度の低下を見つけて直した |
+| 10. 配布(#9) | 完了 | 2026-11-01。`scripts/build-release`。Release への登録はリリース時 |
+| 11. 資料の仕上げ | 完了 | 2026-11-01 |
+
+別のファイルに移した: [段階ごとの記録](log.md)

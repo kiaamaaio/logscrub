@@ -55,7 +55,7 @@ func runRestore(e *env, args []string) int {
 		return e.fail("%v", err)
 	}
 	defer in.Close()
-	w, closeOut, err := e.openOutput(output, paths)
+	w, closeOut, err := e.openOutput(output, append(paths, df.inputFiles()...))
 	if err != nil {
 		return e.fail("%v", err)
 	}

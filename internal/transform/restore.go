@@ -26,7 +26,7 @@ type RestoreResult struct {
 // 対応表は、保存しない。sources(mask に渡したのと同じ入力、同じ順)を、mask と同じ Engine と Masker に
 // 通して、連番を振り直す(出力は捨てる)。連番は、検出器の結果と入力の順だけで決まるので、
 // det と f が、mask のときと同じなら、同じ対応になる。
-// 次に、answer を 1 行ずつ読み、f のラベルを、元の値に置き換えて、w に書く。
+// 次に、answer を 1 行ずつ読み、f のラベルと、HTML・Markdown で崩れた形を、元の値に置き換えて、w に書く。
 // 対応が見つからないラベルは、そのまま残し、RestoreResult.Missing に記録する。
 // ラベルの外は、1 バイトも変えない(改行コード、末尾改行の有無を含む)。
 // 戻した値は、再度ラベルとして読まない。
@@ -37,7 +37,17 @@ func Restore(sources []io.Reader, answer io.Reader, w io.Writer, det *detect.Det
 	}
 
 	table := NewMasker(f)
-	eng := &Engine{Det: det, Rep: table}
+	scanner := label.NewAnswerScanner(f)
+	// mask の出力に現れた崩れた形は、回答でも崩れたラベルとして扱わない(どの入力でも往復が成り立つように。Q82)。
+	literal := make(map[string]struct{})
+	eng := &Engine{Det: det, Rep: table, Inspect: func(out []byte) int {
+		n := 0
+		scanner.ScanEscaped(out, func(form []byte) {
+			literal[string(form)] = struct{}{}
+			n++
+		})
+		return n
+	}}
 	err := eng.Run(sources, io.Discard)
 	res.Source = eng.Stats
 	if err != nil {
@@ -58,7 +68,7 @@ func Restore(sources []io.Reader, answer io.Reader, w io.Writer, det *detect.Det
 		}
 		out = out[:0]
 		last := 0
-		f.Scan(content, func(start, end int, typ string, n int) {
+		scanner.Scan(content, literal, func(start, end int, typ string, n int) {
 			if v, ok := table.Value(typ, n); ok {
 				out = append(out, content[last:start]...)
 				out = append(out, v...)
@@ -66,7 +76,7 @@ func Restore(sources []io.Reader, answer io.Reader, w io.Writer, det *detect.Det
 				res.Restored++
 				return
 			}
-			name := string(content[start:end])
+			name := string(f.Append(nil, typ, n)) // 崩れた形も、本来のラベルで通知する
 			if _, seen := missing[name]; !seen {
 				if missing == nil {
 					missing = make(map[string]struct{})

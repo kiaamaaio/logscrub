@@ -31,6 +31,31 @@ func TestMaskGolden(t *testing.T) {
 	}
 }
 
+// customOptions は、`--deny`・`--domain` のテストの設定。
+var customOptions = detect.Options{
+	Deny:    []string{"acme", "Foo Bar", "アクメ"},
+	Domains: []string{"corp.example.jp", "mycompany.internal"},
+}
+
+// testdata/custom.log を、customOptions で mask した結果が、testdata/custom.mask.golden と一致する(期待値は、手で確認したもの)。
+func TestMaskGoldenCustom(t *testing.T) {
+	in, err := os.ReadFile("testdata/custom.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile("testdata/custom.mask.golden")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := mask(t, customOptions, string(in))
+	if got != string(want) {
+		t.Errorf("mask output differs from internal/transform/testdata/custom.mask.golden\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	if _, restored, _ := roundTrip(t, customOptions, string(in)); restored != string(in) {
+		t.Errorf("restore(mask(x)) != x:\n%s", restored)
+	}
+}
+
 // 合成ログ(1MB の JSON 行を含む)でも、2 回流しても結果が変わらず、改行の数が保たれる。
 func TestMaskSyntheticLogIsIdempotent(t *testing.T) {
 	var sb strings.Builder
@@ -118,12 +143,13 @@ var awsFuzzSeeds = []string{
 	"x..y.cloudfront.net -x.cloudfront.net x-.cloudfront.net a.b.cloudfront.net.-c.cloudfront.net\n",
 }
 
-// fuzzOptions は、ファズテストで試す検出の設定(v1.0 の既定 + uuid と、v1.1 の `--types default,aws`)と、
-// それぞれの Detector を返す。
+// fuzzOptions は、ファズテストで試す検出の設定(v1.0 の既定 + uuid、v1.1 の `--types default,aws`、
+// v1.3 の `--deny`・`--domain`)と、それぞれの Detector を返す。
 func fuzzOptions(tb testing.TB) ([]detect.Options, []*detect.Detector) {
 	optsList := []detect.Options{
 		{Kinds: detect.DefaultKinds.With(detect.KindUUID)},
 		{Kinds: detect.DefaultKinds.With(detect.KindAWSAccount).With(detect.KindAWSS3Bucket).With(detect.KindAWSHost)},
+		customOptions,
 	}
 	dets := make([]*detect.Detector, len(optsList))
 	for i, o := range optsList {

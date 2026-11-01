@@ -17,4 +17,5 @@ exec docker run --rm -i \
   -e GOCACHE=/cache/go-build \
   -e GOMODCACHE=/cache/mod \
   -e GOTOOLCHAIN=local \
+  -e GOOS -e GOARCH -e CGO_ENABLED \
   "$image" go "$@"

@@ -24,6 +24,8 @@ const (
 	KindAWSAccount
 	KindAWSS3Bucket
 	KindAWSHost
+	KindHost
+	KindCustom
 )
 
 var kindNames = [...]string{
@@ -35,6 +37,8 @@ var kindNames = [...]string{
 	KindAWSAccount:  "aws_account",
 	KindAWSS3Bucket: "aws_s3_bucket",
 	KindAWSHost:     "aws_host",
+	KindHost:        "host",
+	KindCustom:      "custom",
 }
 
 func (k Kind) String() string {
@@ -45,7 +49,7 @@ func (k Kind) String() string {
 }
 
 // kindPriority は、範囲の長さが同じときの優先順位(小さいほうが優先)。
-// 仕様: email → ipv4 / ipv6 → secret → uuid → aws_account → aws_s3_bucket → aws_host。
+// 仕様: email → ipv4 / ipv6 → secret → uuid → aws_account → aws_s3_bucket → aws_host → host → custom。
 var kindPriority = [...]int{
 	KindEmail:       1,
 	KindIPv4:        2,
@@ -55,6 +59,8 @@ var kindPriority = [...]int{
 	KindAWSAccount:  5,
 	KindAWSS3Bucket: 6,
 	KindAWSHost:     7,
+	KindHost:        8,
+	KindCustom:      9,
 }
 
 // KindSet は、Kind の集合。ビット k が Kind k。
@@ -86,12 +92,14 @@ var Types = []TypeInfo{
 	{Kind: KindIPv6, Default: true},
 	{Kind: KindSecret, Default: true},
 	{Kind: KindUUID},
+	{Kind: KindHost},
+	{Kind: KindCustom},
 	{Kind: KindAWSAccount, Cloud: "aws"},
 	{Kind: KindAWSS3Bucket, Cloud: "aws"},
 	{Kind: KindAWSHost, Cloud: "aws"},
 }
 
-// DefaultKinds は、`--types` を省略したときの対象(既定で有効の種別)。uuid と aws_* は含まない。
+// DefaultKinds は、`--types` を省略したときの対象(既定で有効の種別)。uuid、host、custom と aws_* は含まない。
 var DefaultKinds = func() KindSet {
 	var s KindSet
 	for _, t := range Types {
@@ -209,6 +217,9 @@ type Match struct {
 	Start, End int // 行内のバイト位置。[Start, End)
 	Kind       Kind
 	Class      Class // IP アドレスのときだけ使う
+	// HideDomain は、メールアドレスのドメインに、利用者が指定した値があること。
+	// ドメインを残す出力(`--email-hash local`)でも、全体を置換する(仕様 5.2)。
+	HideDomain bool
 }
 
 // LabelType は、置換後のラベルの種別名(label.Types のいずれか)を返す。
@@ -227,6 +238,10 @@ func (m Match) LabelType() string {
 		return "aws_s3_bucket"
 	case KindAWSHost:
 		return "aws_host"
+	case KindHost:
+		return "host"
+	case KindCustom:
+		return "custom"
 	case KindIPv4:
 		switch m.Class {
 		case ClassGlobal:

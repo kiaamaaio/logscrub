@@ -2,6 +2,18 @@
 
 logscrub の版ごとの変更点。使い方は [README.md](README.md) を見てください。
 
+### v1.3.0
+
+- 利用者が指定した語を伏せる `--deny`・`--deny-file` を加えました。種別は `custom` で、ラベルは `<custom_1>` です([指定した語](docs/detection.md#指定した語custom))。
+- 指定したドメインのホスト名を伏せる `--domain` を加えました。種別は `host` で、ホスト名全体が `<host_1>` になります([指定したドメイン](docs/detection.md#指定したドメインのホスト名host))。
+- `--mode hash --email-hash local` で、ドメインに指定した語・ドメインを含むメールアドレスは、全体をハッシュします(指定した値を出力に残さないためです)。
+- `restore` が、AI の回答でエスケープされたラベル(`&lt;email_1&gt;`、`\<email_1\>`)も戻すようになりました。
+- `logscrub version`、`logscrub --version` を加えました。
+- GitHub Releases に、linux・darwin・windows(amd64・arm64)のバイナリを置くようにしました。導入の手順は [README](README.md#導入) を見てください。
+- 全体のヘルプと `mask --help` の説明を、今の検出対象に合わせました。
+- `<host_1>`、`<custom_1>`、`host_<12 桁の 16 進数>`、`custom_<12 桁の 16 進数>` の形の文字列は、`--deny`・`--domain` を使わない場合も、置換済みの形として扱います。`token=host_3f9a1c0b7d2e` のような値は、置換されなくなります(stderr に通知します)。
+- `logscrub types` の出力と `--stats` の並びに、`host`・`custom` が加わりました。
+
 ### v1.2.0
 
 - **既定の動作が変わります**(どちらも、今まで隠せていなかった値を隠す方向の変更です)。
@@ -17,7 +29,7 @@ logscrub の版ごとの変更点。使い方は [README.md](README.md) を見�
     - ユーザーの部分に `@` を含む URL(`postgres://myadmin@mydemoserver:s3cret@10.0.0.5/`、`https://bob@example.com:pw@10.0.0.1/`)のパスワードも置換します。ユーザー情報とホストは、ホストの手前の最後の `@` で分けます。
     - キー名ベースの値が URL のパスワードの形で始まる場合(`password=postgres://app:s3cret@db/`)も、パスワードの部分だけを置換するようになりました。
       v1.1 までは `password=<secret_1>`(ホスト名ごと)になり、パスワードに `&` などを含むと、その後ろがそのまま残っていました(`password=https://u:p&q@h` → `password=<secret_1>&q@h`)。
-- AWS のサービスのホスト名の種別 `aws_host` を加えました(既定では無効。[AWS のサービスのホスト名](README.md#aws-のサービスのホスト名))。まとまり `aws`・`cloud` に含まれます。
+- AWS のサービスのホスト名の種別 `aws_host` を加えました(既定では無効。[AWS のサービスのホスト名](docs/detection.md#aws-のサービスのホスト名))。まとまり `aws`・`cloud` に含まれます。
 - `aws_account` に、S3 Control のホスト(`<12 桁>.s3-control.<リージョン>.amazonaws.com`)のアカウント ID を加えました。
 - EC2 のパブリックホスト名の IPv6 形式・デュアルスタック形式(`….ip.aws`)を、`aws_host` で置換するようになりました。
 - `::1::x` のような、IPv6 として正しくない連なり(`::` を 2 つ含むもの)の後ろに英字が続く形の一部を、IPv6 として置換しなくなりました(v1.1 までは `<ipv6_private_1>::x`)。
@@ -30,6 +42,6 @@ logscrub の版ごとの変更点。使い方は [README.md](README.md) を見�
 - **既定の動作が変わります**(どちらも、今まで隠せていなかった値を隠す方向の変更です)。
   - `secret` に、AWS の署名(SigV4。署名付き URL の `X-Amz-Signature=` と、`Authorization: AWS4-HMAC-SHA256 …, Signature=`)を加えました。
   - EC2 のホスト名に埋め込まれた IPv4(`ec2-54-250-1-2.…`、`ip-10-0-1-23`)を、`ipv4` として置換するようになりました。
-- AWS の値の種別 `aws_account`、`aws_s3_bucket` を加えました(既定では無効。[AWS の値](README.md#aws-の値))。
+- AWS の値の種別 `aws_account`、`aws_s3_bucket` を加えました(既定では無効。[AWS の値](docs/detection.md#aws-の値))。
 - `--types` に、種別のまとまり `aws`、`cloud` を書けるようになりました。
 - `logscrub types` の出力に、クラウドごとの見出しと、まとまりの一覧を加えました(列の幅も変わりました)。
