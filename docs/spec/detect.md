@@ -234,9 +234,7 @@ EC2 のホスト名は、IP アドレスを `-` 区切りで含む。IP アド�
   - `$USER`、`*`、`<user>`、`%USERNAME%` は、文字の条件で対象にならない
   - 後ろに `/` がなくてもよい(`HOME=/home/yamada`、`/home/yamada:/bin/bash`)
   - Windows の形に限り、同じ行に次の区切り(`\` または `/`)があるときは、空白を含めてよい(`C:\Users\Taro Yamada\AppData`)。この場合、空白より前の部分も上の文字だけからなること
-- 対象外のユーザー名:
-  - 固定の一覧: `user`、`ubuntu`、`ec2-user`、`debian`、`centos`、`admin`、`runner`、`node`、`vagrant`、`Administrator`、`Public`、`Default`、`Default User`、`All Users`、`Shared`、`Guest`
-  - バージョンの表記: `v` + 数字の 1 つ以上と、`.` + 数字の繰り返し(`v1`、`v10`、`v1.2`)。`/home/v1/items` のような API のパスを伏せないため
+- 対象外のユーザー名(固定の一覧): `user`、`ubuntu`、`ec2-user`、`debian`、`centos`、`admin`、`runner`、`node`、`vagrant`、`Administrator`、`Public`、`Default`、`Default User`、`All Users`、`Shared`、`Guest`
   - 照合の大文字・小文字は、上の表の形に従う
   - 一覧にない名前を残すときは、`--allow`(ユーザー名との完全一致)を使う
 - 置換済みの形(4 章)は、ほかの種別と同じに扱う。`/home/<user_path_1>/` は文字の条件で候補にならず、`/home/user_path_3f9a1c0b7d2e/` は保護範囲に負ける。

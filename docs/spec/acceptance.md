@@ -73,7 +73,7 @@ secret:
 user_path:
 
 - `/home/yamada/proj/app.py` が `/home/<user_path_1>/proj/app.py` に、`C:\Users\Taro Yamada\AppData`、`C:\\Users\\yamada\\app.log` のユーザー名が `<user_path_N>` になる
-- `PWD=/home/user`、`/home/ubuntu/`、`/home/v1/items`、`/home/$USER/`、`/var/home/x`、`https://example.com/home/x` は置換されない
+- `PWD=/home/user`、`/home/ubuntu/`、`/home/$USER/`、`/var/home/x`、`https://example.com/home/x` は置換されない
 - `/home/yamada` と `/Users/yamada` が同じラベルになる
 - `--deny yamada` では、`/home/yamada/` も `<custom_1>` になる
 
