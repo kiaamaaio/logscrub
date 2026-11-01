@@ -11,7 +11,13 @@ type AnswerScanner struct {
 	html Format // リテラルを文字参照にした書式。リテラルに対象の文字がなければ、ゼロ値
 	// start は、ラベル(崩れた形を含む)の先頭になりうるバイト。それ以外の位置は、照合せずに読み飛ばす。
 	start [256]bool
+	// starts は、start のバイトの一覧(書式の始めのリテラルが空でないとき)。bytes.IndexByte で探す。
+	// 空のときは、種別名の先頭か数字なので、種類が多く、start の表で 1 バイトずつ見る。
+	starts []byte
 }
+
+// maxStarts は、starts の長さの上限(始めのリテラルの先頭、その文字参照の先頭、`\` の 3 つ)。
+const maxStarts = 3
 
 // NewAnswerScanner は、書式 f の AnswerScanner を返す。
 func NewAnswerScanner(f Format) *AnswerScanner {
@@ -29,7 +35,42 @@ func NewAnswerScanner(f Format) *AnswerScanner {
 	if isASCIIPunct(f.pre[0]) {
 		a.start['\\'] = true
 	}
+	for c, ok := range a.start {
+		if ok {
+			a.starts = append(a.starts, byte(c))
+		}
+	}
 	return a
+}
+
+// nextStart は、line[i:] の中で、ラベルの先頭になりうる最初の位置を返す。なければ len(line)。
+// next は、starts のバイトごとの次の出現位置。行の最初は noStarts を渡す(同じ位置を探し直さないため)。
+func (a *AnswerScanner) nextStart(line []byte, i int, next *[maxStarts]int) int {
+	if len(a.starts) == 0 {
+		for i < len(line) && !a.start[line[i]] {
+			i++
+		}
+		return i
+	}
+	best := len(line)
+	for k, c := range a.starts {
+		if next[k] < i {
+			next[k] = len(line)
+			if j := bytes.IndexByte(line[i:], c); j >= 0 {
+				next[k] = i + j
+			}
+		}
+		best = min(best, next[k])
+	}
+	return best
+}
+
+// noStarts は、nextStart の next の初期値。
+var noStarts = [maxStarts]int{-1, -1, -1}
+
+// mayHaveEscaped は、line に崩れた形が含まれうるかを返す。崩れた形には、必ず `\` か `&` が含まれる。
+func mayHaveEscaped(line []byte) bool {
+	return bytes.IndexByte(line, '\\') >= 0 || bytes.IndexByte(line, '&') >= 0
 }
 
 // escapeHTML は、b の `&` `<` `>` `"` を文字参照にしたものを返す。
@@ -135,11 +176,12 @@ func (a *AnswerScanner) Scan(line []byte, skip map[string]struct{}, fn func(star
 	if !a.f.ok {
 		return
 	}
-	for i := 0; i < len(line); {
-		if !a.start[line[i]] {
-			i++
-			continue
-		}
+	if !mayHaveEscaped(line) {
+		a.f.Scan(line, fn)
+		return
+	}
+	next := noStarts
+	for i := a.nextStart(line, 0, &next); i < len(line); i = a.nextStart(line, i, &next) {
 		end, typ, n, escaped, ok := a.matchAnyAt(line, i)
 		if ok && escaped {
 			_, skipped := skip[string(line[i:end])]
@@ -154,18 +196,15 @@ func (a *AnswerScanner) Scan(line []byte, skip map[string]struct{}, fn func(star
 	}
 }
 
-// ScanEscaped は、line の中の崩れた形だけを報告する。崩れた形には、必ず `\` か `&` が含まれる。
+// ScanEscaped は、line の中の崩れた形だけを報告する。
 // 報告した形を skip にして Scan を呼ぶと、Scan はその形の次のバイトから読むので、ここでも同じ位置へ進む
 // (`12\_email` の内側の `2\_email`、`<{type}_{n}` の `\<email_1` の内側の `<email_1`)。
 func (a *AnswerScanner) ScanEscaped(line []byte, fn func(form []byte)) {
-	if !a.f.ok || bytes.IndexByte(line, '\\') < 0 && bytes.IndexByte(line, '&') < 0 {
+	if !a.f.ok || !mayHaveEscaped(line) {
 		return
 	}
-	for i := 0; i < len(line); {
-		if !a.start[line[i]] {
-			i++
-			continue
-		}
+	next := noStarts
+	for i := a.nextStart(line, 0, &next); i < len(line); i = a.nextStart(line, i, &next) {
 		end, _, _, escaped, ok := a.matchAnyAt(line, i)
 		if !ok {
 			i++

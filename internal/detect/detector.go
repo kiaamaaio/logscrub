@@ -45,7 +45,7 @@ type Options struct {
 
 // Detector は、行の中の置換する範囲を決める。
 //
-// 内部に作業領域を持つため、複数の goroutine から同時に使ってはならない。
+// 内部に作業領域を持つため、複数の goroutine から同時に使ってはならない。goroutine ごとに Clone を使う。
 type Detector struct {
 	finders []finder
 	// valueFinders は、利用者が指定した値の検出器(finders の一部)。ドメインを残す出力に、指定した値が残らないように、
@@ -199,6 +199,19 @@ func newDetector(o Options, finders []finder) (*Detector, error) {
 		}
 	}
 	return d, nil
+}
+
+// Clone は、同じ設定で検出する Detector を返す。検出器と設定は読み取り専用なので共有し、作業領域だけを分ける。
+func (d *Detector) Clone() *Detector {
+	return &Detector{
+		finders:      d.finders,
+		valueFinders: d.valueFinders,
+		kinds:        d.kinds,
+		scope:        d.scope,
+		allow:        d.allow,
+		format:       d.format,
+		hashLen:      d.hashLen,
+	}
 }
 
 // Find は、line の中の置換する範囲を、開始位置の順に dst に追記して返す(重なりはない)。

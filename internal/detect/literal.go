@@ -1,5 +1,7 @@
 package detect
 
+import "slices"
+
 // literalMatcher は、多数の語を 1 回の走査で探す(Aho-Corasick)。`--deny` と `--domain` で共用する。
 //
 // ASCII の英字だけ、大文字・小文字を区別しない(Q72)。バイト列として照合し、非 ASCII は畳まない。
@@ -10,6 +12,10 @@ type literalMatcher struct {
 	next   []int32     // 状態 × 同値類 → 次の状態
 	outPos []int32     // 状態 s の一致の長さは outLen[outPos[s]:outPos[s+1]]
 	outLen []int32
+	// pair は、語の先頭 2 バイトの同値類の組(同値類 × 同値類)。すべての語が 2 バイト以上のときだけ持つ。
+	pair []bool
+	// root は、根の状態から遷移するバイト。pair がないときに使う。
+	root [256]bool
 }
 
 func foldByte(c byte) byte {
@@ -84,6 +90,16 @@ func newLiteralMatcher(words []string) *literalMatcher {
 		}
 	}
 	m.next = next
+	if !slices.ContainsFunc(words, func(w string) bool { return len(w) < 2 }) {
+		m.pair = make([]bool, m.width*m.width)
+		for _, w := range words {
+			m.pair[int(m.class[w[0]])*m.width+int(m.class[w[1]])] = true
+		}
+	}
+	for c := range m.root {
+		k := m.class[c]
+		m.root[c] = k != 0 && next[k] != 0
+	}
 
 	m.outPos = make([]int32, len(ends)+1)
 	for s, ns := range ends {
@@ -102,11 +118,36 @@ func containsLen(ns []int32, n int32) bool {
 	return false
 }
 
+// skip は、根の状態で line[i:] を読むときに、語の出現が始まりうる最初の位置を返す。なければ len(line)。
+// 語の一部とも一致しない位置は、遷移の表を引かずに読み飛ばす(読み飛ばしたあとも根の状態のまま)。
+func (m *literalMatcher) skip(line []byte, i int) int {
+	if m.pair == nil {
+		for i < len(line) && !m.root[line[i]] {
+			i++
+		}
+		return i
+	}
+	cur := int(m.class[line[i]]) * m.width
+	for ; i+1 < len(line); i++ {
+		c := int(m.class[line[i+1]])
+		if m.pair[cur+c] {
+			return i
+		}
+		cur = c * m.width
+	}
+	return len(line)
+}
+
 // scan は、line の中の語の出現を、重なりも含めてすべて報告する(終わりの位置の順)。
 func (m *literalMatcher) scan(line []byte, fn func(start, end int)) {
 	s := int32(0)
-	for i, c := range line {
-		s = m.next[int(s)*m.width+int(m.class[c])]
+	for i := 0; i < len(line); i++ {
+		if s == 0 {
+			if i = m.skip(line, i); i == len(line) {
+				return
+			}
+		}
+		s = m.next[int(s)*m.width+int(m.class[line[i]])]
 		if lo, hi := m.outPos[s], m.outPos[s+1]; lo != hi {
 			for _, n := range m.outLen[lo:hi] {
 				fn(i+1-int(n), i+1)
