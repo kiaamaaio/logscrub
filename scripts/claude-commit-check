@@ -10,9 +10,9 @@ set -uo pipefail
 input="$(cat)"
 
 # JSON を解析せず、コマンド文字列に「git [オプション] commit」の形があるかだけを見る。
-# 取りこぼしても、検査は pre-commit hook が行う
+# 取りこぼしても、検査は pre-commit hook が行う。JSON の中の改行は \n の 2 文字なので、git の直前の文字として認める
 opt_value='(\\"[^"]*\\"|'"'"'[^'"'"']*'"'"'|[^-[:space:]][^[:space:]]*)'
-if ! grep -Eq '(^|[^[:alnum:]_-])git([[:space:]]+-[^[:space:]]*([[:space:]]+'"$opt_value"')?)*[[:space:]]+commit([[:space:]]|\\|"|$)' <<<"$input"; then
+if ! grep -Eq '(^|[^[:alnum:]_-]|\\[nrt])git([[:space:]]+-[^[:space:]]*([[:space:]]+'"$opt_value"')?)*[[:space:]]+commit([[:space:]]|\\|"|$)' <<<"$input"; then
   exit 0
 fi
 
