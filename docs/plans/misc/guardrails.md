@@ -117,7 +117,7 @@ Claude の hook は文字列の判定なので、書き方によっては確認�
 | 区分 | 対象 |
 |---|---|
 | ask | `git push`、`git merge`、`.claude/`、`.githooks/`、`scripts/claude-commit-check`、`scripts/doc-size-check`、`scripts/go`、`scripts/allowed-modules`、`CLAUDE.md`、`go.mod`、`go get` |
-| deny | `git push --force` と `-f`、`git commit --no-verify` と `-n`、ホストの `go`、完了した版の計画(`docs/plans/v1.0.0.md`〜`v1.2.0.md`)の編集 |
+| deny | `git push --force` と `-f`、`git commit --no-verify` と `-n`、完了した版の計画(`docs/plans/v1.0.0.md`〜`v1.2.0.md`)の編集 |
 
 - `git -C` などの別の書き方のために、`Bash(git * push *)` の形も加える。ただし、文字列の照合なので完全には防げない。確実に守るのは pre-commit の範囲だけと考える
 - **確かめること:** 各ルールを実際のコマンドで発動させ、`git -C . push` の形も含めて結果を記録する(実際には push しない。確認の画面で拒否する)
@@ -215,7 +215,7 @@ CLAUDE.md の形式は `feature/<版>-<内容>` だが、この対応には版�
 | 計画 | 完了 | 2026-11-01 作成。Q85〜Q90 は確定 |
 | 0. 未整形の修正 | 完了 | 2026-11-01。`gofmt` のみで、動作の変更はない |
 | 1. git の pre-commit hook | 完了 | 2026-11-01。検査を `.githooks/pre-commit` へ移した |
-| 2. 権限の設定 | 完了 | 2026-11-01。deny を 6 通り、ask を push で確認した。段階 5 で deny を 1 つ外した |
+| 2. 権限の設定 | 完了 | 2026-11-01。deny を 5 通り、ask を push で確認した。ホストの go の禁止は段階 5 で hook に移した |
 | 3. 条件付きの確認 | 完了 | 2026-11-01。`scripts/claude-commit-check` が `"ask"` を返す |
 | 4. 依存の許可制 | 完了 | 2026-11-01。`scripts/allowed-modules` は空。仕様と README は変えていない |
 | 5. 資料の形式と運用 | 一部未確認 | 2026-11-01。作成は完了。新しいセッションでの確認が未実施 |
@@ -236,9 +236,9 @@ CLAUDE.md の形式は `feature/<版>-<内容>` だが、この対応には版�
 
 #### 段階 2: 権限の設定
 
-- `.claude/settings.json` の変更は、実行中のセッションにすぐ反映された
+- `.claude/settings.json` の変更は、実行中のセッションに反映される。ただし、反映が 1 手遅れることがある(段階 5 で確認した)
 - auto モードのセッションで確かめた。公式資料では、ask ルールは auto モードでも確認の画面を強制し、deny ルールはすべてのモードで止める
-- deny: `go version`、`git -C . commit -n`、`git commit --no-verify`、`git push --force`、`git -C . push --force`、完了した版の計画への `>>` が止まることを確認した
+- deny: `git -C . commit -n`、`git commit --no-verify`、`git push --force`、`git -C . push --force`、完了した版の計画への `>>` が止まることを確認した
 - ask: `git -c push.default=current push --dry-run` で確認の画面が出ることを、セッションの記録(`ruleSource: projectSettings`)で確認した。ユーザーが承認したが、SSH の認証の失敗で送信はされていない
 - ask の `Edit` ルールは、リダイレクト(`>> go.mod`)を覆わない。公式資料では、リダイレクトの検査の対象は `Edit` の allow と deny だけ。`go.mod` は段階 4 の pre-commit で守る
 - `Write(path)` のルールは一致しないので、パスのルールは `Edit(path)` で書く
@@ -266,5 +266,8 @@ CLAUDE.md の形式は `feature/<版>-<内容>` だが、この対応には版�
 - 計画の形式は 3 つのファイルの案内を 1 つの形式のファイルにまとめた(形式のファイルを増やさないため)
 - 段階の完了時に止まるルールに、依頼に続けて進めるとあれば続ける、という例外を加えた(計画にはなかった)
 - 未実施: 新しいセッションで調査を 1 件依頼し、形式に沿って書かれることの確認。このセッションには CLAUDE.md の変更前の内容が読み込まれていて、確かめられない
-- 段階 2 の不具合を直した: deny の `Bash(/usr/bin/go *)` が、公式資料の説明と違って `./scripts/go` も止めていた。段階 2 では止めたいコマンドだけを確かめ、通すべきコマンドを確かめていなかったので、見逃した。このルールを外し、`./scripts/go version` が通ること、`go version` が止まることを確認した。`/usr/bin/go` の形は止まらないので、CLAUDE.md のルールに任せる。pre-commit hook は git が実行するので、この間のコミットの検査には影響していない
+- 段階 2 の不具合を直した: deny の `Bash(go *)` が、公式資料の説明と違って `./scripts/go` も止めていた。段階 2 では止めたいコマンドだけを確かめ、通すべきコマンドを確かめていなかったので、見逃した。この間のコミットの検査は pre-commit hook が行っていたので、影響はない
+  - 切り分けの途中で、`Bash(/usr/bin/go *)` が原因と誤って判断し、記録に書いた。設定の変更の反映が 1 手遅れることがあり、外した効果を取り違えた。原因は `Bash(go *)` で、どちらのルールも外した
+  - ホストの go の禁止は `scripts/claude-commit-check` に移した。コマンドの先頭の語が `go` のときだけ、終了コード 2 で止める。14 通りで確かめ、実際に `./scripts/go test`、`./scripts/go vet` が通り、`go version` が止まることを確認した
+  - 文字列で判定するので、誤検知がある(`;` のあとに go が続く文字列が、コマンドやコミットの内容の中にあっても止まる)
 - 権限のルールを変えるときは、止めるコマンドと通すコマンドの両方を確かめる

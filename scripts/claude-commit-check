@@ -4,10 +4,17 @@
 # 実行する前に、次のことを行う(stderr と確認の理由は Claude やユーザーに返る)。
 #   - pre-commit hook が有効でなければ、終了コード 2 でコミットを止める
 #   - 人が確かめるべき変更を含むなら、ユーザーに確認を求める(permissionDecision: ask)
-# 標準入力は hook の入力(JSON)。git commit を含まないコマンドは何もせず通す。
+# あわせて、すべてのコマンドについて、ホストの go の実行を終了コード 2 で止める。
+# 標準入力は hook の入力(JSON)。ホストの go でも git commit でもないコマンドは何もせず通す。
 set -uo pipefail
 
 input="$(cat)"
+
+# 権限のルールの Bash(go *) は、./scripts/go まで止めるので使えない。コマンドの先頭の語が go のときだけ止める
+if grep -Eq '("command"[[:space:]]*:[[:space:]]*"|[;&|][[:space:]]*|\\[nt][[:space:]]*)(/usr(/local)?/bin/)?go[[:space:]]' <<<"$input"; then
+  printf 'ホストの go は使いません。./scripts/go を使ってください(CLAUDE.md)。\n' >&2
+  exit 2
+fi
 
 # JSON を解析せず、コマンド文字列に「git [オプション] commit」の形があるかだけを見る。
 # 取りこぼしても、検査は pre-commit hook が行う。JSON の中の改行は \n の 2 文字なので、git の直前の文字として認める

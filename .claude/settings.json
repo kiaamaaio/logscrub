@@ -28,7 +28,6 @@
       "Bash(git commit -n*)",
       "Bash(git commit * -n *)",
       "Bash(git * commit -n*)",
-      "Bash(go *)",
       "Edit(/docs/plans/v1.0.0.md)",
       "Edit(/docs/plans/v1.1.0.md)",
       "Edit(/docs/plans/v1.2.0.md)"
