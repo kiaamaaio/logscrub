@@ -9,7 +9,7 @@ import (
 // AWS の値の形の定義(仕様 4.3「ホスト名に埋め込まれた IPv4」、4.4)。
 //
 // パーティション・ドメイン・エンドポイントなどの形は、表(スライスと正規表現の部品)として持つ。
-// 将来のクラウドの追加や、v1.2 の aws_host のホストの表も、同じ形で書き足す(plans/v1.1.0.md 2.2)。
+// 将来のクラウドの追加や、v1.2 の aws_host のホストの表も、同じ形で書き足す(plans/v1.1.0/README.md 2.2)。
 
 // awsPartitions は、対象のパーティション(ARN の 2 つ目の欄。仕様 4.4。AWS SDK の partitions.json で確認)。
 var awsPartitions = []string{"aws", "aws-cn", "aws-us-gov", "aws-iso", "aws-iso-b", "aws-iso-e", "aws-iso-f", "aws-eusc"}
@@ -387,7 +387,7 @@ func bucketMatch(s, e int) Match {
 //   - `arn:<パーティション>:s3:::` の直後。`arn:` の前が英数字でないこと(Q46)
 //
 // `://`・`:s3:::` を bytes.Index で探すと、先頭の `:` が文中に多く(時刻、JSON のキーの区切りなど)、遅い経路になる
-// (DEVELOPMENT.md 3.4 節)。`:` を bytes.IndexByte で 1 回だけ走査し、`:` ごとに後ろを照合する(plans/v1.2.0.md 段階 8)。
+// (DEVELOPMENT.md 3.4 節)。`:` を bytes.IndexByte で 1 回だけ走査し、`:` ごとに後ろを照合する(plans/v1.2.0/README.md 段階 8)。
 func (awsS3BucketFinder) colonForms(line []byte, dst []Match) []Match {
 	for pos := 0; ; {
 		j := bytes.IndexByte(line[pos:], ':')
@@ -598,7 +598,7 @@ type awsHostParts struct {
 
 // hostHintRank は、終端の中から手がかりのバイトを選ぶ順(文中に少ない文字から)。この順で最初に現れる文字を使う。
 // 合成ログと文章(このリポジトリの資料)での文字の出現率と、BenchmarkAWSHostFinder の実測で決めた
-// (plans/v1.2.0.md のベンチマーク記録)。`l` を `k` `y` `f` より前に置くのは、cloudfront.net・amplifyapp.com・
+// (plans/v1.2.0/README.md のベンチマーク記録)。`l` を `k` `y` `f` より前に置くのは、cloudfront.net・amplifyapp.com・
 // elasticbeanstalk.com を 1 回の走査で探すため(走査の回数を減らすほうが、`l` の一致の増加より速かった)。
 const hostHintRank = "zqxjvwlkybpgfmcudhrsnioate"
 
@@ -787,7 +787,7 @@ func (f awsHostFinder) find(line []byte, dst []Match) []Match {
 			p := pos + j
 			pos = p + 1
 			// 手がかりの一致の大半は、終端の一部ではない(`l` は約 1.6%)。bytes.HasPrefix の前に、終端の先頭の `.` と、
-			// 手がかりの次の 1 バイトを比べて、早く捨てる(plans/v1.2.0.md 段階 9)
+			// 手がかりの次の 1 バイトを比べて、早く捨てる(plans/v1.2.0/README.md 段階 9)
 			if g.amazonaws {
 				if a := p - 4; a >= 0 && line[a] == '.' && bytes.HasPrefix(line[a:], amazonawsMarker) {
 					dst = hostAmazon(line, a, &cache, dst)

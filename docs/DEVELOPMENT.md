@@ -4,7 +4,7 @@
 版ごとの実装計画と進捗は [plans/](plans/) にある(この資料の内容は、v1.0.0 の実装計画から移した)。
 
 - 仕様: [SPEC.md](SPEC.md)(以下「仕様」。節番号は仕様のもの。SPEC.md は目次で、4〜6 章・9 章の本文は [spec/](spec/) にある)
-- 文中の Q 番号は、Q1〜Q31 が [plans/v1.0.0.md](plans/v1.0.0.md)、Q32〜Q46 が [plans/v1.1.0.md](plans/v1.1.0.md)、Q47〜Q70 が [plans/v1.2.0.md](plans/v1.2.0.md)、Q71〜Q84 が [plans/v1.3.0.md](plans/v1.3.0.md) の 5 章「未確定事項」の項目(すべて確定済み)
+- 文中の Q 番号は、Q1〜Q31 が [plans/v1.0.0/README.md](plans/v1.0.0/README.md)、Q32〜Q46 が [plans/v1.1.0/README.md](plans/v1.1.0/README.md)、Q47〜Q70 が [plans/v1.2.0/README.md](plans/v1.2.0/README.md)、Q71〜Q84 が [plans/v1.3.0/README.md](plans/v1.3.0/README.md) の 5 章「未確定事項」の項目(すべて確定済み)
 
 ---
 
@@ -125,7 +125,7 @@ func (m Match) LabelType() string  // "email", "ipv4_private" など
 type TypeInfo struct { Kind Kind; Default bool; Cloud string }
 var Types []TypeInfo
 // Group は、種別のまとまり。Groups(default、クラウド名(aws)、cloud)は Types から求める
-// (種別を足したとき、まとまりの定義を書き換えなくて済むように。plans/v1.1.0.md 2.1)。
+// (種別を足したとき、まとまりの定義を書き換えなくて済むように。plans/v1.1.0/README.md 2.1)。
 type Group struct { Name string; Kinds KindSet }
 var Groups []Group
 var DefaultKinds KindSet                       // Types の Default から求める

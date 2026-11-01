@@ -14,7 +14,7 @@ import (
 	"github.com/kiaamaaio/logscrub/internal/synthlog"
 )
 
-// 性能とメモリの測定(仕様 7 章、plans/v1.0.0.md の段階 11、Q29)。時間がかかるので、-perf を付けたときだけ実行する。
+// 性能とメモリの測定(仕様 7 章、plans/v1.0.0/README.md の段階 11、Q29)。時間がかかるので、-perf を付けたときだけ実行する。
 //
 //	./scripts/go test -run Perf -v ./cmd/logscrub -perf [-perf-size 100]
 //
@@ -42,7 +42,7 @@ func genLog(t *testing.T, dir, name string, mb int, pool int) string {
 	return genLogWith(t, dir, name, mb, pool, false)
 }
 
-// genLogWith は、genLog に、AWS の値を含めるか(synthlog.Config.AWS。plans/v1.1.0.md の Q39)を加えたもの。
+// genLogWith は、genLog に、AWS の値を含めるか(synthlog.Config.AWS。plans/v1.1.0/README.md の Q39)を加えたもの。
 func genLogWith(t *testing.T, dir, name string, mb int, pool int, aws bool) string {
 	t.Helper()
 	p := filepath.Join(dir, name)

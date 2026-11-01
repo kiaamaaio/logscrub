@@ -1,6 +1,6 @@
 # ガードレール対応 段階ごとの記録
 
-[計画](../guardrails.md)へ戻る。
+[計画](README.md)へ戻る。
 
 ### 段階ごとの記録
 
@@ -72,4 +72,11 @@
 - `docs/templates/pr.md` を作り、CLAUDE.md のブランチ運用と DEVELOPMENT.md のリリースの手順を直した
 - `develop` から `main` へのマージも、deny により人が行う形になった
 - GitHub のマージ方法を、ユーザーの確認を得て merge commit だけにした。`gh api repos/kiaamaaio/logscrub` で読み直し、`allow_merge_commit` が true、`allow_squash_merge` と `allow_rebase_merge` が false であることを確認した
+
+#### 入口のフォルダへの移動(Q93)
+
+- 5 件の入口を `git mv` で `README.md` へ移し、計画の中の相対リンク、索引、形式、CLAUDE.md、deny ルールのパスを直した
+- コードと資料の 16 ファイルの参照を `plans/<版>/README.md` に置き換えた。Go の変更はコメントだけで、動作は変わらない
+- 確かめたこと: リポジトリの全 `*.md` の相対リンクの切れが 0 件(形式のファイルを除く)、`gofmt`、資料の長さ、test、vet。deny は `docs/plans/v1.2.0/log.md` と `docs/plans/v1.0.0/README.md` への `>>` が止まることを確認した
+- このガードレールの計画の中の古いパスの記述は、当時の記録なので変えていない
 

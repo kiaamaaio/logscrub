@@ -4,8 +4,8 @@
 - 変更点: CHANGELOG.md(版ごとの、利用者から見た変更。README には書かない)
 - 限界: LIMITATIONS.md(利用者向けの説明の正本。仕様の各節は、ここへのリンクだけを置く。README には要約とリンクだけを置く)
 - 同じ内容を複数の資料に書かない。正本を 1 か所に決め、ほかはリンクにする(パッケージ構成は仕様 8 章、限界は LIMITATIONS.md、変更点は CHANGELOG.md)
-- 実装計画: docs/plans/<版>.md(版ごとに作る。版に属さない計画は docs/plans/misc/<内容>.md。形式は docs/templates/plan.md、Q の索引は docs/plans/README.md。完了した版のファイルは記録として残し、書き換えない)
-  - 入口の docs/plans/<版>.md には、範囲、設計、段階、進捗の表を書く。Q は docs/plans/<版>/questions.md、段階ごとの記録は docs/plans/<版>/log.md に、最初から分ける
+- 実装計画: docs/plans/<版>/(版ごとに作る。版に属さない計画は docs/plans/misc/<内容>/。形式は docs/templates/plan.md、Q の索引は docs/plans/README.md。完了した版のファイルは記録として残し、書き換えない)
+  - 入口の README.md には、範囲、設計、段階、進捗の表を書く。Q は questions.md、段階ごとの記録は log.md に、最初から分ける
   - 進捗の表には、状態と 1 行のメモだけを書く。何をしたか・測った値などの詳しい記録は log.md に、段階ごとの見出しを付けて書く
   - 版の完了条件に、時間を決めた `-fuzz` の探索と `-perf` の測定を入れる
 - 調査の資料: docs/research/<日付>-<内容>.md(形式は docs/templates/research.md。確かめた事実と、推測・未確認を分ける)

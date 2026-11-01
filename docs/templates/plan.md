@@ -4,7 +4,7 @@
 
 | ファイル | 内容 |
 |---|---|
-| `docs/plans/<版>.md` | 入口。範囲、設計、段階、進捗の表 |
+| `docs/plans/<版>/README.md` | 入口。範囲、設計、段階、進捗の表 |
 | `docs/plans/<版>/questions.md` | 未確定事項(Q) |
 | `docs/plans/<版>/log.md` | 段階ごとの記録 |
 
@@ -12,7 +12,7 @@
 
 ---
 
-## 入口(`docs/plans/<版>.md`)
+## 入口(`docs/plans/<版>/README.md`)
 
 ```markdown
 # logscrub <版> 実装計画
@@ -22,8 +22,8 @@
 - 前提:
 - ブランチ:
 - 各段階の完了条件:
-- 未確定事項: [questions.md](<版>/questions.md)。回答待ちの項目は推測で実装しない
-- 段階ごとの記録: [log.md](<版>/log.md)
+- 未確定事項: [questions.md](questions.md)。回答待ちの項目は推測で実装しない
+- 段階ごとの記録: [log.md](log.md)
 
 ## 1. 範囲
 
@@ -34,7 +34,7 @@
 
 ## 2. 調査の結果
 
-結論と、[docs/research/](../research/) へのリンクだけを書く。
+結論と、[docs/research/](../../research/) へのリンクだけを書く。
 
 ## 3. 設計の方針
 
@@ -57,7 +57,7 @@
 ```markdown
 # logscrub <版> 未確定事項
 
-[計画](../<版>.md)へ戻る。番号は前の計画の続きから付ける。
+[計画](README.md)へ戻る。番号は前の計画の続きから付ける。
 
 ### Q<番号>: <確認したいこと>
 
@@ -76,7 +76,7 @@ Q が 15 件を超えそうなら、版を分けることを検討する。
 ```markdown
 # logscrub <版> 段階ごとの記録
 
-[計画](../<版>.md)へ戻る。何をしたか、測った値、実際に確かめた方法を書く。測定の詳細は docs/development/performance.md に置く。
+[計画](README.md)へ戻る。何をしたか、測った値、実際に確かめた方法を書く。測定の詳細は docs/development/performance.md に置く。
 
 ## 段階 0: <内容>
 ```

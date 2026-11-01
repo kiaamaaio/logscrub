@@ -30,11 +30,8 @@
       "Bash(git * merge *)",
       "Bash(gh pr merge *)",
       "Bash(gh * pr merge *)",
-      "Edit(/docs/plans/v1.0.0.md)",
       "Edit(/docs/plans/v1.0.0/**)",
-      "Edit(/docs/plans/v1.1.0.md)",
       "Edit(/docs/plans/v1.1.0/**)",
-      "Edit(/docs/plans/v1.2.0.md)",
       "Edit(/docs/plans/v1.2.0/**)"
     ]
   },

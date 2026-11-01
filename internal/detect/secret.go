@@ -62,7 +62,7 @@ type fixedPrefix struct {
 //
 // 接頭辞を bytes.Index で探すと、先頭の文字が文中に多い場合(`sk` の `s`、`rk` の `r` など)に、遅い経路になる
 // (DEVELOPMENT.md 3.4 節)。接頭辞の中の、文中に少ない 1 バイトを bytes.IndexByte で探してから、前後を照合する。
-// 手がかりが同じ接頭辞は、1 回の走査でまとめて探す(plans/v1.2.0.md 段階 7 の実測)。
+// 手がかりが同じ接頭辞は、1 回の走査でまとめて探す(plans/v1.2.0/README.md 段階 7 の実測)。
 var fixedPrefixes = []fixedPrefix{
 	{lits: [][]byte{[]byte("AKIA"), []byte("ASIA"), []byte("AIza")}, off: 0}, // `A`
 	{lits: [][]byte{[]byte("gh"), []byte("github_pat_")}, off: 0},            // `g`
