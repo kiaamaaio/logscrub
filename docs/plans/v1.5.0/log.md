@@ -182,3 +182,27 @@ Q100〜Q111 が確定した(2026-11-01)。すべて案どおり。Q102 に、バ
 - PEM の行番号: 数え終えた位置から続けて数えるようにして、BEGIN の行が続く入力の 2 乗の時間をなくした。指摘の案(書き換えの段で求める)は、END のないブロックが入力の終わりで決まるので変更が大きく、採らなかった。印のないブロックの `bytes.Count` は残るので、DEVELOPMENT.md の記述を直した
 - `Stats`: 行番号の記録を `appendLine` にまとめ、上限は `MaxKeptLines = detect.MaxUnclosedLines` の 1 か所にした
 - 確認の記録がなかった規則は、Q112 に書いた。2026-11-01 に、案のとおり今の実装のままと確定した
+
+### 修正のあとの確認
+
+4f90d6f で実行した。
+
+`./scripts/go test ./internal/transform -run '^$' -fuzz … -fuzztime 90s`: 失敗なし。
+
+| 対象 | 実行回数 |
+|---|---|
+| `FuzzMaskStable` | 922,525 |
+| `FuzzHashStable` | 430,829 |
+| `FuzzRestoreRoundTrip` | 113,068 |
+
+`./scripts/go test -run Perf -v -timeout 40m ./cmd/logscrub -perf`(100MB、3 回の最速、2 コア): 3 つのテストが PASS。mask(ファイルから)は 298.0 MB/s、パイプからは 250.7 MB/s、`GOMAXPROCS=1` は 168.2 MB/s、hash は 338.0 MB/s、restore は 262.2 MB/s。段階 5 の値(346.0、297.2、182.6、360.2、278.9 MB/s)より 6〜16% 低いので、修正の前後を交互に測って切り分けた。
+
+修正の前(b80f8eb)と後(4f90d6f)のバイナリを交互に 9 回ずつ、100MB の合成ログ。
+
+| 測定 | 前(最速) | 後(最速) | 差(最速 / 中央値) |
+|---|---|---|---|
+| mask、`GOMAXPROCS=1` | 168.6 MB/s | 169.2 MB/s | +0.4% / +0.8% |
+| mask、`GOMAXPROCS=2` | 308.8 MB/s | 316.6 MB/s | +2.5% / +0.2% |
+| restore、`GOMAXPROCS=2` | 274.2 MB/s | 273.3 MB/s | -0.3% / +1.7% |
+
+修正による低下はなく、計画の 4.1 節の基準の範囲内。`-perf` の絶対値が低いのは、修正前のバイナリも同じ回に同じ程度まで下がっているので、測定の時点のマシンの状態による。README の性能の表は、段階 5 の値のまま変えない。
