@@ -71,5 +71,5 @@
   - 通る: `git merge-base`、`git log`、`gh pr list`、`./scripts/go version`
 - `docs/templates/pr.md` を作り、CLAUDE.md のブランチ運用と DEVELOPMENT.md のリリースの手順を直した
 - `develop` から `main` へのマージも、deny により人が行う形になった
-- 未実施: GitHub のマージ方法を merge commit だけにする設定。今は merge、squash、rebase のすべてが有効。リポジトリの設定の変更なので、確認を待つ
+- GitHub のマージ方法を、ユーザーの確認を得て merge commit だけにした。`gh api repos/kiaamaaio/logscrub` で読み直し、`allow_merge_commit` が true、`allow_squash_merge` と `allow_rebase_merge` が false であることを確認した
 
