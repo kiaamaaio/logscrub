@@ -111,3 +111,23 @@ Q100〜Q111 が確定した(2026-11-01)。すべて案どおり。Q102 に、バ
 - `TestOutDirMatchesConcatenatedMask`: 書き出したファイルの連結が `mask a b` の出力と同じで、`restore` で戻る
 - 実バイナリで、README の例を実行した: 出力の配置、番号の通し、権限(0700・0600)、2 回目のエラー、`restore`
 - 速度: 段階 2 のコミットのバイナリと交互に 9 回ずつ。mask、`GOMAXPROCS=2` は 342.2 → 341.9 MB/s(最速 -0.1%、中央値 +3.1%)、`GOMAXPROCS=1` は 186.1 → 183.1 MB/s(最速 -1.6%、中央値 -0.5%)。測定のばらつきの範囲
+
+## 段階 4: `--review`
+
+`internal/transform/review.go` を加えた。`Engine.Review` が `nil` でないときだけ、書き換えの段の `reviewLine` が表示を作る。通常の経路の変更は `nil` の確認 1 つだけ。
+
+- 仕様 6 章の「制御文字」の範囲を具体的にした: C0、DEL、C1(U+009B の CSI など)、双方向テキストの制御文字、不正な UTF-8 のバイト。双方向の制御文字は、表示の順を入れ替えて値を読めなくできるので含めた
+- 通知の行番号の組み立てを `lineList` にまとめた(`printUnchanged`・`printUnclosed`・`printSuspects`)
+
+### 怪しい語の量
+
+合成ログ(100MB、492,576 行)で 22,177 件。`logscrub mask --review` の出力を集計すると、上位は `req=<UUID>` の形で、`uuid` を無効にしている分だった(既定で無効の種別なので、知らせる意味がある)。`testdata` では、`app.log` が 17 行で 2 件、`pem.log` が 23 行で 1 件(`CERTIFICATE` の本文)、`paths.log`・`custom.log` は 0 件。規則は調整しない。
+
+### 確かめたこと
+
+- `./scripts/go test ./...`、`./scripts/go vet ./...`: 通った
+- `TestReviewMatchesMask`: `testdata` の 4 つで、色の指定を除いた出力が通常の mask と同じ。件数も同じ
+- 実バイナリで、`ESC[8m` で隠した文字列が `^[[8mhidden-value^[[0m` と表示されること
+- 実際の端末での色の見え方は確かめていない(自動の環境に端末がない)。Windows のコンソールも同じ
+- 速度: 段階 3 のコミットのバイナリと交互に 9 回ずつ。`GOMAXPROCS=2` は 315.9 → 314.3 MB/s(最速 -0.5%、中央値 +0.7%)、`GOMAXPROCS=1` は 172.9 → 171.3 MB/s(最速 -0.9%、中央値 -0.7%)。測定のばらつきの範囲。絶対値が段階 3 より低いのは、測定の時点のマシンの状態による(同じ回の比較では差がない)
+- `--review` 自体は 245 MB/s(1 回)

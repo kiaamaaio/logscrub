@@ -197,7 +197,7 @@ type Stats struct { ... }    // 種別名ごとの件数(→ Q19)
 
 // Engine は入力群を行ごとに検出・置換して w に書く。
 // Inspect は任意で、変換した 1 行を受け取り、置換済みの形として数える数を返す(restore が、崩れた形を集めるために使う。Q82)。
-type Engine struct { Det *detect.Detector; Rep Replacer; Stats Stats; Inspect func(out []byte) int }
+type Engine struct { Det *detect.Detector; Rep Replacer; Stats Stats; Inspect func(out []byte) int; Review *Review }
 func (e *Engine) Run(inputs []io.Reader, w io.Writer) error
 
 // Restore は sources から mask と同じ規則で対応を作り直し、answer 中のラベルを戻して w に書く。

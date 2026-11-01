@@ -20,6 +20,7 @@ func runMask(e *env, args []string) int {
 	fs.StringVar(&output, "output", "", "output file")
 	fs.StringVar(&output, "o", "", "output file (short)")
 	outDir := fs.String("out-dir", "", "directory for one masked file per input")
+	review := fs.Bool("review", false, "show the result in color, for checking it")
 
 	files, code, done := e.parseFlags("mask", usageMask, fs, args)
 	if done {
@@ -47,6 +48,9 @@ func runMask(e *env, args []string) int {
 		if set["output"] || set["o"] {
 			return e.fail("--out-dir cannot be used with --output")
 		}
+	}
+	if *review && (set["output"] || set["o"] || set["out-dir"]) {
+		return e.fail("--review cannot be used with --output or --out-dir")
 	}
 	opts, format, err := df.options(set)
 	if err != nil {
@@ -85,6 +89,9 @@ func runMask(e *env, args []string) int {
 	}
 
 	eng := &transform.Engine{Det: det, Rep: rep}
+	if *review {
+		eng.Review = &transform.Review{Color: e.getenv("NO_COLOR") == ""}
+	}
 	var runErr error
 	if set["out-dir"] {
 		plan, err := planOutDir(*outDir, files)
@@ -121,6 +128,7 @@ func runMask(e *env, args []string) int {
 	}
 	printUnchanged(e, eng.Stats.Kept, eng.Stats.KeptLineCount, eng.Stats.KeptLines)
 	printUnclosed(e, &eng.Stats)
+	printSuspects(e, &eng.Stats)
 	if *failOnDetect && eng.Stats.Total() > 0 {
 		return exitDetected
 	}

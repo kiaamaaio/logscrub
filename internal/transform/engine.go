@@ -38,6 +38,8 @@ type Engine struct {
 	// Inspect は、任意。変換した 1 行(改行コードを含まない)を受け取り、その行で
 	// 置換済みの形として数える文字列の数を返す。restore が、mask の出力を確かめるために使う。
 	Inspect func(out []byte) int
+	// Review は、任意。`--review` の表示にする(nil なら、通常の出力)。
+	Review *Review
 
 	// workers は、検出のワーカー数。0 なら GOMAXPROCS から決める(上限は maxWorkers)。
 	workers int
@@ -249,11 +251,33 @@ func (e *Engine) writeBlocks(w io.Writer, ordered <-chan *block, free chan<- *bl
 	return bw.Flush()
 }
 
+// reviewLine は、`--review` の表示の 1 行を作る。
+func (e *Engine) reviewLine(out *[]byte, content []byte, matches []detect.Match) []byte {
+	dst := (*out)[:0]
+	last, suspects := 0, 0
+	for _, m := range matches {
+		var n int
+		dst, n = e.Review.appendPlain(dst, content[last:m.Start])
+		suspects += n
+		dst = e.Review.appendValue(dst, e.Rep, content, m)
+		last = m.End
+		e.Stats.add(m)
+	}
+	dst, n := e.Review.appendPlain(dst, content[last:])
+	if suspects += n; suspects > 0 {
+		e.Stats.addSuspects(suspects, e.Stats.Lines)
+	}
+	*out = dst
+	return dst
+}
+
 // writeLine は、1 行を置き換えて書く。out は、置き換えた行の作業領域。
 func (e *Engine) writeLine(bw *bufio.Writer, out *[]byte, content, eol []byte, matches []detect.Match, kept int) error {
 	e.Stats.Lines++
 	line := content
-	if len(matches) > 0 {
+	if e.Review != nil {
+		line = e.reviewLine(out, content, matches)
+	} else if len(matches) > 0 {
 		*out = (*out)[:0]
 		last := 0
 		for _, m := range matches {

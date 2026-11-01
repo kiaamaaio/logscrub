@@ -34,6 +34,12 @@ type Stats struct {
 	Unclosed      int
 	UnclosedLines []int
 
+	// Suspects は、`--review` で、置換しなかった怪しい語の数。SuspectLines は、その行番号(最初の MaxKeptLines 件まで)、
+	// SuspectLineCount は、その行の数。
+	Suspects         int
+	SuspectLines     []int
+	SuspectLineCount int
+
 	counts [label.NumTypes]int
 }
 
@@ -50,6 +56,15 @@ func (s *Stats) addKept(n, line int) {
 	s.KeptLineCount++
 	if len(s.KeptLines) < MaxKeptLines {
 		s.KeptLines = append(s.KeptLines, line)
+	}
+}
+
+// addSuspects は、行番号 line の行の、怪しい語を n 件数える(1 行につき 1 回呼ぶ)。
+func (s *Stats) addSuspects(n, line int) {
+	s.Suspects += n
+	s.SuspectLineCount++
+	if len(s.SuspectLines) < MaxKeptLines {
+		s.SuspectLines = append(s.SuspectLines, line)
 	}
 }
 

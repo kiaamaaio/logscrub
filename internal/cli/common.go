@@ -134,18 +134,34 @@ func printUnchanged(e *env, kept, keptLineCount int, keptLines []int) {
 	if kept == 1 {
 		what = "1 string was left unchanged because it looks"
 	}
-	nums := make([]string, len(keptLines))
-	for i, n := range keptLines {
+	fmt.Fprintf(e.stderr, "logscrub: %s already replaced (%s). Check them before sharing.\n", what, lineList(keptLines, keptLineCount))
+}
+
+// lineList は、通知の行番号の並びを作る。listed は最初の数件で、count は全体の数。
+func lineList(listed []int, count int) string {
+	nums := make([]string, len(listed))
+	for i, n := range listed {
 		nums[i] = fmt.Sprint(n)
 	}
-	lines := "lines " + strings.Join(nums, ", ")
-	if len(keptLines) == 1 && keptLineCount == 1 {
-		lines = "line " + nums[0]
+	if count == 1 {
+		return "line " + nums[0]
 	}
-	if keptLineCount > len(keptLines) {
+	lines := "lines " + strings.Join(nums, ", ")
+	if count > len(listed) {
 		lines += ", ..."
 	}
-	fmt.Fprintf(e.stderr, "logscrub: %s already replaced (%s). Check them before sharing.\n", what, lines)
+	return lines
+}
+
+// printSuspects は、`--review` の怪しい語の、件数と行番号を通知する(仕様 6 章)。値は出さない。
+func printSuspects(e *env, st *transform.Stats) {
+	switch st.Suspects {
+	case 0:
+	case 1:
+		fmt.Fprintf(e.stderr, "logscrub: 1 string looks like an unreplaced value (%s).\n", lineList(st.SuspectLines, st.SuspectLineCount))
+	default:
+		fmt.Fprintf(e.stderr, "logscrub: %d strings look like unreplaced values (%s).\n", st.Suspects, lineList(st.SuspectLines, st.SuspectLineCount))
+	}
 }
 
 // printUnclosed は、END のない PEM のブロックの、件数と行番号を通知する(仕様 6 章)。
@@ -157,18 +173,7 @@ func printUnclosed(e *env, st *transform.Stats) {
 	if st.Unclosed == 1 {
 		what, pron = "1 private key block", "it"
 	}
-	nums := make([]string, len(st.UnclosedLines))
-	for i, n := range st.UnclosedLines {
-		nums[i] = fmt.Sprint(n)
-	}
-	lines := "lines " + strings.Join(nums, ", ")
-	if st.Unclosed == 1 {
-		lines = "line " + nums[0]
-	}
-	if st.Unclosed > len(st.UnclosedLines) {
-		lines += ", ..."
-	}
-	fmt.Fprintf(e.stderr, "logscrub: %s had no END line (%s). Check the lines after %s before sharing.\n", what, lines, pron)
+	fmt.Fprintf(e.stderr, "logscrub: %s had no END line (%s). Check the lines after %s before sharing.\n", what, lineList(st.UnclosedLines, st.Unclosed), pron)
 }
 
 // maxMissingListed は、戻せなかったラベルを、stderr に並べる最大の数(件数は、全体を出す)。

@@ -83,6 +83,11 @@ Options (they may be written before or after FILE):
   --out-dir DIR             write one masked file per FILE into DIR (numbering continues
                             across files). Paths are kept relative to the common parent
                             of the FILEs; existing files are never overwritten.
+  --review                  show the result on stdout for checking it: replacements
+                            and suspicious strings left in the text are colored,
+                            control characters are made visible. Do not pass this
+                            output on. Use "| less -R" for long logs. NO_COLOR turns
+                            the colors off. Not with --output or --out-dir.
   -h, --help                show this help.
 
 Exit status: 0 success, 1 error, 2 something was replaced (--fail-on-detect).
