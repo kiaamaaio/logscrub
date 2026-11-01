@@ -131,3 +131,43 @@ Q100〜Q111 が確定した(2026-11-01)。すべて案どおり。Q102 に、バ
 - 実際の端末での色の見え方は確かめていない(自動の環境に端末がない)。Windows のコンソールも同じ
 - 速度: 段階 3 のコミットのバイナリと交互に 9 回ずつ。`GOMAXPROCS=2` は 315.9 → 314.3 MB/s(最速 -0.5%、中央値 +0.7%)、`GOMAXPROCS=1` は 172.9 → 171.3 MB/s(最速 -0.9%、中央値 -0.7%)。測定のばらつきの範囲。絶対値が段階 3 より低いのは、測定の時点のマシンの状態による(同じ回の比較では差がない)
 - `--review` 自体は 245 MB/s(1 回)
+
+## 段階 5: 仕上げ
+
+### ファズテスト
+
+各 90 秒。失敗なし。
+
+| 対象 | 実行回数 |
+|---|---|
+| `FuzzMaskStable` | 999,176 |
+| `FuzzHashStable` | 466,613 |
+| `FuzzRestoreRoundTrip` | 194,185 |
+
+`CGO_ENABLED=1 ./scripts/go test -race -timeout 20m -skip '^TestEngineMatchesSequential$' ./internal/transform ./internal/cli ./internal/stream`: 通った(除いた理由は段階 2。`detect` の `-race` は段階 2 のあと変えていないので、再度は実行していない。**段階 4 の変更は `transform`・`cli` だけ**)。
+
+### 性能
+
+`./scripts/go test -run Perf -v -timeout 40m ./cmd/logscrub -perf`(1a8bd9d、100MB、3 回の最速、2 コア)。3 つのテストが PASS。README の性能の表は、この結果の値。
+
+段階 0 の基準値との比較。別の時に測った値なので、数 % のばらつきを含む(段階ごとの差は、交互に測った各段階の記録を見る)。
+
+| 測定 | v1.4.0 のあと | v1.5.0 | 差 | 最大メモリ |
+|---|---|---|---|---|
+| mask、ファイルから | 373.6 MB/s | 346.0 MB/s | -7.4% | 37 → 38 MB |
+| mask、パイプから | 316.1 MB/s | 297.2 MB/s | -6.0% | 32 → 38 MB |
+| mask、`GOMAXPROCS=1` | 206.4 MB/s | 182.6 MB/s | -11.5% | 35 → 38 MB |
+| mask、`GOMAXPROCS=2` | 375.5 MB/s | 348.1 MB/s | -7.3% | 36 → 36 MB |
+| AWS のログ、`default,aws` | 274.9 MB/s | 265.8 MB/s | -3.3% | 39 → 40 MB |
+| 語 1000 個 | 329.7 MB/s | 306.8 MB/s | -6.9% | 36 → 38 MB |
+| `--domain` | 327.7 MB/s | 299.8 MB/s | -8.5% | 36 → 36 MB |
+| `--mode hash` | 400.6 MB/s | 360.2 MB/s | -10.1% | 16 → 16 MB |
+| restore | 316.2 MB/s | 278.9 MB/s | -11.8% | 39 → 44 MB |
+| 10MB の行、検出対象なし(`GOMAXPROCS=1`) | 2,187.5 MB/s | 1,930.4 MB/s | -11.8% | 29.3 → 32.2 MB |
+
+仕様 7 章の目標(50MB/s)は、すべて満たす。段階ごとの差は、計画の 4.1 節の基準の範囲か、受け入れたもの(段階 1)。累積の -12% 近い値は、段階 1 の約 -9% の上に、ばらつきと段階 2 の小さな増加が重なったものと見ている(原因の内訳は確かめていない)。
+
+### 確かめたこと
+
+- 実バイナリで、README と detection.md の例を実行した: `user_path`、PEM、`--review`、`logscrub types`、`mask --help`。`--out-dir` は段階 3
+- `./scripts/doc-size-check`
