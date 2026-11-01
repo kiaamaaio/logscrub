@@ -33,7 +33,7 @@
 - コミットの前の検査: git の pre-commit hook(`.githooks/pre-commit`)が、`main` へのコミットを止め、資料の長さ、`go.mod` の依存(`scripts/allowed-modules` にないものを止める)、`gofmt`、test、vet(Linux・Windows)を確かめる。失敗の出力は、コミットの結果として表示される
   - クローンごとに、最初に 1 回だけ `git config core.hooksPath .githooks` を実行して有効にする
   - git が実行するので、Claude のコミットにも人のコミットにも、コマンドの書き方によらず動く。人の判断でコミットするときは `git commit --no-verify` で飛ばせる
-  - 確認するのは作業ツリーの状態で、ステージした内容だけではない
+  - 確認するのはコミットされる内容(インデックス)で、`.cache/pre-commit` に書き出して検査する
   - Docker が使えずテストを実行できない場合も、コミットを止める
 - Claude Code によるコミットの前の確認: `.claude/settings.json` の PreToolUse hook が、Claude が Bash で `git commit` を実行する直前に `scripts/claude-commit-check` を呼ぶ。pre-commit hook が有効でなければコミットを止める(終了コード 2。理由は Claude に返る)。また、次のどれかに当たるときはユーザーに確認を求める(`permissionDecision: "ask"`)
   - `feature/` で始まらないブランチへのコミット

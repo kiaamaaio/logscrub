@@ -80,3 +80,10 @@
 - 確かめたこと: リポジトリの全 `*.md` の相対リンクの切れが 0 件(形式のファイルを除く)、`gofmt`、資料の長さ、test、vet。deny は `docs/plans/v1.2.0/log.md` と `docs/plans/v1.0.0/README.md` への `>>` が止まることを確認した
 - このガードレールの計画の中の古いパスの記述は、当時の記録なので変えていない
 
+#### マージ前のレビューの修正
+
+- `scripts/claude-commit-check`: `-c core.hooksPath=…` と `git config` による `core.hooksPath` の変更、結合した `-n`(`-anm`)を、終了コード 2 で止める。deny にも `Bash(git * commit * -n *)`、`Bash(git *core.hooksPath=*)` を加えた
+- 文字列で判定するので、コミットメッセージの中の同じ形でも止まる
+- `.githooks/pre-commit`: 検査の対象を、作業ツリーからインデックスに変えた。`git checkout-index` で `.cache/pre-commit` に書き出し、`go test -C` などで検査する。依存の `require` の空行も無視する
+- `scripts/doc-size-check`、`scripts/claude-commit-check`: `core.quotePath=false` で、日本語のパスも判定する
+

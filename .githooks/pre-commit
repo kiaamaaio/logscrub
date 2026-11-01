@@ -2,48 +2,59 @@
 # git がコミットの前に実行する hook(有効にする手順は docs/DEVELOPMENT.md 1 章)。
 # main へのコミットを止め、資料の長さ、許可されていない依存、gofmt、test、vet(Linux・Windows)を確かめる。
 # どれかが失敗したら終了コード 1 でコミットを止める。
-# 確かめるのは作業ツリーの内容で、ステージした内容だけではない。
+# 確かめるのはコミットされる内容(インデックス)で、.cache/pre-commit に書き出したものを検査する。
 # 人の判断でコミットするときは git commit --no-verify で飛ばせる。
 set -uo pipefail
 
 repo="$(git rev-parse --show-toplevel)"
 cd "$repo" || exit 1
 
+# scripts/go がマウントするのはリポジトリだけで、ビルドのキャッシュも共用したいので、リポジトリの中に書き出す
+src=.cache/pre-commit
+trap 'rm -rf "$src"' EXIT
+rm -rf "$src"
+mkdir -p .cache
+if ! git checkout-index -a --prefix="$src/"; then
+  printf 'コミットを中止しました: コミットされる内容を書き出せません。\n' >&2
+  exit 1
+fi
+
 if [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ]; then
   printf 'コミットを中止しました: main には直接コミットしません(CLAUDE.md のブランチ運用)。\n' >&2
   exit 1
 fi
 
-if ! out="$(scripts/doc-size-check 2>&1)"; then
+mapfile -t docs < <(git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR HEAD -- '*.md')
+if [ "${#docs[@]}" -gt 0 ] && ! out="$(scripts/doc-size-check "${docs[@]/#/$src/}" 2>&1)"; then
   printf 'コミットを中止しました: 資料の長さが上限を超えています。\n%s\n' "$out" >&2
   exit 1
 fi
 
-mapfile -t modules < <(awk '/^require \(/ { block = 1; next } block && /^\)/ { block = 0; next } block && $1 !~ /^\/\// { print $1 } /^require [^(]/ { print $2 }' go.mod)
+mapfile -t modules < <(awk '/^require \(/ { block = 1; next } block && /^\)/ { block = 0; next } block && NF && $1 !~ /^\/\// { print $1 } /^require [^(]/ { print $2 }' "$src/go.mod")
 for m in "${modules[@]}"; do
-  if ! grep -Fxq -- "$m" scripts/allowed-modules; then
+  if ! grep -Fxq -- "$m" "$src/scripts/allowed-modules"; then
     printf 'コミットを中止しました: 許可されていない依存です: %s\n実装を止めて、ユーザーに確認してください(CLAUDE.md)。\n' "$m" >&2
     exit 1
   fi
 done
 
 # gofmt -l は、未整形のファイルがあっても終了コード 0 で終えるので、出力でも判定する
-if ! out="$(scripts/go run cmd/gofmt -l cmd internal 2>&1)" || [ -n "$out" ]; then
+if ! out="$(scripts/go run -C "$src" cmd/gofmt -l cmd internal 2>&1)" || [ -n "$out" ]; then
   printf 'コミットを中止しました: gofmt が通りません。\n%s\n' "$out" >&2
   exit 1
 fi
 
-if ! out="$(scripts/go test ./... 2>&1)"; then
+if ! out="$(scripts/go test -C "$src" ./... 2>&1)"; then
   printf 'コミットを中止しました: ./scripts/go test ./... が失敗しました。\n%s\n' "$out" >&2
   exit 1
 fi
 
-if ! out="$(scripts/go vet ./... 2>&1)"; then
+if ! out="$(scripts/go vet -C "$src" ./... 2>&1)"; then
   printf 'コミットを中止しました: ./scripts/go vet ./... が失敗しました。\n%s\n' "$out" >&2
   exit 1
 fi
 
-if ! out="$(GOOS=windows GOARCH=amd64 scripts/go vet ./... 2>&1)"; then
+if ! out="$(GOOS=windows GOARCH=amd64 scripts/go vet -C "$src" ./... 2>&1)"; then
   printf 'コミットを中止しました: Windows 向けの vet が失敗しました。\n%s\n' "$out" >&2
   exit 1
 fi

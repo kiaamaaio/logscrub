@@ -2,10 +2,10 @@
 # Claude Code の PreToolUse hook(.claude/settings.json)から呼ばれる。
 # 検査そのものは git の pre-commit hook(.githooks/pre-commit)が行う。ここでは、Claude が Bash で git commit を
 # 実行する前に、次のことを行う(stderr と確認の理由は Claude やユーザーに返る)。
-#   - pre-commit hook が有効でなければ、終了コード 2 でコミットを止める
+#   - pre-commit hook が有効でなければ、または `-n` で飛ばすなら、終了コード 2 でコミットを止める
 #   - 人が確かめるべき変更を含むなら、ユーザーに確認を求める(permissionDecision: ask)
-# あわせて、すべてのコマンドについて、ホストの go の実行を終了コード 2 で止める。
-# 標準入力は hook の入力(JSON)。ホストの go でも git commit でもないコマンドは何もせず通す。
+# あわせて、すべてのコマンドについて、ホストの go の実行と、core.hooksPath の変更を終了コード 2 で止める。
+# 標準入力は hook の入力(JSON)。これらのどれでもないコマンドは何もせず通す。
 set -uo pipefail
 
 input="$(cat)"
@@ -16,11 +16,25 @@ if grep -Eq '("command"[[:space:]]*:[[:space:]]*"|[;&|][[:space:]]*|\\[nt][[:spa
   exit 2
 fi
 
+# pre-commit hook を飛ばす書き方を止める。読み取りと、手順どおりの .githooks への設定は通す。git の設定名は大文字・小文字を区別しない
+if grep -Eiq 'git[^;&|]*[[:space:]]-c[[:space:]]+[^[:space:]]*core\.hookspath=|git[^;&|]*[[:space:]]config[[:space:]][^;&|]*core\.hookspath' <<<"$input" &&
+  ! grep -Eiq 'git config core\.hookspath([[:space:]]+\.githooks)?[[:space:]]*(\\|"|[;&|]|$)' <<<"$input"; then
+  printf 'core.hooksPath は変えません。pre-commit hook の検査を飛ばすことになります(CLAUDE.md)。\n' >&2
+  exit 2
+fi
+
 # JSON を解析せず、コマンド文字列に「git [オプション] commit」の形があるかだけを見る。
 # 取りこぼしても、検査は pre-commit hook が行う。JSON の中の改行は \n の 2 文字なので、git の直前の文字として認める
 opt_value='(\\"[^"]*\\"|'"'"'[^'"'"']*'"'"'|[^-[:space:]][^[:space:]]*)'
-if ! grep -Eq '(^|[^[:alnum:]_-]|\\[nrt])git([[:space:]]+-[^[:space:]]*([[:space:]]+'"$opt_value"')?)*[[:space:]]+commit([[:space:]]|\\|"|$)' <<<"$input"; then
+git_commit='(^|[^[:alnum:]_-]|\\[nrt])git([[:space:]]+-[^[:space:]]*([[:space:]]+'"$opt_value"')?)*[[:space:]]+commit'
+if ! grep -Eq "$git_commit"'([[:space:]]|\\|"|$)' <<<"$input"; then
   exit 0
+fi
+
+# 権限のルールでは、結合した短いオプション(-an)を書き切れないので、ここで止める。値を取る -m などのあとの n は除く
+if grep -Eq "$git_commit"'[[:space:]]([^;&|]*[[:space:]])?-[aeiopqsvz]*n[[:alpha:]]*([[:space:]]|\\|"|$)' <<<"$input"; then
+  printf 'コミットを中止しました: -n で pre-commit hook を飛ばすことはできません(CLAUDE.md)。\n' >&2
+  exit 2
 fi
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -40,10 +54,10 @@ case "$branch" in
 esac
 
 # 同じコマンドの git add は、この時点では実行されていないので、ステージしていない変更も含めて見る
-mapfile -t untracked < <(git ls-files --others --exclude-standard)
+mapfile -t untracked < <(git -c core.quotePath=false ls-files --others --exclude-standard)
 mapfile -t changed < <(
   {
-    git diff --name-only HEAD
+    git -c core.quotePath=false diff --name-only HEAD
     printf '%s\n' "${untracked[@]}"
   } | sort -u
 )

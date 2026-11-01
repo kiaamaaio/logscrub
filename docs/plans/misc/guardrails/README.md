@@ -3,7 +3,7 @@
 - 目的: Claude Code に実装を任せるときの検査漏れと、文章だけのルールの破れを、機械で防ぐ。あわせて、テストが通っても値が漏れる変更を人の確認に回す
 - 開発環境・設計の注意点: [DEVELOPMENT.md](../../../DEVELOPMENT.md)
 - 前提: logscrub の機能・出力は変えない。利用者から見た変更がないので、CHANGELOG.md には書かない
-- ブランチ: `feature/v1.3.0-custom-values`(Q86)。段階ごとにコミットし、develop へのマージは指示があってから `--no-ff` で行う
+- ブランチ: `feature/v1.3.0-custom-values`(Q86)。段階ごとにコミットし、develop へは、指示があってから、`/code-review` のあとで AI が PR を作り、人がマージする(CLAUDE.md)
 - 各段階の完了条件: `./scripts/go test ./...` と `./scripts/go vet ./...` が通ること(CLAUDE.md)に加え、段階ごとの「確かめること」を実際に動かして確かめること
 - **5 章の回答待ちの項目は、推測で実装しない。** 各段階の「前提となる確認」が決まるまで、その段階には入らない
 
