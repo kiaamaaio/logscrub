@@ -31,3 +31,10 @@ KEY=-----BEGIN RSA PRIVATE KEY-----<secret_7>-----END RSA PRIVATE KEY-----
 {"log":"2026-11-01 INFO <secret_9>\n","stream":"stderr"}
 {"log":"2026-11-01 WARN <secret_3>\n","stream":"stderr"}
 {"log":"2026-11-01 INFO -----END ENCRYPTED PRIVATE KEY-----\n","stream":"stderr"}
+KEY=-----BEGIN RSA PRIVATE KEY-----\n
+<secret_1>\n
+-----END RSA PRIVATE KEY-----\n
+KEY="-----BEGIN RSA PRIVATE KEY-----\n\
+<secret_1>\n\
+<secret_3>\n\
+-----END RSA PRIVATE KEY-----\n"

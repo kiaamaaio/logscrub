@@ -41,8 +41,10 @@
 - 行の先頭に日時などが付く形と文字列で包まれた形では、END の印に続けて書かれた本文(`t=3 AAAA-----END PRIVATE KEY-----`、`{"log":"AAAA-----END PRIVATE KEY-----\n"}` の `AAAA`)が残り、stderr の通知も出ません。
 - 行頭に日時などが付くログで、BEGIN の印の列と同じ長さの行は、末尾が空白か記号なら、空行として扱われてブロックが続きます。その行は置換されず、続く行が本文の形なら伏せられます。
 - 本文の形の短い語(`done` など)は、END のないブロックの中では、本文として置換されます。
+- END のないブロックの中に、行全体がトークンの行(`ghp_…`、JWT、`sk_live_…`。Docker の `{"log":"ghp_…\n"}` の形でも同じ)があると、トークンは置換されますが、その行でブロックが終わり、後ろの本文は残ります(stderr に通知します)。その出力を再度 `mask` すると、置換済みの行でブロックが続くので、残っていた本文が伏せられ、結果が変わります。このとき、残っていた本文には、新しい連番のラベルが付くので、1 回目のラベルと同じ番号になることがあります。
 - 鍵の本文は、行ごとに別のラベルになります。4096 ビットの RSA で約 50 個になり、後ろの `<secret_N>` の番号がその分ずれます。
-- 1 行ごとに文字列で包まれた鍵は、文字の `\n` があるときだけ検出します(Docker の `{"log":"-----BEGIN PRIVATE KEY-----\n",…}`、ソースコードの `"-----BEGIN PRIVATE KEY-----\n" +`)。`\n` がない形(`"-----BEGIN PRIVATE KEY-----",` の次の行に続く形)は、本文の行を検出できず、stderr の通知も出ません。
+- 1 行ごとに文字列で包まれた鍵は、文字の `\n` があるときだけ検出します(Docker の `{"log":"-----BEGIN PRIVATE KEY-----\n",…}`、ソースコードの `"-----BEGIN PRIVATE KEY-----\n" +`、シェルなどの行の継続の `KEY="-----BEGIN PRIVATE KEY-----\n\`)。`\n` がない形(`"-----BEGIN PRIVATE KEY-----",` の次の行に続く形、行末が `\` だけの `KEY=-----BEGIN PRIVATE KEY-----\`)は、本文の行を検出できず、stderr の通知も出ません。
+- `\` を 2 重にした形(`{"log":"{\"msg\":\"-----BEGIN PRIVATE KEY-----\\n<本文>\\n\"}\n"}`。Docker のログの中の JSON のロガーなど)は、同じ行に END の印がなければ、本文が残り、stderr の通知も出ません。
 - 文字列で包まれた鍵の本文は、1 レコードに 1 行で、その行の最初の文字の `\n` の手前にあるものとして判定します。1 レコードに複数行がある形(`{"log":"AAAA\nBBBB\n"}` の `BBBB`)と、前のフィールドに `\n` がある形(`{"a":"x\n","log":"AAAA\n"}` の `AAAA`)は、本文が残り、stderr の通知も出ません。`/` をエスケープした形(`{"log":"AAAA\/BBBB\n"}`)は、そこでブロックが終わり、本文が残ります(stderr に通知します)。
 - PuTTY の `.ppk` など、PEM でない形式も対象外です。
 
@@ -85,7 +87,7 @@
 
 - 形だけで判定するので、`/home/` で始まる Web のパス(`GET /home/dashboard`、`/home/v1/items`)や、Windows の形に見える `GET /c/users/123` の `dashboard`・`v1`・`123` も置換されます。`restore` で戻せます。`--allow` でも残せます。
 - パスの途中の `/home/`(`/var/home/yamada`、`/data/home/yamada`)と、ドメインのある URL は対象外です。ユーザー名がパスの外にある形(`user=yamada`、`~yamada`)も対象外です。`--deny` で指定してください。
-- 次の形は対象外で、ユーザー名が残ります: 2 重にエスケープしたパス(`C:\\\\Users\\\\yamada`)、`file:///mnt/c/Users/…`、`file:///c/Users/…`、`\/mnt\/c\/Users\/…` と `\/c\/Users\/…`、`file:\/\/\/home\/…`、エスケープした形で区切りが混ざるパス(`C:\\Users/yamada`)、ドライブのない形(`HOMEPATH=\Users\yamada`)、英数字の直後のパス(`-I/home/yamada`、`-L/Users/yamada`)、WSL の形の大文字(`\\WSL$\Ubuntu\home\yamada`)、WSL の形で区切りが混ざるパス(`\\wsl$\Ubuntu/home/yamada`)、WSL の URL(`file://wsl$/Ubuntu/home/yamada`)。
+- 次の形は対象外で、ユーザー名が残ります: 2 重にエスケープしたパス(`C:\\\\Users\\\\yamada`)、`file:///mnt/c/Users/…`、`file:///c/Users/…`、`\/mnt\/c\/Users\/…` と `\/c\/Users\/…`、`file:\/\/\/home\/…`、エスケープした形で区切りが混ざるパス(`C:\\Users/yamada`)、ドライブのない形(`HOMEPATH=\Users\yamada`)、英数字の直後のパス(`-I/home/yamada`、`-L/Users/yamada`)、WSL の形の大文字(`\\WSL$\Ubuntu\home\yamada`)、WSL の形で区切りが混ざるパス(`\\wsl$\Ubuntu/home/yamada`)、WSL の URL(`file://wsl$/Ubuntu/home/yamada`、`file:////wsl$/Ubuntu/home/yamada`、`file:////wsl.localhost/Ubuntu/home/yamada`)、WSL の長いパス(`\\?\UNC\wsl$\Ubuntu\home\yamada`、`\\?\UNC\wsl.localhost\Ubuntu\home\yamada`)。
 - 空白を含む名前は、Windows の形で、後ろに `\` か `/` があるときだけ 1 つの値になります。最後の要素(`C:\Users\Taro Yamada`)は `Taro` だけが置換され、`Yamada` が残ります。Linux・macOS の形の空白でも、同じです。URL の `%20`(`file:///C:/Users/Taro%20Yamada/`)と、`/` をエスケープした URL(`file:\/C:\/Users\/Taro Yamada\/x`)も同じです。
 - キー名の値の中のパスで、キー名の値が空白で切れると、後ろの部分が残ります(`private_key: C:\Users\Taro Yamada\.ssh\id_rsa` の `Yamada`)。
 - 空白を含む名前の後ろに、空白で区切られたパスが続くと、間の語も値に含まれます(`C:\Users\taro and /var/log` は `taro and` が 1 つの値)。

@@ -113,13 +113,13 @@ func (s *PEMScanner) scanLine(data, line []byte, pos int, dst []PEMSpan) []PEMSp
 				dst = append(dst, PEMSpan{Pos: pos, Start: bs, End: be})
 			}
 		} else {
+			bodyStart, bodyEnd := s.bodyRange(line)
 			var body bool
-			if dst, body = s.bodyLine(line, pos, dst); body {
+			if dst, body = s.bodyLine(line, bodyStart, bodyEnd, pos, dst); body {
 				return dst
 			}
 			// 本文の範囲の末尾が置換済みなら、伏せた出力を再度流している。鍵の残りを知らせる理由がない。
-			from, to := s.bodyRange(line)
-			if bs, be := trimBlank(line, from, to); s.secretTail(line[bs:be]) >= 0 {
+			if bs, be := trimBlank(line, bodyStart, bodyEnd); s.secretTail(line[bs:be]) >= 0 {
 				s.inBlock = false
 			} else {
 				s.closeUnfinished()
@@ -162,9 +162,8 @@ func (s *PEMScanner) scanLine(data, line []byte, pos int, dst []PEMSpan) []PEMSp
 }
 
 // bodyLine は、ブロックの中の 1 行が本文の形かを返し、置換する範囲を dst に追記する(仕様 4.1)。
-// BEGIN の印の列(列で語が切れる行は除く)、本文の範囲(bodyRange)、行全体の順に、狭い範囲から調べる。
-func (s *PEMScanner) bodyLine(line []byte, pos int, dst []PEMSpan) ([]PEMSpan, bool) {
-	from, to := s.bodyRange(line)
+// BEGIN の印の列(列で語が切れる行は除く)、本文の範囲 line[from:to](bodyRange)、行全体の順に、狭い範囲から調べる。
+func (s *PEMScanner) bodyLine(line []byte, from, to, pos int, dst []PEMSpan) ([]PEMSpan, bool) {
 	if c := from + s.column; s.column > 0 && c <= to && !isBase64Byte(line[c-1]) {
 		if d, body := s.bodyForm(line, c, to, pos, dst); body {
 			return d, true
@@ -303,15 +302,15 @@ func isPEMHeader(b []byte) bool {
 	return true
 }
 
-// endsWithEscapedNewline は、BEGIN の印の後ろ rest が、文字の `\n`(`\r\n`)と閉じ引用符で始まるかを返す。
-// 本文は次の行の文字列に続く(Docker の json-file など)。
+// endsWithEscapedNewline は、BEGIN の印の後ろ rest が、文字の `\n`(`\r\n`)で始まり、そのあとが閉じ引用符、行末、`\` だけの
+// どれかであるかを返す。本文は次の行に続く(Docker の json-file、シェルなどの行の継続)。
 func endsWithEscapedNewline(rest []byte) bool {
 	rest, ok := bytes.CutPrefix(bytes.TrimPrefix(rest, []byte(`\r`)), []byte(`\n`))
 	if !ok {
 		return false
 	}
 	rest = bytes.TrimPrefix(rest, []byte(`\`))
-	return len(rest) > 0 && (rest[0] == '"' || rest[0] == '\'')
+	return len(rest) == 0 || rest[0] == '"' || rest[0] == '\''
 }
 
 // inlinePEMBody は、END のない BEGIN の印の後ろ rest が、本文で始まるかを返す。

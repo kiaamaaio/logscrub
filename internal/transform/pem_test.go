@@ -112,7 +112,9 @@ func TestPEMIsStable(t *testing.T) {
 	in := "taro@example.com\n" + pemBegin + "\nProc-Type: 4,ENCRYPTED\n\n" + strings.Join(key, "\n") + "\n" + pemEnd + "\n" +
 		"t=1 " + pemBegin + "\nt=2 " + key[0] + "\nt=3 " + pemEnd + "\n" +
 		`{"pem":"` + pemBegin + `\nAAAA\n` + pemEnd + `\n"}` + "\n" +
-		`{"log":"t=1 ` + pemBegin + `\n"}` + "\n" + `{"log":"t=2 Proc-Type: 4,ENCRYPTED\n"}` + "\n" + `{"log":"t=3 ` + key[1] + `\n"}` + "\n" + `{"log":"t=4 ` + pemEnd + `\n"}` + "\n"
+		`{"log":"t=1 ` + pemBegin + `\n"}` + "\n" + `{"log":"t=2 Proc-Type: 4,ENCRYPTED\n"}` + "\n" + `{"log":"t=3 ` + key[1] + `\n"}` + "\n" + `{"log":"t=4 ` + pemEnd + `\n"}` + "\n" +
+		"key=" + pemBegin + `\n` + "\n" + key[0] + `\n` + "\n" + pemEnd + `\n` + "\n" +
+		`KEY="` + pemBegin + `\n\` + "\n" + key[1] + `\n\` + "\n" + pemEnd + `\n"` + "\n"
 	optsList, dets := fuzzOptions(t)
 	checkMaskStable(t, optsList, dets, in)
 	checkHashStable(t, optsList, dets, in)
