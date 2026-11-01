@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,8 +76,15 @@ type measurement struct {
 // runMask は、`logscrub mask < log > /dev/null`(viaPipe なら `cat log | logscrub mask > /dev/null`)を実行して測る。
 func runMask(t *testing.T, bin, logPath string, viaPipe bool, args ...string) measurement {
 	t.Helper()
-	cmd := exec.Command(bin, append([]string{"mask"}, args...)...)
-	f, err := os.Open(logPath)
+	return runBin(t, bin, logPath, viaPipe, nil, append([]string{"mask"}, args...)...)
+}
+
+// runBin は、`env logscrub args... < stdin > /dev/null` を実行して測る。viaPipe なら、stdin をパイプで渡す。
+func runBin(t *testing.T, bin, stdin string, viaPipe bool, env []string, args ...string) measurement {
+	t.Helper()
+	cmd := exec.Command(bin, args...)
+	cmd.Env = append(os.Environ(), env...)
+	f, err := os.Open(stdin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,6 +118,42 @@ func runMask(t *testing.T, bin, logPath string, viaPipe bool, args ...string) me
 	return measurement{seconds: elapsed, maxRSSM: maxRSSMB(t, cmd.ProcessState)}
 }
 
+// maskToFile は、log の mask の結果を path に書く(restore の測定の回答に使う)。
+func maskToFile(t *testing.T, bin, log, path string) {
+	t.Helper()
+	in, err := os.Open(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer in.Close()
+	out, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	cmd := exec.Command(bin, "mask")
+	cmd.Stdin, cmd.Stdout = in, out
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("logscrub mask: %v", err)
+	}
+}
+
+// variedWords は、子音と母音の綴りの語を n 個返す。語の先頭のバイトが多様で、文中の語に近い形(plans/v1.4.0 の Q99)。
+func variedWords(n int) []string {
+	const consonants, vowels = "bdfghjkmnprstwyz", "aeiou"
+	rng := rand.New(rand.NewPCG(1, 2))
+	ws := make([]string, n)
+	for i := range ws {
+		var sb strings.Builder
+		for range 3 {
+			sb.WriteByte(consonants[rng.IntN(len(consonants))])
+			sb.WriteByte(vowels[rng.IntN(len(vowels))])
+		}
+		ws[i] = sb.String()
+	}
+	return ws
+}
+
 func TestPerfThroughput(t *testing.T) {
 	if !*perf {
 		t.Skip("run with -perf")
@@ -118,36 +162,48 @@ func TestPerfThroughput(t *testing.T) {
 	dir := t.TempDir()
 	log := genLog(t, dir, "big.log", *perfSize, 0)
 	awsLog := genLogWith(t, dir, "big-aws.log", *perfSize, 0, true)
-	words := func(n int) string {
-		p := filepath.Join(dir, fmt.Sprintf("words-%d", n))
-		var sb strings.Builder
-		for i := range n {
-			fmt.Fprintf(&sb, "project-%d-name\n", i)
-		}
-		if err := os.WriteFile(p, []byte(sb.String()), 0o644); err != nil {
+	writeWords := func(name string, ws []string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(strings.Join(ws, "\n")+"\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		return p
 	}
+	words := func(n int) string {
+		ws := make([]string, n)
+		for i := range ws {
+			ws[i] = fmt.Sprintf("project-%d-name", i)
+		}
+		return writeWords(fmt.Sprintf("words-%d", n), ws)
+	}
+	masked := filepath.Join(dir, "big.masked")
+	maskToFile(t, bin, log, masked)
 	for _, tc := range []struct {
 		name string
-		log  string
+		log  string // stdin
 		pipe bool
+		env  []string
 		args []string
 	}{
-		{"mask, stdin from a file", log, false, nil},
-		{"mask, stdin from a pipe", log, true, nil},
-		{"mask with uuid", log, false, []string{"--types", "default,uuid"}},
-		{"aws log, default types", awsLog, false, nil},
-		{"aws log, default,aws", awsLog, false, []string{"--types", "default,aws"}},
-		{"aws log, without aws_host", awsLog, false, []string{"--types", "default,aws_account,aws_s3_bucket"}},
-		{"10 words", log, false, []string{"--deny-file", words(10)}},
-		{"1000 words", log, false, []string{"--deny-file", words(1000)}},
-		{"--domain", log, false, []string{"--domain", "example.com"}},
+		{"mask, stdin from a file", log, false, nil, []string{"mask"}},
+		{"mask, stdin from a pipe", log, true, nil, []string{"mask"}},
+		{"mask, GOMAXPROCS=1", log, false, []string{"GOMAXPROCS=1"}, []string{"mask"}},
+		{"mask, GOMAXPROCS=2", log, false, []string{"GOMAXPROCS=2"}, []string{"mask"}},
+		{"mask with uuid", log, false, nil, []string{"mask", "--types", "default,uuid"}},
+		{"aws log, default types", awsLog, false, nil, []string{"mask"}},
+		{"aws log, default,aws", awsLog, false, nil, []string{"mask", "--types", "default,aws"}},
+		{"aws log, without aws_host", awsLog, false, nil, []string{"mask", "--types", "default,aws_account,aws_s3_bucket"}},
+		{"10 words", log, false, nil, []string{"mask", "--deny-file", words(10)}},
+		{"1000 words", log, false, nil, []string{"mask", "--deny-file", words(1000)}},
+		{"1000 varied words", log, false, nil, []string{"mask", "--deny-file", writeWords("words-varied", variedWords(1000))}},
+		{"--domain", log, false, nil, []string{"mask", "--domain", "example.com"}},
+		{"hash", log, false, []string{"LOGSCRUB_KEY=perf-key"}, []string{"mask", "--mode", "hash"}},
+		// MB/s は、元の入力の大きさ。回答は、mask の結果そのもの。
+		{"restore", masked, false, nil, []string{"restore", "--source", log}},
 	} {
 		best := measurement{seconds: 1e9}
 		for i := 0; i < 3; i++ {
-			m := runMask(t, bin, tc.log, tc.pipe, tc.args...)
+			m := runBin(t, bin, tc.log, tc.pipe, tc.env, tc.args...)
 			if m.seconds < best.seconds {
 				best = m
 			}
