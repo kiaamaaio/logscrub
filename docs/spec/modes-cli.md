@@ -94,7 +94,8 @@ logscrub mask    [FILE ...] [--mode mask|hash] [--types default,uuid,...]
                  [--uuid-versions 4,7] [--ip-scope global|private|all]
                  [--allow VALUE ...] [--deny VALUE ...] [--deny-file FILE ...]
                  [--domain DOMAIN ...]
-                 [--stats] [--fail-on-detect] [--output FILE]
+                 [--stats] [--fail-on-detect]
+                 [--output FILE | --out-dir DIR | --review]
 logscrub restore --source FILE [--source FILE ...] [ANSWER_FILE]
                  [--types ...] [--uuid-versions ...] [--ip-scope ...]
                  [--allow VALUE ...] [--deny VALUE ...] [--deny-file FILE ...]
@@ -107,7 +108,7 @@ logscrub version
 - `mask` で FILE を複数指定した場合は、指定した順に連結して 1 つの入力として処理する(連番も通しで振る)。
 - `restore` の ANSWER_FILE は 1 つだけ指定できる。
 - `--output FILE`(`-o`): 出力先をファイルにする。`-` は標準出力。出力先が、入力ファイル(`FILE`、`--source`、ANSWER_FILE)のどれかと同じファイルの場合は、入力を消さないため、何も書かずにエラー終了する。入力ファイルは、処理を始める前にすべて開き、開けないものがあれば、出力を始める前にエラー終了する。
-- `--stats`: 置換した件数を、種別ごとに **stderr** に出力する(生の値は出さない)。IP アドレスは `ipv4_global` のように区別ごとに数える。形式は、1 行 1 種別の `logscrub: email=3`。件数は、値の種類数でなく、置換した出現回数で、`--allow` で残した値や特殊アドレスは数えない。0 件の種別は出さない。並びは、`email`、`ipv4_global`、`ipv4_private`、`ipv6_global`、`ipv6_private`、`secret`、`uuid`、`aws_account`、`aws_s3_bucket`、`aws_host`、`host`、`custom` の順(`aws_account`・`aws_s3_bucket` は v1.1、`aws_host` は v1.2、`host`・`custom` は v1.3 で追加)。
+- `--stats`: 置換した件数を、種別ごとに **stderr** に出力する(生の値は出さない)。IP アドレスは `ipv4_global` のように区別ごとに数える。形式は、1 行 1 種別の `logscrub: email=3`。件数は、値の種類数でなく、置換した出現回数で、`--allow` で残した値や特殊アドレスは数えない。0 件の種別は出さない。並びは、`email`、`ipv4_global`、`ipv4_private`、`ipv6_global`、`ipv6_private`、`secret`、`uuid`、`aws_account`、`aws_s3_bucket`、`aws_host`、`host`、`custom`、`user_path` の順(`aws_account`・`aws_s3_bucket` は v1.1、`aws_host` は v1.2、`host`・`custom` は v1.3、`user_path` は v1.5 で追加)。
 - hash 専用のオプション(`--hash-length`、`--email-hash`、`--key-file`)を、`--mode mask`(既定)で指定すると、エラー終了する。`--hash-length` は 8〜64。
 - `--allow VALUE`: 置換しない値(例: 問い合わせ窓口のアドレス)。完全一致で判定する。複数回指定できる。
 - `--deny VALUE`、`--deny-file FILE`: 伏せる語(4.6)。`--domain DOMAIN`: 伏せるドメイン(4.7)。どれも複数回指定できる。
@@ -119,6 +120,25 @@ logscrub version
   - 終了コードは変えない。`--fail-on-detect` の件数にも含めない。抑止するオプションは設けない
   - 置換済みの出力を再度流した場合も出る(元の値か前回の出力かは区別できないため)
   - 行番号は、入力をまたいで通しで数える(1 始まり)。件数が 1 件のときは `1 string was left unchanged because it looks already replaced (line 12)`。行が 6 行以上あるときは、最初の 5 行のあとに `, ...` を付ける
+- END のない PEM のブロック(4.1)が 1 件以上あれば、処理の最後に **stderr** へ 1 行だけ通知する(v1.5 で追加)。`mask` と `restore` の `--source` の処理で共通。行番号は上の通知と同じく通しで数え、最初の 5 件までを出す。値は出さず、終了コードは変えない
+  - 例: `logscrub: 2 private key blocks had no END line (lines 12, 40). Check the lines after them before sharing.`
+  - 件数が 1 件のときは `1 private key block had no END line (line 12). Check the lines after it before sharing.`
+- `--out-dir DIR`(`mask` のみ。v1.5 で追加): 入力ファイルごとに、伏せたファイルを `DIR` に書き出す。stdout には何も書かない。
+  - 連番はファイルをまたいで通しで振る。書き出したファイルを入力の順に連結すると、同じオプションの `mask FILE ...` の出力と同じになる。`restore` は、`--source` を同じ順に指定する
+  - 書き出し先は、すべての入力の共通の親ディレクトリからの相対パス(`logs/a/app.log logs/b/app.log` → `DIR/a/app.log`、`DIR/b/app.log`。1 ファイルなら `DIR/app.log`)。パスは絶対パスにしてから比べる
+  - `DIR` と途中のディレクトリは、なければ作る。新しいディレクトリは 0700、ファイルは 0600
+  - 次の場合は、何も書かずにエラー終了する: FILE がない、`-`(stdin)、入力がディレクトリ、同じファイルを 2 回指定、書き出し先が同じになる入力、書き出し先に既存のファイルがある、`--output`・`--review` との同時指定
+  - 既存のファイルは上書きしない。やり直すときは、利用者が消す。前回と違う連番のファイルが混ざるのを防ぎ、入力のディレクトリを指定して元のファイルを失う事故も防ぐため
+  - 処理の途中のエラーでは、今回書いたファイルを消してエラー終了する。作ったディレクトリは残す
+  - `--stats`、`--fail-on-detect`、置換済みの形の通知は、全ファイルの合計で働く。行番号は通しで数える
+  - ディレクトリを再帰的にたどらない
+- `--review`(`mask` のみ。v1.5 で追加): 変換の結果を、確認のために色を付けて stdout に出す。`--mode hash` でも使える。出力は確認専用で、他者や AI に渡すものでない。
+  - 置換した箇所と、置換しなかった怪しい語に、別の色を付ける。出力先が端末でなくても色を付ける(`| less -R` で見るため)。環境変数 `NO_COLOR` が空でなければ、色を付けない
+  - 置換しなかった部分の制御文字(タブを除く)は `^[` のような見える形にする。ログの中の制御文字で、端末の表示を書き換えられないようにするため。そのため、7 章の入出力のバイト列の保持の対象外とする
+  - 怪しい語: 置換しなかった部分の、英数字・`+`・`=`・`_`・`-` の 20 文字以上の並びで、英字と数字の両方を含むもの。置換の結果、`--stats`、`--fail-on-detect`、終了コードには影響しない
+  - 怪しい語が 1 件以上あれば、処理の最後に **stderr** へ 1 行だけ通知する。件数と行番号のみで、値は出さない。行番号の扱いは、置換済みの形の通知と同じ
+    - 例: `logscrub: 3 strings look like unreplaced values (lines 12, 40).`。件数が 1 件のときは `1 string looks like an unreplaced value (line 12).`
+  - `--output`・`--out-dir` との同時指定は、エラー終了する
 - `logscrub types`: 対応する種別の一覧を出す。1 行 1 種別で、種別 ID、既定で有効か(`on` / `off`)、説明。IP アドレスの区別(`ipv4_global` など)は、説明の中で示す。`--verbose` で `secret` の対応形式(4.1)も列挙する。種別は、共通の種別(`email` 〜 `uuid`)のあとに、クラウドごとにまとめて並べる。一覧の最後に、種別のまとまり(`default`、`aws`、`cloud`)と、それぞれに含まれる種別を出す(v1.1 で追加)。
 - `logscrub version`、`logscrub --version`(`-version`): 版を stdout に 1 行(`logscrub v1.3.0`)で出して、終了コード 0 で終わる(v1.3 で追加)。サブコマンドの後ろの `--version` は対応しない。`version` に引数を付けるとエラー終了する。
   - 版は `debug.ReadBuildInfo` の `Main.Version` から取る。`go install …@v1.3.0` とタグの位置のビルドでは、タグの版になる。取れないときは `(devel)`

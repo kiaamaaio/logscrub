@@ -1,4 +1,4 @@
-# logscrub 仕様: 検出対象(4 章、4.2、4.3、4.6、4.7)
+# logscrub 仕様: 検出対象(4 章、4.2、4.3、4.6、4.7、4.8)
 
 [仕様の目次](../SPEC.md)。4.1 `secret` は [secret.md](secret.md)、4.4・4.5 の AWS の値は [aws.md](aws.md) にある。
 
@@ -19,8 +19,9 @@
 | `aws_host` | AWS のサービスのホスト名のうち、利用者ごとの部分(4.5 参照。v1.2 で追加) | ❌ |
 | `host` | `--domain` で指定したドメインとそのサブドメインのホスト名(4.7 参照。v1.3 で追加) | ❌ |
 | `custom` | `--deny`・`--deny-file` で指定した語(4.6 参照。v1.3 で追加) | ❌ |
+| `user_path` | ホームディレクトリのパスの中のユーザー名(4.8 参照。v1.5 で追加) | ✅ |
 
-既定で有効にするのは、どこでも使われる技術的な値(メールアドレス、IP アドレス、秘密情報)だけとする。
+既定で有効にするのは、どこでも使われる技術的な値(メールアドレス、IP アドレス、秘密情報、ホームディレクトリのパス)だけとする。
 特定のクラウドに依存する値(`aws_*` など)は、既定では無効にする(v1.1 で追加)。
 
 ### 対象種別の指定(`--types`)
@@ -28,7 +29,7 @@
 - `--types` を指定すると、**指定した種別だけ**が対象になる。
   - 例: `--types email` → メールアドレスだけを置換する
 - 既定の種別に追加したい場合は `default` を含める。
-  - 例: `--types default,uuid` → `email`、`ipv4`、`ipv6`、`secret`、`uuid` が対象
+  - 例: `--types default,uuid` → `email`、`ipv4`、`ipv6`、`secret`、`user_path`、`uuid` が対象
 - `--types` を省略した場合は `default`(既定で有効の種別)が対象。
 - 種別のまとまり(v1.1 で追加)。種別名と同じ場所に書ける。
   - `default`: 既定で有効の種別
@@ -47,7 +48,7 @@
 ### 範囲が重なった場合
 
 - 複数の種別が重なる範囲に一致した場合は、**長く一致したほうを優先**する。
-- 同じ長さの場合は、種別の優先順位で決める。優先順位は `email` → `ipv4`/`ipv6` → `secret` → `uuid` → `aws_account` → `aws_s3_bucket` → `aws_host` → `host` → `custom`。
+- 同じ長さの場合は、種別の優先順位で決める。優先順位は `email` → `ipv4`/`ipv6` → `secret` → `uuid` → `aws_account` → `aws_s3_bucket` → `aws_host` → `host` → `custom` → `user_path`。
 - 一部だけ重なる場合も、このルールで 1 つに決める。
 - `custom`・`host` にも例外は設けない。語が、より長い値に含まれる場合は、その値全体が置換される(`--deny acme` で `taro@acme.co.jp` は `<email_1>`)。ドメインを残す `--email-hash local` は 5.2 参照。
   - 例: `::ffff:10.0.0.1` は、IPv6 全体(長い)と、末尾の IPv4 部分(短い)の両方に一致する。長い IPv6 を優先し、1 つの IPv6 として置換する。
@@ -210,3 +211,35 @@ EC2 のホスト名は、IP アドレスを `-` 区切りで含む。IP アド�
 - メールアドレス: 特別な規則を設けない。`email` が有効なら、長い一致のメールアドレス全体が `<email_N>` になる。`email` を無効にすると `taro@<host_1>` になる。
 
 限界: 利用者向けの説明は [LIMITATIONS.md](../../LIMITATIONS.md) の「`--domain`」が正本。この節の規則を変えたら、そちらも合わせて直す。
+
+### 4.8 `user_path`(v1.5 で追加)
+
+スタックトレースやエラーメッセージのパスに出る人名を伏せる。決まった形の直後だけを見るので、文中の語は対象にならない。
+
+- 置換するのは、ユーザー名の部分だけ。パスの残りは残す
+  - 例: `File "/home/yamada/proj/app.py"` → `File "/home/<user_path_1>/proj/app.py"`、`C:\Users\yamada\AppData` → `C:\Users\<user_path_1>\AppData`
+  - 同じ値の判定はユーザー名のバイト列で行う(5.1)ので、`/home/yamada` と `/Users/yamada` は同じラベルになる
+- 対象の形(ユーザー名の直前まで):
+
+| 形 | 例 | 大文字・小文字 |
+|---|---|---|
+| Linux | `/home/`、`file:///home/` | 区別する |
+| macOS | `/Users/`、`file:///Users/` | 区別する |
+| Windows | `<ドライブ>:\Users\`、`<ドライブ>:\\Users\\`(JSON、Python の repr)、`<ドライブ>:/Users/`、`/mnt/<ドライブ>/Users/`(WSL)、`/<ドライブ>/Users/`(Git Bash)、`file:///<ドライブ>:/Users/` | 区別しない |
+
+- `<ドライブ>` は英字 1 文字。
+- 形の前の条件: 行頭か、英数字・`-`・`_`・`.`・`/`・`\` 以外の文字(`file:///` の形は `file:` の前で判定する)。`https://example.com/home/x`、`/var/home/x`、`/api/Users/x` は対象外。
+- ユーザー名の範囲:
+  - 英数字・`.`・`_`・`-`・`@`・`+` と非 ASCII のバイトの連なり。末尾の `.` は含めない(文末の `/home/yamada.`)
+  - `$USER`、`*`、`<user>`、`%USERNAME%` は、文字の条件で対象にならない
+  - 後ろに `/` がなくてもよい(`HOME=/home/yamada`、`/home/yamada:/bin/bash`)
+  - Windows の形に限り、同じ行に次の区切り(`\` または `/`)があるときは、空白を含めてよい(`C:\Users\Taro Yamada\AppData`)。この場合、空白より前の部分も上の文字だけからなること
+- 対象外のユーザー名:
+  - 固定の一覧: `user`、`ubuntu`、`ec2-user`、`debian`、`centos`、`admin`、`runner`、`node`、`vagrant`、`Administrator`、`Public`、`Default`、`Default User`、`All Users`、`Shared`、`Guest`
+  - バージョンの表記: `v` + 数字の 1 つ以上と、`.` + 数字の繰り返し(`v1`、`v10`、`v1.2`)。`/home/v1/items` のような API のパスを伏せないため
+  - 照合の大文字・小文字は、上の表の形に従う
+  - 一覧にない名前を残すときは、`--allow`(ユーザー名との完全一致)を使う
+- 置換済みの形(4 章)は、ほかの種別と同じに扱う。`/home/<user_path_1>/` は文字の条件で候補にならず、`/home/user_path_3f9a1c0b7d2e/` は保護範囲に負ける。
+- `hash` の出力は `/home/user_path_a1b2c3d4e5f6/proj/app.py`。
+
+限界: 利用者向けの説明は [LIMITATIONS.md](../../LIMITATIONS.md) の「ホームディレクトリのパス」が正本。この節の規則を変えたら、そちらも合わせて直す。

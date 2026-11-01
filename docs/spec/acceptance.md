@@ -65,6 +65,17 @@ secret:
 - `"token": 12345`、`"password": null`、`"token": {"a":1}` は置換されない
 - ログに文字列として埋め込まれた JSON(`{"message":"{\"password\":\"abc\"}"}`)の値が置換される
 - JSON の文字列の中の `token=abc\ndef`、`?token=abc\u0026user=x` は、`abc` だけが置換される
+- PEM の秘密鍵の本文が行ごとに `<secret_N>` になり、印、行の数、改行コードは保たれる。`CERTIFICATE` のブロックは置換されない
+- PEM の 1 行の形(`\n` が文字の形、改行を空白にした形)の本文が 1 つの `<secret_N>` になる
+- END のない PEM のブロックは、本文の形でない行で終わり、その行は通常どおり処理され、stderr に行番号だけが通知される。`"-----BEGIN PRIVATE KEY-----"` だけの行の後ろのログが伏せられない
+- PEM の秘密鍵を含む入力が、mask → restore で 1 バイトも違わずに戻り、再度流しても変わらない(mask、hash の両方)
+
+user_path:
+
+- `/home/yamada/proj/app.py` が `/home/<user_path_1>/proj/app.py` に、`C:\Users\Taro Yamada\AppData`、`C:\\Users\\yamada\\app.log` のユーザー名が `<user_path_N>` になる
+- `PWD=/home/user`、`/home/ubuntu/`、`/home/v1/items`、`/home/$USER/`、`/var/home/x`、`https://example.com/home/x` は置換されない
+- `/home/yamada` と `/Users/yamada` が同じラベルになる
+- `--deny yamada` では、`/home/yamada/` も `<custom_1>` になる
 
 UUID:
 
@@ -192,3 +203,17 @@ CLI:
 - サブコマンドなし、または不明なサブコマンドで、使い方が stderr に出て終了コード 1 になる
 - すべての種別名が `mask --help` に載っている
 - `go.mod` に外部の依存がない(標準ライブラリのみ)
+
+`--out-dir`:
+
+- `logscrub mask --out-dir DIR logs/a/app.log logs/b/app.log` が `DIR/a/app.log`、`DIR/b/app.log` を書き、連結した内容が `logscrub mask logs/a/app.log logs/b/app.log` の出力と同じになる
+- 書き出したファイルのラベルが、`--source` を同じ順に指定した `restore` で戻る
+- 書き出し先に既存のファイルがあると、何も書かずにエラー終了する。`-`、ディレクトリ、書き出し先の重なり、`--output`・`--review` との同時指定も同じ
+- 処理の途中で失敗すると、今回書いたファイルが残らない
+
+`--review`:
+
+- 色の指定を除いた出力が、制御文字のない入力では、通常の mask の出力と同じになる
+- ログの中の制御文字が、見える形で出力される
+- `NO_COLOR` で色の指定がなくなる
+- 怪しい語の通知に値が出ず、置換の結果、`--stats`、終了コードが `--review` の有無で変わらない

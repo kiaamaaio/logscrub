@@ -19,6 +19,7 @@
 | 4.5 | `aws_host`(AWS のサービスのホスト名) | [spec/aws.md](spec/aws.md) |
 | 4.6 | `custom`(`--deny`、`--deny-file`) | [spec/detect.md](spec/detect.md) |
 | 4.7 | `host`(`--domain`) | [spec/detect.md](spec/detect.md) |
+| 4.8 | `user_path`(ホームディレクトリのパスのユーザー名) | [spec/detect.md](spec/detect.md) |
 | 5 | 変換モードと復元(5.1 `mask`、5.2 `hash`、5.3 `restore`) | [spec/modes-cli.md](spec/modes-cli.md) |
 | 6 | CLI(6.1 CLI の実装方針) | [spec/modes-cli.md](spec/modes-cli.md) |
 | 7、8 | 非機能要件、構成 | この文書 |
@@ -46,7 +47,7 @@
 - テキストを**行単位のストリーム**で処理する(大きなログでもメモリを使い切らない)
 - 外部通信は一切行わない
 
-対象外(v1): 氏名・住所の検出、画像/PDF/バイナリ、複数行にまたがる値。
+対象外(v1): 氏名・住所の検出、画像/PDF/バイナリ、複数行にまたがる値(PEM の秘密鍵を除く。v1.5 で変更。4.1)。
 
 ## 3. 実装言語
 
@@ -130,8 +131,12 @@ logscrub/
 25. 配布用のバイナリは、手で実行するスクリプトで作り、圧縮せずに `SHA256SUMS` と一緒に GitHub Releases に置く。GitHub Actions は使わない(2026-11-01。Q80)
 26. `restore` は、HTML と Markdown で崩れたラベルを、始めと終わりの両方が同じ方式で崩れているときだけ戻す。mask の出力に現れた形は除き、どの入力でも往復が成り立つようにする(2026-11-01。5.3、Q81、Q82)
 27. 検出を並列に行う(2026-11-01)。ワーカー数は `GOMAXPROCS` から決め、上限は 8。公開のオプションは加えない。連番を振る処理は 1 か所に保つので、出力は変わらない(Q95、Q96)
+28. ホームディレクトリのパスのユーザー名を、種別 `user_path` で伏せる(2026-11-01)。既定で有効。一般的な名前とバージョンの表記は対象外にする(4.8、Q100〜Q103)
+29. PEM の秘密鍵の本文を `secret` として伏せる(2026-11-01)。複数行の形は行ごとに別のラベルにし、行をまたぐ状態は読み取りの段だけに持つ。本文の形でない行で、END がなくてもブロックを終える(4.1、Q104〜Q107)
+30. `mask --review` は、置換した箇所と、置換しなかった怪しい語に色を付けて stdout に出す(2026-11-01)。確認専用で、置換の結果と終了コードは変えない(6 章、Q108、Q109)
+31. `mask --out-dir DIR` は、入力ごとに伏せたファイルを、共通の親からの相対パスで書き出す(2026-11-01)。連番は通しで、既存のファイルがあれば何も書かずにエラーにする(6 章、Q110、Q111)
 
 ## 11. 未決事項
 
-なし(v1.1 の細部は [plans/v1.1.0/README.md](plans/v1.1.0/README.md) 5 章の Q32〜Q46、v1.2 の細部は [plans/v1.2.0/README.md](plans/v1.2.0/README.md) 5 章の Q47〜Q70、v1.3 の細部は [plans/v1.3.0/README.md](plans/v1.3.0/README.md) 5 章の Q71〜Q84、v1.4 の細部は [plans/v1.4.0/questions.md](plans/v1.4.0/questions.md) の Q94〜Q99 で確定済み)
+なし(v1.1 の細部は [plans/v1.1.0/README.md](plans/v1.1.0/README.md) 5 章の Q32〜Q46、v1.2 の細部は [plans/v1.2.0/README.md](plans/v1.2.0/README.md) 5 章の Q47〜Q70、v1.3 の細部は [plans/v1.3.0/README.md](plans/v1.3.0/README.md) 5 章の Q71〜Q84、v1.4 の細部は [plans/v1.4.0/questions.md](plans/v1.4.0/questions.md) の Q94〜Q99、v1.5 の細部は [plans/v1.5.0/questions.md](plans/v1.5.0/questions.md) の Q100〜Q111 で確定済み)
 
