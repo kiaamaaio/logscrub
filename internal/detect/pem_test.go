@@ -62,10 +62,24 @@ func TestPEMScanner(t *testing.T) {
 		{"one line with \\n", `{"pem":"` + b + `\nAAAA\nBBBB\n` + e + `\n"}` + "\n", []string{`\nAAAA\nBBBB\n`}, 0},
 		{"one line with spaces", "KEY=" + b + " AAAA BBBB " + e + "\n", []string{" AAAA BBBB "}, 0},
 		{"two keys on one line", b + "AAAA" + e + " " + b + "BBBB" + e + "\n", []string{"AAAA", "BBBB"}, 0},
-		{"one line without END", `{"pem":"` + b + `\nAAAA...` + `"}` + "\n", []string{`\nAAAA...`}, 0},
-		{"one line without END, \\r\\n", `{"pem":"` + b + `\r\nAAAA\r\n` + "\n", []string{`\r\nAAAA\r\n`}, 0},
-		{"one line without END, escaped quote", `{\"pem\":\"` + b + `\nAAAA\"}` + "\n", []string{`\nAAAA`}, 0},
-		{"one line without END after a space", b + " " + strings.Repeat("A", 16) + " x\n", []string{" " + strings.Repeat("A", 16) + " x"}, 0},
+		{"one line without END", `{"pem":"` + b + `\nAAAA...` + `"}` + "\n", []string{`\nAAAA...`}, 1},
+		{"one line without END, \\r\\n", `{"pem":"` + b + `\r\nAAAA\r\n` + "\n", []string{`\r\nAAAA\r\n`}, 1},
+		{"one line without END, escaped quote", `{\"pem\":\"` + b + `\nAAAA\"}` + "\n", []string{`\nAAAA`}, 1},
+		{"one line without END after a space", b + " " + strings.Repeat("A", 16) + " x\n", []string{" " + strings.Repeat("A", 16) + " x"}, 1},
+		{"one line without END, the body goes on in a string", `{"log":"` + b + `\nAAAA\n","stream":"stderr"}` + "\n" + `{"log":"BBBB\n"}` + "\n", []string{`\nAAAA\n`}, 1},
+		{"one line without END, a line continuation", `KEY="` + b + `\nAAAA\n\` + "\n" + `BBBB\n\` + "\n", []string{`\nAAAA\n\`}, 1},
+		{"one line without END, no quote", "key=" + b + `\nAAAA\n` + "\n" + `BBBB\n` + "\n", []string{`\nAAAA\n`}, 1},
+		{"\\n and a blank", "key=" + b + `\n ` + "\n", []string{`\n `}, 1},
+		{"\\n, a blank and \\", `KEY="` + b + `\n \` + "\n", []string{`\n \`}, 1},
+		{"\\n, \\ and a blank", `KEY="` + b + `\n\ ` + "\n", []string{`\n\ `}, 1},
+		{"\\n twice", "key=" + b + `\n\n` + "\n", []string{`\n\n`}, 1},
+		{"one line without END ends the block", b + "\nAAAA\n" + b + `\nBBBB` + "\n", []string{"AAAA", `\nBBBB`}, 2},
+		{"a label after the marker", `{"pem":"` + b + `<secret_1>"}` + "\n", nil, 0},
+		{"a hashed value after the marker", `{"pem":"` + b + `secret_3f9a1c0b7d2e"}` + "\n", []string{"secret_3f9a1c0b7d2e"}, 0},
+		{"a hashed value before an escaped quote", `{\"pem\":\"` + b + `secret_3f9a1c0b7d2e\"}` + "\n", []string{"secret_3f9a1c0b7d2e"}, 0},
+		{"a hashed value at the end of the line", "key=" + b + "secret_3f9a1c0b7d2e\n", []string{"secret_3f9a1c0b7d2e"}, 0},
+		{"a body that starts like a hashed value", b + "secret_3f9a1c0b7d2eAAAA\n", []string{"secret_3f9a1c0b7d2eAAAA"}, 1},
+		{"another kind of hashed value", b + "email_3f9a1c0b7d2e\n", []string{"email_3f9a1c0b7d2e"}, 1},
 		{"replaced lines keep the block", b + "\n<secret_1>\nsecret_3f9a1c0b7d2e\nAAAA\n" + e + "\n", []string{"AAAA"}, 0},
 		{"one string per line", `{"log":"` + b + `\n","t":"1"}` + "\n" + `{"log":"AAAA\n","t":"2"}` + "\n" + `{"log":"BB==\n","t":"3"}` + "\n" + `{"log":"` + e + `\n","t":"4"}` + "\n",
 			[]string{"AAAA", "BB=="}, 0},
@@ -132,6 +146,15 @@ func TestPEMScannerLineNumbers(t *testing.T) {
 func TestPEMScannerLineNumbersInOneBlock(t *testing.T) {
 	const b = "-----BEGIN PRIVATE KEY-----\nnot a body line\n"
 	if _, s := scanPEM(t, "a\n"+b+"c\n"+b); s.Unclosed != 2 || s.UnclosedLines[0] != 2 || s.UnclosedLines[1] != 5 {
+		t.Errorf("%d %v", s.Unclosed, s.UnclosedLines)
+	}
+}
+
+// 1 行の形の通知の行番号も、ブロックの通知と同じ順で、通しで数える。
+func TestPEMScannerLineNumbersOfOneLine(t *testing.T) {
+	const b = "-----BEGIN PRIVATE KEY-----"
+	if _, s := scanPEM(t, "a\n"+b+"\nAAAA\n"+b+`\nBBBB`+"\nc\n"+b+" "+strings.Repeat("A", 16)+"\n"); s.Unclosed != 3 ||
+		s.UnclosedLines[0] != 2 || s.UnclosedLines[1] != 4 || s.UnclosedLines[2] != 6 {
 		t.Errorf("%d %v", s.Unclosed, s.UnclosedLines)
 	}
 }

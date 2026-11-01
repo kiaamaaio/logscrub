@@ -37,6 +37,28 @@ func TestPEMUnclosedNotice(t *testing.T) {
 	}
 }
 
+// END のない 1 行の形も、同じ文で通知する。hash の出力を再度流しても、通知しない(Q123)。
+func TestPEMOneLineNotice(t *testing.T) {
+	in := "x\n" + `{"log":"-----BEGIN PRIVATE KEY-----\nAAAA\n"}` + "\n"
+	const want = "logscrub: 1 private key block had no END line (line 2). Check the lines after it before sharing.\n"
+	r := run(t, in, nil, "mask")
+	if r.code != 0 || r.stdout != "x\n"+`{"log":"-----BEGIN PRIVATE KEY-----<secret_1>"}`+"\n" || r.stderr != want {
+		t.Fatalf("%+v", r)
+	}
+	if again := run(t, r.stdout, nil, "mask"); again.stdout != r.stdout || strings.Contains(again.stderr, "END line") {
+		t.Errorf("%+v", again)
+	}
+	env := map[string]string{keyEnv: "test-key"}
+	h := run(t, in, env, "mask", "--mode", "hash")
+	if h.code != 0 || !strings.Contains(h.stdout, "-----secret_") || h.stderr != want {
+		t.Fatalf("%+v", h)
+	}
+	again := run(t, h.stdout, env, "mask", "--mode", "hash")
+	if again.stdout != h.stdout || strings.Contains(again.stderr, "END line") {
+		t.Errorf("%+v", again)
+	}
+}
+
 func TestPEMStatsAndFail(t *testing.T) {
 	in := "-----BEGIN PRIVATE KEY-----\nAAAA\nBBBB\n-----END PRIVATE KEY-----\n"
 	r := run(t, in, nil, "mask", "--stats", "--fail-on-detect")

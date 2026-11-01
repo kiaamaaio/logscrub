@@ -38,3 +38,11 @@ KEY="-----BEGIN RSA PRIVATE KEY-----\n\
 QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5YWJjZGVmZ2hpamts\n\
 ZmFrZQ==\n\
 -----END RSA PRIVATE KEY-----\n"
+{"log":"-----BEGIN RSA PRIVATE KEY-----\nQUJDREVG\n","stream":"stderr"}
+{"log":"ZmFrZQ==\n","stream":"stderr"}
+KEY="-----BEGIN RSA PRIVATE KEY-----\nQUJDREVG\n\
+ZmFrZQ==\n\
+key=-----BEGIN RSA PRIVATE KEY-----\n\n
+ZmFrZQ==\n
+-----BEGIN RSA PRIVATE KEY----- QUJDREVGR0hJSktMTU5P
+ZmFrZQ==

@@ -73,6 +73,8 @@ secret:
 - 1 行ごとに文字列で包まれた PEM(`{"log":"…\n",…}`)の本文が行ごとに `<secret_N>` になる
 - 文字列の中の行頭の長さが同じ PEM(`{"log":"2026-11-01 INFO …\n",…}`)で、暗号化された鍵のヘッダーと短い最後の行も `<secret_N>` になる
 - 文字列で包まれた PEM で、末尾が置換済みの行でブロックが終わる出力を再度流しても、END のない PEM の通知が出ない
+- END のない PEM の 1 行の形(`{"log":"-----BEGIN…\nAAAA\n",…}`、`key=-----BEGIN…\n `)は、印の後ろが 1 つの `<secret_N>` になり、stderr に行番号だけが通知される
+- END のない PEM の 1 行の形を伏せた出力を再度流しても(mask、hash、`--mask-format '{type}_{n}'`)、END のない PEM の通知が出ない
 - PEM の秘密鍵を含む入力が、mask → restore で 1 バイトも違わずに戻り、再度流しても変わらない(mask、hash の両方)
 
 user_path:

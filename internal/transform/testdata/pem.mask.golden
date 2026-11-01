@@ -38,3 +38,11 @@ KEY="-----BEGIN RSA PRIVATE KEY-----\n\
 <secret_1>\n\
 <secret_3>\n\
 -----END RSA PRIVATE KEY-----\n"
+{"log":"-----BEGIN RSA PRIVATE KEY-----<secret_10>","stream":"stderr"}
+{"log":"ZmFrZQ==\n","stream":"stderr"}
+KEY="-----BEGIN RSA PRIVATE KEY-----<secret_11>
+ZmFrZQ==\n\
+key=-----BEGIN RSA PRIVATE KEY-----<secret_12>
+ZmFrZQ==\n
+-----BEGIN RSA PRIVATE KEY-----<secret_13>
+ZmFrZQ==

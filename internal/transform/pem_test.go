@@ -135,6 +135,52 @@ func TestPEMReplacedTailInAString(t *testing.T) {
 	}
 }
 
+// END のない 1 行の形は、通知する。伏せた出力を再度流しても、通知しない。hash の出力と `{type}_{n}` のラベルは、
+// base64 の文字で始まるので、1 行の形として読まれる(Q123)。
+func TestPEMOneLineNotice(t *testing.T) {
+	f, err := label.ParseFormat("{type}_{n}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bare := detect.Options{Format: f}
+	for _, in := range []string{
+		`{"log":"` + pemBegin + `\nAAAA\n","stream":"stderr"}` + "\n" + `{"log":"BBBB\n"}` + "\n",
+		`{\"pem\":\"` + pemBegin + `\nAAAA\"}` + "\n",
+		`KEY="` + pemBegin + `\nAAAA\n\` + "\nBBBB\n",
+		"key=" + pemBegin + `\nAAAA\n` + "\nBBBB\n",
+		pemBegin + " " + strings.Repeat("A", 16) + "\nBBBB\n",
+		"key=" + pemBegin + `\n ` + "\nBBBB\n",
+		`KEY="` + pemBegin + `\n \` + "\nBBBB\n",
+		`KEY="` + pemBegin + `\n\ ` + "\nBBBB\n",
+		"key=" + pemBegin + `\n\n` + "\nBBBB\n",
+	} {
+		masked, st := mask(t, detect.Options{}, in)
+		if st.Unclosed != 1 {
+			t.Errorf("%q: mask: %+v", in, st)
+		}
+		if twice, st := mask(t, detect.Options{}, masked); twice != masked || st.Unclosed != 0 {
+			t.Errorf("%q: mask, second pass %q: %+v", in, twice, st)
+		}
+		masked, st = mask(t, bare, in)
+		if st.Unclosed != 1 {
+			t.Errorf("%q: bare: %+v", in, st)
+		}
+		if twice, st := mask(t, bare, masked); twice != masked || st.Unclosed != 0 {
+			t.Errorf("%q: bare, second pass %q: %+v", in, twice, st)
+		}
+		hashed, st := hashRun(t, detect.Options{}, testKey, 12, EmailHashFull, in)
+		if st.Unclosed != 1 {
+			t.Errorf("%q: hash: %+v", in, st)
+		}
+		if twice, st := hashRun(t, detect.Options{}, testKey, 12, EmailHashFull, hashed); twice != hashed || st.Unclosed != 0 {
+			t.Errorf("%q: hash, second pass %q: %+v", in, twice, st)
+		}
+		if _, restored, _ := roundTrip(t, detect.Options{}, in); restored != in {
+			t.Errorf("%q: restored %q", in, restored)
+		}
+	}
+}
+
 func TestPEMBareFormat(t *testing.T) {
 	f, err := label.ParseFormat("{type}_{n}")
 	if err != nil {

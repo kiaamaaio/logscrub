@@ -120,7 +120,7 @@ logscrub version
   - 終了コードは変えない。`--fail-on-detect` の件数にも含めない。抑止するオプションは設けない
   - 置換済みの出力を再度流した場合も出る(元の値か前回の出力かは区別できないため)
   - 行番号は、入力をまたいで通しで数える(1 始まり)。件数が 1 件のときは `1 string was left unchanged because it looks already replaced (line 12)`。行が 6 行以上あるときは、最初の 5 行のあとに `, ...` を付ける
-- END のない PEM のブロック(4.1)が 1 件以上あれば、処理の最後に **stderr** へ 1 行だけ通知する(v1.5 で追加)。`mask` と `restore` の `--source` の処理で共通。行番号は上の通知と同じく通しで数え、最初の 5 件までを出す。値は出さず、終了コードは変えない
+- END のない PEM のブロックと、END のない 1 行の形(4.1)が 1 件以上あれば、処理の最後に **stderr** へ 1 行だけ通知する(v1.5 で追加)。`mask` と `restore` の `--source` の処理で共通。行番号は上の通知と同じく通しで数え、最初の 5 件までを出す。値は出さず、終了コードは変えない
   - 例: `logscrub: 2 private key blocks had no END line (lines 12, 40). Check the lines after them before sharing.`
   - 件数が 1 件のときは `1 private key block had no END line (line 12). Check the lines after it before sharing.`
 - `--out-dir DIR`(`mask` のみ。v1.5 で追加): 入力ファイルごとに、伏せたファイルを `DIR` に書き出す。stdout には何も書かない。

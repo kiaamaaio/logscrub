@@ -93,6 +93,12 @@ func (s *PEMScanner) countLines(data []byte, pos int) {
 	s.counted = pos
 }
 
+// setBeginLine は、位置 pos の行を、BEGIN の行として記録する。
+func (s *PEMScanner) setBeginLine(data []byte, pos int) {
+	s.countLines(data, pos)
+	s.beginLine = s.line + 1
+}
+
 func (s *PEMScanner) closeUnfinished() {
 	s.inBlock = false
 	s.Unclosed++
@@ -150,12 +156,17 @@ func (s *PEMScanner) scanLine(data, line []byte, pos int, dst []PEMSpan) []PEMSp
 			if bs, be := trimBlank(line, base, ms); bs < be {
 				s.column = ms - base
 			}
-			s.countLines(data, pos)
-			s.beginLine = s.line + 1
+			s.setBeginLine(data, pos)
 			return dst
 		}
 		if inlinePEMBody(rest) {
-			dst = append(dst, PEMSpan{Pos: pos, Start: me, End: me + inlinePEMEnd(rest)})
+			end := inlinePEMEnd(rest)
+			dst = append(dst, PEMSpan{Pos: pos, Start: me, End: me + end})
+			// 次の行に本文が続いても、ブロックには入らないので知らせる。置換済みの形なら、伏せた出力を再度流している。
+			if !s.isReplacedSecret(rest[:end]) {
+				s.setBeginLine(data, pos)
+				s.closeUnfinished()
+			}
 		}
 		return dst
 	}

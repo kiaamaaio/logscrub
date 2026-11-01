@@ -92,7 +92,7 @@ func TestMaskGoldenPEM(t *testing.T) {
 	if got != string(want) {
 		t.Errorf("mask output differs from internal/transform/testdata/pem.mask.golden\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
-	if st.Unclosed != 1 {
+	if st.Unclosed != 5 {
 		t.Errorf("unclosed: %d", st.Unclosed)
 	}
 	if _, restored, _ := roundTrip(t, opts, string(in)); restored != string(in) {

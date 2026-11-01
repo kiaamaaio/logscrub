@@ -8,7 +8,7 @@ logscrub の版ごとの変更点。使い方は [README.md](README.md) を見�
   - ホームディレクトリのパスのユーザー名を伏せる種別 `user_path` を加え、既定で有効にしました。`/home/yamada/app.py` は `/home/<user_path_1>/app.py` になります。`/Users/`、`C:\Users\` と、JSON のエスケープ、WSL、Git Bash の形も対象です([詳細](docs/detection.md#ホームディレクトリのパスuser_path))。`user`、`ubuntu` などの一般的な名前は対象外です。
   - PEM の秘密鍵の本文を `secret` に加えました。行ごとに別のラベルになり、印は残ります。1 行に収まった形(`\n` が文字の形、改行を空白にした形)は、印の間を 1 つのラベルにします([詳細](docs/detection.md#pem-の秘密鍵))。
   - 鍵を含む入力では、`<secret_N>` の番号が鍵の行の分だけ増えます。`restore` は、`mask` と同じバージョンで使ってください。
-- END のない PEM のブロックがあると、BEGIN の行番号を stderr に通知します。
+- END のない PEM のブロックと、END のない 1 行の形があると、BEGIN の行番号を stderr に通知します。
 - `mask --out-dir DIR FILE ...` を加えました。入力ごとに伏せたファイルを書き出します。番号はファイルをまたいで通しで、既存のファイルは上書きしません([使い方](README.md#ai-エージェントにファイルを読ませる))。
 - `mask --review` を加えました。置換した箇所と、置換しなかった怪しい語に色を付けて表示します。確認専用です([使い方](README.md#出力を確認する))。
 - `<user_path_1>`、`user_path_<12 桁の 16 進数>` の形の文字列は、置換済みの形として扱います。`token=user_path_3f9a1c0b7d2e` のような値は、置換されなくなります(stderr に通知します)。
