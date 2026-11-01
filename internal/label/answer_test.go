@@ -2,6 +2,7 @@ package label
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"slices"
 	"testing"
 )
@@ -88,4 +89,81 @@ func TestFormatScanIgnoresEscapedForms(t *testing.T) {
 	DefaultFormat.Scan([]byte(`&lt;email_1&gt; \<email_1\>`), func(s, e int, _ string, _ int) {
 		t.Errorf("unexpected label at %d-%d", s, e)
 	})
+}
+
+// refScan は、Scan の参照実装。すべての位置で照合する。
+func refScan(a *AnswerScanner, line []byte, skip map[string]struct{}, fn func(start, end int, typ string, n int)) {
+	for i := 0; i < len(line); {
+		end, typ, n, escaped, ok := a.matchAnyAt(line, i)
+		if ok && escaped {
+			_, skipped := skip[string(line[i:end])]
+			ok = !skipped
+		}
+		if !ok {
+			i++
+			continue
+		}
+		fn(i, end, typ, n)
+		i = end
+	}
+}
+
+// refScanEscaped は、ScanEscaped の参照実装。すべての位置で照合する。
+func refScanEscaped(a *AnswerScanner, line []byte, fn func(form []byte)) {
+	for i := 0; i < len(line); {
+		end, _, _, escaped, ok := a.matchAnyAt(line, i)
+		switch {
+		case !ok:
+			i++
+		case escaped:
+			fn(line[i:end])
+			i++
+		default:
+			i = end
+		}
+	}
+}
+
+// 読み飛ばしの有無で、結果が変わらないことを確かめる。
+func TestAnswerScanMatchesReference(t *testing.T) {
+	formats := []string{"<{type}_{n}>", "[{type}-{n}]", "{type}_{n}", "{n}_{type}", "<<{type}:{n}>>", `"{type}#{n}"`, "&{type}{n};", "L{type}{n}", "<{n}_{type}"}
+	fragments := []string{
+		"<email_1>", "&lt;email_1&gt;", `\<email_1\>`, `\<aws\_host\_2\>`, "[email-1]", `\[email-1\]`, `\[email\-1\]`,
+		"email_3", `email\_3`, "3_email", `3\_email`, "<<uuid:2>>", `\<\<uuid:2\>\>`, "&lt;&lt;uuid:2&gt;&gt;",
+		`"email#4"`, "&quot;email#4&quot;", "&email5;", "&amp;email5;", `\&email5;`, "Lemail6", `\Lemail6`,
+		"<", ">", "&", `\`, "&lt;", "&gt;", "&amp;", "_", "email", "1", "12", " ", "x", `"`, "[", "]", "L",
+	}
+	rng := rand.New(rand.NewPCG(1, 2))
+	for _, format := range formats {
+		f, err := ParseFormat(format)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a := NewAnswerScanner(f)
+		if len(a.starts) > maxStarts {
+			t.Fatalf("format %q: %d start bytes", format, len(a.starts))
+		}
+		for range 20000 {
+			var line []byte
+			for range rng.IntN(8) {
+				line = append(line, fragments[rng.IntN(len(fragments))]...)
+			}
+			var gotForms, wantForms []string
+			a.ScanEscaped(line, func(form []byte) { gotForms = append(gotForms, string(form)) })
+			refScanEscaped(a, line, func(form []byte) { wantForms = append(wantForms, string(form)) })
+			if !slices.Equal(gotForms, wantForms) {
+				t.Fatalf("format %q, line %q: ScanEscaped got %q, want %q", format, line, gotForms, wantForms)
+			}
+			var skip map[string]struct{}
+			if rng.IntN(2) == 0 && len(wantForms) > 0 {
+				skip = map[string]struct{}{wantForms[rng.IntN(len(wantForms))]: {}}
+			}
+			var got, want []string
+			a.Scan(line, skip, func(s, e int, typ string, n int) { got = append(got, fmt.Sprint(s, e, typ, n)) })
+			refScan(a, line, skip, func(s, e int, typ string, n int) { want = append(want, fmt.Sprint(s, e, typ, n)) })
+			if !slices.Equal(got, want) {
+				t.Fatalf("format %q, line %q, skip %q: Scan got %q, want %q", format, line, skip, got, want)
+			}
+		}
+	}
 }
