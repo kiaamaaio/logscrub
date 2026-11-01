@@ -65,10 +65,10 @@ type fixedPrefix struct {
 // 手がかりが同じ接頭辞は、1 回の走査でまとめて探す(plans/v1.2.0.md 段階 7 の実測)。
 var fixedPrefixes = []fixedPrefix{
 	{lits: [][]byte{[]byte("AKIA"), []byte("ASIA"), []byte("AIza")}, off: 0}, // `A`
-	{lits: [][]byte{[]byte("gh"), []byte("github_pat_")}, off: 0},             // `g`
-	{lits: [][]byte{[]byte("xox")}, off: 0},                                   // `x`
-	{lits: [][]byte{[]byte("sk"), []byte("rk")}, off: 1},                      // `k`
-	{lits: [][]byte{[]byte("eyJ")}, off: 2},                                   // `J`
+	{lits: [][]byte{[]byte("gh"), []byte("github_pat_")}, off: 0},            // `g`
+	{lits: [][]byte{[]byte("xox")}, off: 0},                                  // `x`
+	{lits: [][]byte{[]byte("sk"), []byte("rk")}, off: 1},                     // `k`
+	{lits: [][]byte{[]byte("eyJ")}, off: 2},                                  // `J`
 }
 
 // maxFixedPrefixes は、fixedPrefixes のまとまりの数の上限(fixed の作業領域を、配列で持つため)。
@@ -213,7 +213,7 @@ func isLowerHex(b []byte) bool {
 func isURLSchemeChar(c byte) bool { return isASCIIAlnum(c) || c == '+' || c == '.' || c == '-' }
 
 // isURLUserInfoStop は、URL のユーザー情報(ユーザーとパスワード)に含まれない文字(空白・`/`・`?`・`#`・`@`と、
-// RFC 3986 で URL に使えない `"` `'` `` ` `` `<` `>` `\` `{` `}` `|` `^`)。後者は、JSON などで、パスのない URL の後ろの
+// RFC 3986 で URL に使えない `"` `'` “ ` “ `<` `>` `\` `{` `}` `|` `^`)。後者は、JSON などで、パスのない URL の後ろの
 // 別の値(`"https://example.com","email":"bob@example.com"`)を、ユーザー情報として読まないため(Q60)。
 func isURLUserInfoStop(c byte) bool {
 	switch c {

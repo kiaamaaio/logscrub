@@ -52,10 +52,10 @@ type Detector struct {
 	// メールアドレスのドメインの確認にも使う(仕様 5.2)。
 	valueFinders []finder
 	kinds        KindSet
-	scope   Scope
-	allow   map[string]struct{}
-	format  label.Format
-	hashLen int
+	scope        Scope
+	allow        map[string]struct{}
+	format       label.Format
+	hashLen      int
 
 	raw     []Match
 	cands   []cand
