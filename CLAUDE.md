@@ -28,7 +28,7 @@
 - 変更後は `./scripts/go test ./...` と `./scripts/go vet ./...` が通ることを確認する
 - コミットメッセージは日本語で書く(第一言語が日本語のため)。push は指示があるまで行わない
 - ブランチ運用:
-  - 版の機能開発(docs/plans/ に実装計画がある作業)は、`develop` から作る `feature/<版>-<内容>`(例: `feature/v1.1.0-aws`)で行い、段階ごとにそこへコミットする。`develop` へのマージは、指示があってから `--no-ff` で行う
+  - 版の機能開発(docs/plans/ に実装計画がある作業)は、`develop` から作る `feature/<版>-<内容>`(例: `feature/v1.1.0-aws`)で行い、段階ごとにそこへコミットする。`develop` へは、指示があってから、`/code-review` のあとで AI が PR を作り(説明の形式は docs/templates/pr.md)、人が差分を見て merge commit でマージする。AI はマージしない
   - 資料の更新や小さな修正は、作業中の feature ブランチがあればそのブランチにコミットする(`develop` へのマージで反映される)。作業中の feature ブランチがないときは、`develop` に直接コミットする
     - 例外: feature ブランチのマージより前に `develop` で必要になる修正(リリースに含める修正など)は、`develop` に直接コミットする
-  - リリース時に `develop` を `main` へ `--no-ff` でマージし、そのマージコミットにタグ(`vX.Y.Z`)を付ける。`main` には直接コミットしない
+  - リリース時に、人が `develop` を `main` へ merge commit でマージし、そのマージコミットにタグ(`vX.Y.Z`)を付ける。`main` には直接コミットしない

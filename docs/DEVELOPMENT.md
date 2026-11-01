@@ -274,7 +274,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 
 ## 4. リリースの手順
 
-1. `develop` を `main` へ `--no-ff` でマージし、そのマージコミットにタグ(`vX.Y.Z`)を付ける
+1. 人が `develop` を `main` へ merge commit でマージし、そのマージコミットにタグ(`vX.Y.Z`)を付ける(AI はマージしない)
 2. `main` のタグの位置で `scripts/build-release` を実行する。`dist/` に 6 環境のバイナリと `SHA256SUMS` ができる
    - 版はタグから入る(`-ldflags` は使わない)。変更のある作業ツリーや、タグの位置でない HEAD では動かない。linux/amd64 のバイナリで版を確かめる
    - v2 以上のタグでは、`go.mod` のモジュールのパスに `/v2` などを付けないと、タグの版にならない(このスクリプトの確認で止まる)

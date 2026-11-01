@@ -62,3 +62,14 @@
 - 分割の処理で確かめた: 元の行(5 件で合計 1854 行)がすべて残り、増えた行は案内の行と、移した先の節の見出しだけ。変えたのは、移した行の相対リンクと案内の行だけ。`docs/plans/` の相対リンクの切れは 0 件
 - 分割の前に deny ルールを外し、分割のあとで新しいパスも含めて戻した。`docs/plans/v1.2.0/log.md` と `docs/plans/v1.0.0.md` への `>>` が止まり、`./scripts/go version` が通ることを確認した
 
+#### 段階 7: PR によるマージの運用
+
+- push の認証: SSH の鍵はあるが、このセッションから使える agent がない。`gh` のトークンには `repo` の権限があり、次の形の `--dry-run` が通った。リモートの設定は変えていない
+  - `git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push https://github.com/kiaamaaio/logscrub.git HEAD:refs/heads/<ブランチ>`
+- deny に `git merge` と `gh pr merge` を加えた(`git merge` は ask から移した)
+  - 止まる: `git merge --no-ff`、`git -C . merge`、`gh pr merge`、`gh --repo ... pr merge`。止まらなかった場合に備えて、存在しないブランチと PR 番号で確かめた
+  - 通る: `git merge-base`、`git log`、`gh pr list`、`./scripts/go version`
+- `docs/templates/pr.md` を作り、CLAUDE.md のブランチ運用と DEVELOPMENT.md のリリースの手順を直した
+- `develop` から `main` へのマージも、deny により人が行う形になった
+- 未実施: GitHub のマージ方法を merge commit だけにする設定。今は merge、squash、rebase のすべてが有効。リポジトリの設定の変更なので、確認を待つ
+
