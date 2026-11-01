@@ -71,6 +71,14 @@
 - 国際化ドメインは、`xn--…` の形でだけ指定できます。
 - 指定していないドメインは検出しません(別名や、CNAME の先は分かりません)。
 
+## ホームディレクトリのパス
+
+- 形だけで判定するので、`/home/` で始まる Web のパス(`GET /home/dashboard`、`/home/v1/items`)や、Windows の形に見える `GET /c/users/123` の `dashboard`・`v1`・`123` も置換されます。`restore` で戻せます。`--allow` でも残せます。
+- パスの途中の `/home/`(`/var/home/yamada`、`/data/home/yamada`)と、ドメインのある URL は対象外です。ユーザー名がパスの外にある形(`user=yamada`、`~yamada`)も対象外です。`--deny` で指定してください。
+- 空白を含む名前は、Windows の形で、後ろに `\` か `/` があるときだけ 1 つの値になります。最後の要素(`C:\Users\Taro Yamada`)は `Taro` だけが置換され、`Yamada` が残ります。Linux・macOS の形の空白でも、同じです。
+- 空白を含む名前の後ろに、空白で区切られたパスが続くと、間の語も値に含まれます(`C:\Users\taro and /var/log` は `taro and` が 1 つの値)。
+- 対象外の名前(`user`、`admin` など)が実際のユーザー名でも、残ります。
+
 ## UUID
 
 - 既定では無効です(リクエスト ID・トレース ID の場合もあるため)。ハイフン無しの 32 桁は、対象外です。

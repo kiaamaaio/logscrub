@@ -53,6 +53,11 @@ var fuzzFragments = []string{
 	"curl https://internal.corp.example.jp/api", "taro@acme.co.jp", "taro@mail.corp.example.jp", "postgres://app:s3cret@db.mycompany.internal/",
 	"notcorp.example.jp", "corp.example.jp.evil.org", "<custom_1>", "<host_1>", "custom_3f9a1c0b7d2e", "host_3f9a1c0b7d2e", "password=<custom_1>",
 	"https://u:<secret_1>@<host_1>/", "https://u:secret_3f9a1c0b7d2e@host_3f9a1c0b7d2e/",
+	// ホームディレクトリのパス(v1.5)
+	`File "/home/yamada/proj/app.py", line 3`, "/Users/hanako/Library/Logs", `C:\Users\Taro Yamada\AppData\Local`,
+	`{"path":"C:\\Users\\yamada\\app.log"}`, "C:/Users/yamada/app.log", "/mnt/c/Users/yamada/x", "file:///home/yamada/a.txt",
+	"HOME=/home/yamada", "PWD=/home/user", "/home/ubuntu/x", "/home/$USER/x", "GET /home/dashboard HTTP/1.1",
+	"/home/<user_path_1>/proj", `C:\Users\<user_path_1>\AppData`, "/home/user_path_3f9a1c0b7d2e/proj", "<user_path_1>", "user_path_3f9a1c0b7d2e",
 	// 崩れたラベル(v1.3)
 	"&lt;email_1&gt;", `\<email_1\>`, `\\10.0.0.5\share`, "&lt;taro@example.com&gt;",
 	// 文脈(値でないもの)

@@ -233,7 +233,7 @@ EC2 のホスト名は、IP アドレスを `-` 区切りで含む。IP アド�
   - 英数字・`.`・`_`・`-`・`@`・`+` と非 ASCII のバイトの連なり。末尾の `.` は含めない(文末の `/home/yamada.`)
   - `$USER`、`*`、`<user>`、`%USERNAME%` は、文字の条件で対象にならない
   - 後ろに `/` がなくてもよい(`HOME=/home/yamada`、`/home/yamada:/bin/bash`)
-  - Windows の形に限り、同じ行に次の区切り(`\` または `/`)があるときは、空白を含めてよい(`C:\Users\Taro Yamada\AppData`)。この場合、空白より前の部分も上の文字だけからなること
+  - Windows の形に限り、同じ行に次の区切り(`\` または `/`)があるときは、空白を含めてよい(`C:\Users\Taro Yamada\AppData`)。この場合、区切りまでが上の文字と空白だけからなること。末尾の空白は含めない
 - 対象外のユーザー名(固定の一覧): `user`、`ubuntu`、`ec2-user`、`debian`、`centos`、`admin`、`runner`、`node`、`vagrant`、`Administrator`、`Public`、`Default`、`Default User`、`All Users`、`Shared`、`Guest`
   - 照合の大文字・小文字は、上の表の形に従う
   - 一覧にない名前を残すときは、`--allow`(ユーザー名との完全一致)を使う

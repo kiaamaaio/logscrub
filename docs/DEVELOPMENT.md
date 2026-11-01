@@ -87,8 +87,8 @@ func Copy(w io.Writer, inputs ...io.Reader) error
 ```go
 // 置換後の種別名。IP は区別を含む。並びは連番・--stats の出力順にも使う(aws_account・aws_s3_bucket は v1.1、aws_host は v1.2 で追加)。
 var Types = []string{"email", "ipv4_global", "ipv4_private", "ipv6_global", "ipv6_private", "secret", "uuid",
-    "aws_account", "aws_s3_bucket", "aws_host", "host", "custom"}
-const NumTypes = 12                                 // len(Types)。統計・連番の表を固定長の配列で持つため
+    "aws_account", "aws_s3_bucket", "aws_host", "host", "custom", "user_path"}
+const NumTypes = 13                                 // len(Types)。統計・連番の表を固定長の配列で持つため
 
 type Format struct { ... }                          // '<{type}_{n}>' を前後・中間のリテラルに分解したもの
 func ParseFormat(s string) (Format, error)          // {type} と {n} を含まなければエラー
@@ -108,7 +108,7 @@ func (a *AnswerScanner) ScanEscaped(line []byte, fn func(form []byte))
 **detect**
 
 ```go
-type Kind uint8   // KindEmail, KindIPv4, KindIPv6, KindSecret, KindUUID, KindAWSAccount, KindAWSS3Bucket, KindAWSHost, KindHost, KindCustom(0 は無効)
+type Kind uint8   // KindEmail, KindIPv4, KindIPv6, KindSecret, KindUUID, KindAWSAccount, KindAWSS3Bucket, KindAWSHost, KindHost, KindCustom, KindUserPath(0 は無効)
 type KindSet uint32 // ビット k が Kind k(v1.1 で uint8 から広げた。v1.2 の aws_host で 8 ビットを超えるため)
 type Class uint8  // ClassNone, ClassGlobal, ClassPrivate, ClassSpecial(IP のみ使用)
 
@@ -174,6 +174,8 @@ v1.2 では、`aws.go` に `aws_host` の検出器 `awsHostFinder` と、その�
 v1.3 では、`custom.go` に `customFinder`(`--deny`)と `hostFinder`(`--domain`)を、`literal.go` に、両方が使う照合器 `literalMatcher`(Aho-Corasick。遷移の表は、語に現れるバイトの同値類を列にする)を置いた。
 語の読み込み(`--deny-file`)は `internal/cli` で行い、`detect` には語の一覧だけを渡す。語・ドメインを指定しなければ、検出器を作らない。
 `--email-hash local` のために、`Detector.Find` は、email の一致のドメインの部分を `customFinder`・`hostFinder` で確かめ、`Match.HideDomain` を立てる。
+
+v1.5 では、`userpath.go` に `userPathFinder` を置いた。既定で有効なので、手がかりの語を照合器で探さず、`/` と `\` の位置だけを `IndexByte` で飛んで調べる。
 
 前処理(3.4 節)用の `may(line, hint)` と `lineHint` は設けない。各検出器が `find` の先頭で、自分の手がかり
 (email は `'@'` の `bytes.IndexByte` など)を探し、なければすぐ戻る。

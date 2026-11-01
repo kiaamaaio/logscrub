@@ -155,6 +155,7 @@ stderr に出します(終了コードは 0)。
 | `email` | メールアドレス(TLD は英字 2 文字以上) | 有効 |
 | `ipv4` / `ipv6` | IP アドレス。グローバルとプライベートを、ラベルで区別する(`<ipv4_global_1>`、`<ipv4_private_1>`) | 有効 |
 | `secret` | トークン類([対応形式](docs/detection.md#secret-の対応形式)) | 有効 |
+| `user_path` | ホームディレクトリのパスのユーザー名(`/home/<user_path_1>/`。[詳細](docs/detection.md#ホームディレクトリのパスuser_path)) | 有効 |
 | `uuid` | UUID(バージョン 1〜8) | 無効 |
 | `aws_account` | AWS アカウント ID(ARN・ECR・SQS・S3 Control の中のもの。[AWS の値](docs/detection.md#aws-の値)) | 無効 |
 | `aws_s3_bucket` | S3 のバケット名(`s3://`・S3 の URL・ARN の中のもの。[AWS の値](docs/detection.md#aws-の値)) | 無効 |
@@ -166,7 +167,7 @@ stderr に出します(終了コードは 0)。
 
 | まとまり | 含まれる種別 |
 |---|---|
-| `default` | 既定で有効の種別(`email`、`ipv4`、`ipv6`、`secret`) |
+| `default` | 既定で有効の種別(`email`、`ipv4`、`ipv6`、`secret`、`user_path`) |
 | `aws` | `aws_` で始まる種別(`aws_account`、`aws_s3_bucket`、`aws_host`) |
 | `cloud` | すべてのクラウドの種別(今は `aws` と同じ) |
 

@@ -804,7 +804,7 @@ func TestTypesCommand(t *testing.T) {
 	}
 	// 1 行 1 種別(種別 ID、既定、説明)。共通の種別のあとに、クラウドごとにまとめる(仕様 6 章)。
 	wantDefault := map[string]string{
-		"email": "on", "ipv4": "on", "ipv6": "on", "secret": "on", "uuid": "off", "aws_account": "off", "aws_s3_bucket": "off", "aws_host": "off",
+		"email": "on", "ipv4": "on", "ipv6": "on", "secret": "on", "user_path": "on", "uuid": "off", "aws_account": "off", "aws_s3_bucket": "off", "aws_host": "off",
 	}
 	var order []string
 	for _, line := range strings.Split(r.stdout, "\n") {
@@ -819,7 +819,7 @@ func TestTypesCommand(t *testing.T) {
 			}
 		}
 	}
-	if got := strings.Join(order, ","); got != "email,ipv4,ipv6,secret,uuid,aws_account,aws_s3_bucket,aws_host" {
+	if got := strings.Join(order, ","); got != "email,ipv4,ipv6,secret,user_path,uuid,aws_account,aws_s3_bucket,aws_host" {
 		t.Errorf("type order: %s", got)
 	}
 	if !strings.Contains(r.stdout, "\nAWS:\naws_account ") {
@@ -827,7 +827,7 @@ func TestTypesCommand(t *testing.T) {
 	}
 	// 最後に、まとまりと、それぞれに含まれる種別。
 	if !strings.HasSuffix(r.stdout, "\nGroups for --types:\n"+
-		"  default  email, ipv4, ipv6, secret\n"+
+		"  default  email, ipv4, ipv6, secret, user_path\n"+
 		"  aws      aws_account, aws_s3_bucket, aws_host\n"+
 		"  cloud    aws_account, aws_s3_bucket, aws_host\n") {
 		t.Errorf("types lacks the groups:\n%s", r.stdout)

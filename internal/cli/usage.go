@@ -51,11 +51,11 @@ secrets; see --types. Several FILEs are read in the given order as one input
 Options (they may be written before or after FILE):
   --mode mask|hash          mask: <email_1> style labels (default).
                             hash: <type>_<hex> using HMAC-SHA256; cannot be restored.
-  --types LIST              comma separated types: email, ipv4, ipv6, secret, uuid,
-                            host, custom, aws_account, aws_s3_bucket, aws_host;
+  --types LIST              comma separated types: email, ipv4, ipv6, secret,
+                            user_path, uuid, host, custom, aws_account, aws_s3_bucket, aws_host;
                             or groups: default, aws, cloud. Only the listed types are
                             replaced (add "default" to keep the default ones).
-                            Default: default (email, ipv4, ipv6, secret; uuid,
+                            Default: default (email, ipv4, ipv6, secret, user_path; uuid,
                             host, custom and aws_* are off).
                             Run "logscrub types" for the list.
   --uuid-versions 4,7       replace only these UUID versions (1-8); enables uuid.

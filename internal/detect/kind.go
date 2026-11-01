@@ -26,6 +26,7 @@ const (
 	KindAWSHost
 	KindHost
 	KindCustom
+	KindUserPath
 )
 
 var kindNames = [...]string{
@@ -39,6 +40,7 @@ var kindNames = [...]string{
 	KindAWSHost:     "aws_host",
 	KindHost:        "host",
 	KindCustom:      "custom",
+	KindUserPath:    "user_path",
 }
 
 func (k Kind) String() string {
@@ -49,7 +51,7 @@ func (k Kind) String() string {
 }
 
 // kindPriority は、範囲の長さが同じときの優先順位(小さいほうが優先)。
-// 仕様: email → ipv4 / ipv6 → secret → uuid → aws_account → aws_s3_bucket → aws_host → host → custom。
+// 仕様: email → ipv4 / ipv6 → secret → uuid → aws_account → aws_s3_bucket → aws_host → host → custom → user_path。
 var kindPriority = [...]int{
 	KindEmail:       1,
 	KindIPv4:        2,
@@ -61,6 +63,7 @@ var kindPriority = [...]int{
 	KindAWSHost:     7,
 	KindHost:        8,
 	KindCustom:      9,
+	KindUserPath:    10,
 }
 
 // KindSet は、Kind の集合。ビット k が Kind k。
@@ -91,6 +94,7 @@ var Types = []TypeInfo{
 	{Kind: KindIPv4, Default: true},
 	{Kind: KindIPv6, Default: true},
 	{Kind: KindSecret, Default: true},
+	{Kind: KindUserPath, Default: true},
 	{Kind: KindUUID},
 	{Kind: KindHost},
 	{Kind: KindCustom},
@@ -242,6 +246,8 @@ func (m Match) LabelType() string {
 		return "host"
 	case KindCustom:
 		return "custom"
+	case KindUserPath:
+		return "user_path"
 	case KindIPv4:
 		switch m.Class {
 		case ClassGlobal:

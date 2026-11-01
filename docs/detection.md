@@ -89,6 +89,27 @@ connect <aws_host_1>.ap-northeast-1.rds.amazonaws.com:5432
 - `admin@mydb.….rds.amazonaws.com` のように、メールアドレスの一部として読めるホスト名は、長いメールアドレスが優先されます。
 - 表の形は、2026-10-18 に AWS の公式ドキュメントで確認しました。
 
+## ホームディレクトリのパス(`user_path`)
+
+スタックトレースやエラーメッセージのパスに出る人名を伏せます。既定で有効です。置換するのはユーザー名の部分だけで、パスの残りは残ります。
+
+```console
+$ echo 'File "/home/yamada/proj/app.py", line 3' | logscrub mask
+File "/home/<user_path_1>/proj/app.py", line 3
+```
+
+| 形 | 例 |
+|---|---|
+| Linux・macOS | `/home/yamada/`、`/Users/yamada/`、`file:///home/yamada/` |
+| Windows | `C:\Users\yamada\`、`C:\\Users\\yamada\\`(JSON など)、`C:/Users/yamada/`、`/mnt/c/Users/yamada/`(WSL)、`/c/Users/yamada/`(Git Bash)、`file:///C:/Users/yamada/` |
+
+- `/home/yamada` と `/Users/yamada` は、同じラベルになります。
+- `/home/yamada` のように、後ろに `/` がなくても対象です。日本語の名前も対象です。
+- Windows の形は、大文字・小文字を区別せず、次の区切りがあれば空白を含む名前も 1 つの値にします(`C:\Users\Taro Yamada\AppData`)。
+- 次の名前は人名でないので、対象にしません: `user`、`ubuntu`、`ec2-user`、`debian`、`centos`、`admin`、`runner`、`node`、`vagrant`、`Administrator`、`Public`、`Default`、`Default User`、`All Users`、`Shared`、`Guest`。ほかの名前を残すときは、`--allow` にユーザー名を指定します。
+- `/home/$USER/`、`/home/*/` は対象外です。`https://example.com/home/x`、`/var/home/x` のように、パスの途中の `/home/` も対象外です。
+- `--deny` の語と同じ範囲なら、`<custom_N>` になります。
+
 ## 指定した語(`custom`)
 
 形式では判定できない会社名・案件名・社内のサービス名などを、語として指定します。`--deny`・`--deny-file` を指定すると、`custom` が対象に加わります(`--types` を指定していても加わります)。語だけを置換するなら `--types custom` と併用します。

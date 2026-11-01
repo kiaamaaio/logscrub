@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kiaamaaio/logscrub/internal/detect"
+	"github.com/kiaamaaio/logscrub/internal/label"
 	"github.com/kiaamaaio/logscrub/internal/synthlog"
 )
 
@@ -53,6 +54,46 @@ func TestMaskGoldenCustom(t *testing.T) {
 	}
 	if _, restored, _ := roundTrip(t, customOptions, string(in)); restored != string(in) {
 		t.Errorf("restore(mask(x)) != x:\n%s", restored)
+	}
+}
+
+// testdata/paths.log を、既定の種別で mask した結果が、testdata/paths.mask.golden と一致する(期待値は、手で確認したもの)。
+func TestMaskGoldenPaths(t *testing.T) {
+	in, err := os.ReadFile("testdata/paths.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile("testdata/paths.mask.golden")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := detect.Options{}
+	got, _ := mask(t, opts, string(in))
+	if got != string(want) {
+		t.Errorf("mask output differs from internal/transform/testdata/paths.mask.golden\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	if _, restored, _ := roundTrip(t, opts, string(in)); restored != string(in) {
+		t.Errorf("restore(mask(x)) != x:\n%s", restored)
+	}
+}
+
+// 書式が `{type}_{n}` でも、ホームディレクトリのパスのラベルは再度置換されず、戻る。
+func TestUserPathWithBareFormat(t *testing.T) {
+	f, err := label.ParseFormat("{type}_{n}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := detect.Options{Format: f}
+	in := `/home/yamada/x C:\Users\Taro Yamada\y`
+	masked, restored, _ := roundTrip(t, opts, in)
+	if want := `/home/user_path_1/x C:\Users\user_path_2\y`; masked != want {
+		t.Errorf("got %q, want %q", masked, want)
+	}
+	if restored != in {
+		t.Errorf("restored %q", restored)
+	}
+	if twice, st := mask(t, opts, masked); twice != masked || st.Total() != 0 {
+		t.Errorf("second pass: %q", twice)
 	}
 }
 

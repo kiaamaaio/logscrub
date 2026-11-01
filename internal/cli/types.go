@@ -13,6 +13,7 @@ var typeDescriptions = map[detect.Kind]string{
 	detect.KindIPv4:        "IPv4 addresses (labels: ipv4_global, ipv4_private; special addresses are kept)",
 	detect.KindIPv6:        "IPv6 addresses (labels: ipv6_global, ipv6_private; special addresses are kept)",
 	detect.KindSecret:      "tokens and credentials (see --verbose for the formats)",
+	detect.KindUserPath:    "user names in home directory paths (/home/NAME, /Users/NAME, C:\\Users\\NAME)",
 	detect.KindUUID:        "UUIDs, versions 1-8 (enable with --types default,uuid or --uuid-versions)",
 	detect.KindHost:        "host names in the domains given with --domain",
 	detect.KindCustom:      "words given with --deny or --deny-file",
