@@ -54,12 +54,18 @@ func (r *Reader) Next() (content, eol []byte, err error) {
 		return nil, nil, io.EOF
 	}
 	// ここに来る時点で、err == nil(改行で終わる行)か、err == io.EOF(改行なしの最終行)。
+	content, eol = cutEOL(line)
+	return content, eol, nil
+}
+
+// cutEOL は、行を中身と改行コードに分ける。改行で終わらない行の改行コードは nil。line は空でないこと。
+func cutEOL(line []byte) (content, eol []byte) {
 	if line[len(line)-1] != '\n' {
-		return line, nil, nil
+		return line, nil
 	}
 	line = line[:len(line)-1]
 	if bytes.HasSuffix(line, eolCRLF[:1]) {
-		return line[:len(line)-1], eolCRLF, nil
+		return line[:len(line)-1], eolCRLF
 	}
-	return line, eolLF, nil
+	return line, eolLF
 }

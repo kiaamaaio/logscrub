@@ -70,34 +70,91 @@ func TestLiteralMatcherDuplicateWords(t *testing.T) {
 func TestLiteralMatcherAgainstReference(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))
 	alphabet := "abAB-\xe3\x82"
-	word := func(maxLen int) string {
+	word := func(minLen, maxLen int) string {
 		var sb strings.Builder
-		for n := 1 + rng.Intn(maxLen); n > 0; n-- {
+		for n := minLen + rng.Intn(maxLen-minLen+1); n > 0; n-- {
 			sb.WriteByte(alphabet[rng.Intn(len(alphabet))])
 		}
 		return sb.String()
 	}
-	for range 20000 {
-		words := make([]string, 1+rng.Intn(6))
-		for i := range words {
-			words[i] = word(4)
+	// minLen が 1 なら 1 バイトの語が混ざるので root で、2 なら pair で読み飛ばす。
+	for _, minLen := range []int{1, 2} {
+		for range 20000 {
+			words := make([]string, 1+rng.Intn(6))
+			for i := range words {
+				words[i] = word(minLen, 4)
+			}
+			m := newLiteralMatcher(words)
+			if minLen == 2 && m.pair == nil {
+				t.Fatalf("words %q: no pair table", words)
+			}
+			line := []byte(word(0, 40))
+			if got, want := literalScan(m, line), refLiteralScan(words, line); !slices.Equal(got, want) {
+				t.Fatalf("words %q, line %q: got %q, want %q", words, line, got, want)
+			}
 		}
-		m := newLiteralMatcher(words)
-		line := []byte(word(40))
-		if got, want := literalScan(m, line), refLiteralScan(words, line); !slices.Equal(got, want) {
-			t.Fatalf("words %q, line %q: got %q, want %q", words, line, got, want)
+	}
+}
+
+// 語が行の端にある場合と、読み飛ばしのあとの連続する一致。
+func TestLiteralMatcherSkipEdges(t *testing.T) {
+	tests := []struct {
+		words []string
+		line  string
+		want  []string
+	}{
+		{[]string{"ab"}, "ab", []string{"0-2"}},
+		{[]string{"ab"}, "xxab", []string{"2-4"}},
+		{[]string{"ab"}, "xxa", nil},
+		{[]string{"ab"}, "a", nil},
+		{[]string{"ab"}, "", nil},
+		{[]string{"AB"}, "xaBx", []string{"1-3"}},
+		{[]string{"ab", "bc"}, "abc", []string{"0-2", "1-3"}},
+		{[]string{"aab"}, "aaab", []string{"1-4"}},
+		{[]string{"a"}, "xxa", []string{"2-3"}},
+		{[]string{"a", "bc"}, "bbc a", []string{"1-3", "4-5"}},
+	}
+	for _, tt := range tests {
+		if got := literalScan(newLiteralMatcher(tt.words), []byte(tt.line)); !slices.Equal(got, tt.want) {
+			t.Errorf("words %q, line %q: got %q, want %q", tt.words, tt.line, got, tt.want)
 		}
 	}
 }
 
 func BenchmarkLiteralMatcher(b *testing.B) {
 	line := bytes.Repeat([]byte("2026-10-24T12:00:00Z INFO request served by node-17 in 12ms status=200 path=/api/v1/items\n"), 1000)
-	for _, n := range []int{1, 10, 1000} {
+	project := func(n int) []string {
 		words := make([]string, n)
 		for i := range words {
 			words[i] = fmt.Sprintf("project-%d-name", i)
 		}
-		b.Run(fmt.Sprint(n), func(b *testing.B) {
+		return words
+	}
+	// varied は、子音と母音の綴りの語。dense は、先頭の 2 バイトの組が、英小文字の組をほぼ覆う語。
+	varied, dense := make([]string, 1000), make([]string, 1000)
+	rng := rand.New(rand.NewSource(1))
+	for i := range varied {
+		var sb strings.Builder
+		for range 3 {
+			sb.WriteByte("bdfghjkmnprstwyz"[rng.Intn(16)])
+			sb.WriteByte("aeiou"[rng.Intn(5)])
+		}
+		varied[i] = sb.String()
+		dense[i] = fmt.Sprintf("%c%cword%d", 'a'+i%26, 'a'+(i/26)%26, i)
+	}
+	for _, tc := range []struct {
+		name  string
+		words []string
+	}{
+		{"1", project(1)},
+		{"10", project(10)},
+		{"1000", project(1000)},
+		{"domain", []string{"example.com"}},
+		{"varied1000", varied},
+		{"dense1000", dense},
+	} {
+		words := tc.words
+		b.Run(tc.name, func(b *testing.B) {
 			m := newLiteralMatcher(words)
 			b.SetBytes(int64(len(line)))
 			for b.Loop() {
