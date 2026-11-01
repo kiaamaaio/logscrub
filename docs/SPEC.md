@@ -138,5 +138,5 @@ logscrub/
 
 ## 11. 未決事項
 
-なし(v1.1 の細部は [plans/v1.1.0/README.md](plans/v1.1.0/README.md) 5 章の Q32〜Q46、v1.2 の細部は [plans/v1.2.0/README.md](plans/v1.2.0/README.md) 5 章の Q47〜Q70、v1.3 の細部は [plans/v1.3.0/README.md](plans/v1.3.0/README.md) 5 章の Q71〜Q84、v1.4 の細部は [plans/v1.4.0/questions.md](plans/v1.4.0/questions.md) の Q94〜Q99、v1.5 の細部は [plans/v1.5.0/questions.md](plans/v1.5.0/questions.md) の Q100〜Q111 で確定済み)
+なし(v1.1 の細部は [plans/v1.1.0/README.md](plans/v1.1.0/README.md) 5 章の Q32〜Q46、v1.2 の細部は [plans/v1.2.0/README.md](plans/v1.2.0/README.md) 5 章の Q47〜Q70、v1.3 の細部は [plans/v1.3.0/README.md](plans/v1.3.0/README.md) 5 章の Q71〜Q84、v1.4 の細部は [plans/v1.4.0/questions.md](plans/v1.4.0/questions.md) の Q94〜Q99、v1.5 の細部は [plans/v1.5.0/questions.md](plans/v1.5.0/questions.md) の Q100〜Q116 で確定済み)
 

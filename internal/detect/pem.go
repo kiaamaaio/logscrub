@@ -38,9 +38,11 @@ type PEMScanner struct {
 
 	inBlock   bool
 	bodySeen  bool
-	line      int // data[:counted] までの行数
-	counted   int // data の中の、行数を数え終えた位置
-	beginLine int // 開いているブロックの BEGIN の行番号
+	line      int  // data[:counted] までの行数
+	counted   int  // data の中の、行数を数え終えた位置
+	beginLine int  // 開いているブロックの BEGIN の行番号
+	column    int  // 開いているブロックの BEGIN の印の列。手前が空白だけなら 0(行頭に日時などが付くログ。仕様 4.1)
+	escaped   bool // 開いているブロックが、1 行ごとに文字列で包まれた形(`{"log":"…\n",…}`。仕様 4.1)
 
 	// Unclosed は、END のないブロックの数。UnclosedLines は、その BEGIN の行番号(最初の MaxUnclosedLines 件まで)。
 	Unclosed      int
@@ -124,7 +126,7 @@ func (s *PEMScanner) scanLine(data, line []byte, pos int, dst []PEMSpan) []PEMSp
 		}
 	}
 	for {
-		_, me, ok := findPEMMarker(line, from, "-----BEGIN ")
+		ms, me, ok := findPEMMarker(line, from, "-----BEGIN ")
 		if !ok {
 			return dst
 		}
@@ -136,8 +138,13 @@ func (s *PEMScanner) scanLine(data, line []byte, pos int, dst []PEMSpan) []PEMSp
 			continue
 		}
 		rest := line[me:]
-		if len(bytes.TrimRight(rest, " \t")) == 0 {
-			s.inBlock, s.bodySeen = true, false
+		escaped := endsWithEscapedNewline(rest)
+		if escaped || len(bytes.TrimRight(rest, " \t")) == 0 {
+			s.inBlock, s.bodySeen, s.escaped = true, false, escaped
+			s.column = 0
+			if bs, be := trimBlank(line, 0, ms); bs < be {
+				s.column = ms
+			}
 			s.countLines(data, pos)
 			s.beginLine = s.line + 1
 			return dst
@@ -150,19 +157,50 @@ func (s *PEMScanner) scanLine(data, line []byte, pos int, dst []PEMSpan) []PEMSp
 }
 
 // bodyLine は、ブロックの中の 1 行が本文の形かを返し、置換する範囲を dst に追記する(仕様 4.1)。
+// 行の一部(bodyView)を先に調べ、本文の形でなければ、行全体を調べる。
 func (s *PEMScanner) bodyLine(line []byte, pos int, dst []PEMSpan) ([]PEMSpan, bool) {
-	bs, be := trimBlank(line, 0, len(line))
+	if from, to, ok := s.bodyView(line); ok {
+		if d, body := s.bodyForm(line, from, to, pos, dst); body {
+			return d, true
+		}
+	}
+	return s.bodyForm(line, 0, len(line), pos, dst)
+}
+
+// bodyView は、行の中で本文が入るはずの範囲を返す。文字列で包まれた形では、開き引用符から文字の `\n` まで。
+// 行頭に日時などが付く形では、BEGIN の印の列から行末まで(列で語が切れる行は除く)。
+func (s *PEMScanner) bodyView(line []byte) (from, to int, ok bool) {
+	switch {
+	case s.escaped:
+		i := bytes.Index(line, []byte(`\n`))
+		if i < 0 {
+			return 0, 0, false
+		}
+		if bytes.HasSuffix(line[:i], []byte(`\r`)) {
+			i -= len(`\r`)
+		}
+		return bytes.LastIndexAny(line[:i], `"'`) + 1, i, true
+	case s.column > 0 && s.column <= len(line) && !isBase64Byte(line[s.column-1]):
+		return s.column, len(line), true
+	}
+	return 0, 0, false
+}
+
+// bodyForm は、line[from:to] が本文の形かを返し、置換する範囲を dst に追記する。
+func (s *PEMScanner) bodyForm(line []byte, from, to, pos int, dst []PEMSpan) ([]PEMSpan, bool) {
+	whole := from == 0 && to == len(line)
+	bs, be := trimBlank(line, from, to)
 	switch {
 	case bs == be:
 		return dst, true
 	case isBase64(line[bs:be]):
 		s.bodySeen = true
-		return append(dst, PEMSpan{Pos: pos, Start: bs, End: be, Body: true}), true
+		return append(dst, PEMSpan{Pos: pos, Start: bs, End: be, Body: whole}), true
 	case s.isReplacedSecret(line[bs:be]):
 		s.bodySeen = true
 		return dst, true // 通常の検出が、保護範囲として残す
 	case !s.bodySeen && isPEMHeader(line[bs:be]):
-		return append(dst, PEMSpan{Pos: pos, Start: bs, End: be, Body: true}), true
+		return append(dst, PEMSpan{Pos: pos, Start: bs, End: be, Body: whole}), true
 	}
 	t := be
 	for t > bs && isBase64Byte(line[t-1]) {
@@ -258,6 +296,17 @@ func isPEMHeader(b []byte) bool {
 		}
 	}
 	return true
+}
+
+// endsWithEscapedNewline は、BEGIN の印の後ろ rest が、文字の `\n`(`\r\n`)と閉じ引用符で始まるかを返す。
+// 本文は次の行の文字列に続く(Docker の json-file など)。
+func endsWithEscapedNewline(rest []byte) bool {
+	rest, ok := bytes.CutPrefix(bytes.TrimPrefix(rest, []byte(`\r`)), []byte(`\n`))
+	if !ok {
+		return false
+	}
+	rest = bytes.TrimPrefix(rest, []byte(`\`))
+	return len(rest) > 0 && (rest[0] == '"' || rest[0] == '\'')
 }
 
 // inlinePEMBody は、END のない BEGIN の印の後ろ rest が、本文で始まるかを返す。

@@ -63,6 +63,9 @@ var fuzzFragments = []string{
 	"-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\n\nQUJDREVG\n-----END RSA PRIVATE KEY-----", "-----BEGIN CERTIFICATE-----\nQUJDREVG\n-----END CERTIFICATE-----",
 	"{\"pem\":\"-----BEGIN RSA PRIVATE KEY-----\\nQUJD\\n-----END RSA PRIVATE KEY-----\\n\"}", "KEY=-----BEGIN RSA PRIVATE KEY----- QUJDREVGR0hJSktM -----END RSA PRIVATE KEY-----", "-----BEGIN RSA PRIVATE KEY-----<secret_1>-----END RSA PRIVATE KEY-----",
 	"-----BEGIN RSA PRIVATE KEY-----\nQUJDREVG\n", "expected -----BEGIN RSA PRIVATE KEY----- here",
+	"{\"log\":\"-----BEGIN RSA PRIVATE KEY-----\\n\"}\n{\"log\":\"QUJD\\n\"}\n{\"log\":\"-----END RSA PRIVATE KEY-----\\n\"}", "{\"log\":\"<secret_1>\\n\"}",
+	"t=1 -----BEGIN RSA PRIVATE KEY-----\nt=2 Proc-Type: 4,ENCRYPTED\nt=3 QUJD\nt=4 -----END RSA PRIVATE KEY-----", "t=2 <secret_1>",
+	`\\wsl$\Ubuntu\home\yamada\x`, `C:\Users/yamada/x`, `C:/Users\yamada\x`, "jar:file:/C:/Users/yamada/app.jar", `C:\/Users\/Taro Yamada\/x`,
 	// 崩れたラベル(v1.3)
 	"&lt;email_1&gt;", `\<email_1\>`, `\\10.0.0.5\share`, "&lt;taro@example.com&gt;",
 	// 文脈(値でないもの)

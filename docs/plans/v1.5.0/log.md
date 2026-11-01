@@ -206,3 +206,38 @@ Q100〜Q111 が確定した(2026-11-01)。すべて案どおり。Q102 に、バ
 | restore、`GOMAXPROCS=2` | 274.2 MB/s | 273.3 MB/s | -0.3% / +1.7% |
 
 修正による低下はなく、計画の 4.1 節の基準の範囲内。`-perf` の絶対値が低いのは、修正前のバイナリも同じ回に同じ程度まで下がっているので、測定の時点のマシンの状態による。README の性能の表は、段階 5 の値のまま変えない。
+
+## 2 回目の `/code-review` の修正
+
+指摘の全体は PR の説明に書く。Q113〜Q116 は 2026-11-01 に確定した。
+
+- `user_path`: `C:\/Users\/` が、先に macOS の形の分岐に入っていた。Windows の分岐を先にして、空白を含む名前と、対象外の名前の照合が働くようにした。既存のテストは空白のない名前だけだった
+- `user_path`(Q115): `file:/C:/Users/`、`/C:/Users/`、`C:\Users/`、`C:/Users\`、`\\wsl$\<配布>\home\`、`\\wsl.localhost\<配布>\home\` を形に足した。`%20`、`-I`・`-L` は LIMITATIONS.md に書いた
+- PEM(Q113): BEGIN の後ろが文字の `\n` と閉じ引用符のときは、ブロックに入る。ブロックの中は、開き引用符から `\n` までで本文の形を判定する。実装を `bodyForm`(範囲の判定)と `bodyView`(範囲の決定)に分けた。ソースコードの `"…\n" +` の形も、同じ規則で検出するようになった
+- PEM(Q114): BEGIN の印の手前に空白以外があるときは、印と同じ列から判定する。列の直前が base64 の文字の行は、語が切れるので、行全体の判定にする
+- Q116 は LIMITATIONS.md に書いた
+- `https://example.com/C:/Users/x` は、変更の前から macOS の形に当たって置換される。伏せる側の誤りなので変えていない
+- 既存のゴールデンは変えていない
+
+### 修正のあとの確認
+
+- `./scripts/go test ./...`、`./scripts/go vet ./...`、`GOOS=windows ./scripts/go vet ./...`: 通った
+- `CGO_ENABLED=1 ./scripts/go test -race -timeout 40m -skip '^TestEngineMatchesSequential$' ./internal/detect ./internal/transform ./internal/cli ./internal/stream`: 通った(`detect` 821 秒)。**`TestEngineMatchesSequential` は、段階 2 と同じ理由で `-race` では実行していない**。前の `/code-review` の修正(4f90d6f)のあとの `-race` の記録はなかったが、これで確かめた
+- 実バイナリで、指摘の入力が直ったこと、2 回目の mask で変わらないこと、Docker の形が `restore` で戻ることを確かめた
+
+`./scripts/go test ./internal/transform -run '^$' -fuzz … -fuzztime 90s`: 失敗なし。
+
+| 対象 | 実行回数 |
+|---|---|
+| `FuzzMaskStable` | 1,004,734 |
+| `FuzzHashStable` | 486,411 |
+| `FuzzRestoreRoundTrip` | 277,844 |
+
+`./scripts/go test -run Perf -v -timeout 40m ./cmd/logscrub -perf`(100MB、3 回の最速、2 コア): 3 つのテストが PASS。mask(ファイルから)は 341.2 MB/s、パイプからは 300.3 MB/s、`GOMAXPROCS=1` は 189.4 MB/s、hash は 370.7 MB/s、restore は 299.3 MB/s。
+
+修正の前(6b088d1)と後のバイナリを交互に 9 回ずつ。合成ログの生成器でなく、対象の値と `/` を含む同じ形の行を並べた 100MB のログで測った。計画の 4.1 節の基準の範囲内。
+
+| 測定 | 前(最速) | 後(最速) | 差(最速 / 中央値) |
+|---|---|---|---|
+| mask、`GOMAXPROCS=1` | 151.9 MB/s | 147.6 MB/s | -2.8% / -2.7% |
+| mask、`GOMAXPROCS=2` | 288.7 MB/s | 280.6 MB/s | -2.8% / -0.8% |

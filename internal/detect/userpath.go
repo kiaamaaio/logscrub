@@ -32,6 +32,10 @@ func (userPathFinder) find(line []byte, dst []Match) []Match {
 			if unixPathStart(line, p) {
 				dst = appendUserName(dst, line, i+len("home/"), false)
 			}
+		case hasPrefixFold(rest, `users\`):
+			if p >= 2 && isDrive(line, p-1) {
+				dst = appendUserName(dst, line, i+len(`users\`), true) // C:/Users\(区切りが混ざる形)
+			}
 		case hasPrefixFold(rest, "users/"):
 			switch {
 			case windowsSlashStart(line, p):
@@ -52,14 +56,20 @@ func (userPathFinder) find(line []byte, dst []Match) []Match {
 		switch {
 		case bytes.HasPrefix(rest, []byte(`/home\/`)) && pathBoundary(line, p):
 			dst = appendUserName(dst, line, i+len(`/home\/`), false) // \/home\/(JSON の `/` のエスケープ)
+		case hasPrefixFold(rest, `/users\/`) && p >= 2 && isDrive(line, p-1):
+			dst = appendUserName(dst, line, i+len(`/users\/`), true) // C:\/Users\/(`:` は形の前の条件を満たすので、macOS の形より先に見る)
 		case bytes.HasPrefix(rest, []byte(`/Users\/`)) && pathBoundary(line, p):
 			dst = appendUserName(dst, line, i+len(`/Users\/`), false)
-		case hasPrefixFold(rest, `/users\/`) && p >= 2 && isDrive(line, p-1):
-			dst = appendUserName(dst, line, i+len(`/users\/`), true) // C:\/Users\/
 		case hasPrefixFold(rest, `users\\`) && p >= 3 && line[p-1] == '\\' && isDrive(line, p-2):
 			dst = appendUserName(dst, line, i+len(`users\\`), true) // C:\\Users\\
 		case hasPrefixFold(rest, `users\`) && p >= 2 && isDrive(line, p-1):
 			dst = appendUserName(dst, line, i+len(`users\`), true)
+		case hasPrefixFold(rest, "users/") && p >= 2 && isDrive(line, p-1):
+			dst = appendUserName(dst, line, i+len("users/"), true) // C:\Users/(区切りが混ざる形)
+		default:
+			if s := wslHomeStart(line, p); s >= 0 {
+				dst = appendUserName(dst, line, s, false)
+			}
 		}
 	}
 }
@@ -96,13 +106,40 @@ func fileURLStart(line []byte, s int, prefix string) bool {
 	return bytes.HasSuffix(line[:s], []byte(prefix)) && pathBoundary(line, s-len(prefix))
 }
 
-// windowsSlashStart は、p の `/` の手前が、`C:`、`/c`、`/mnt/c`、`file:///C:` のどれかかを返す。
+// wslHomeStart は、p の `\` から `\\wsl$\<配布>\home\`、`\\wsl.localhost\<配布>\home\`(`\` を 2 重にしたものも含む)が
+// 始まるなら、ユーザー名の開始位置を返す。そうでなければ -1。
+func wslHomeStart(line []byte, p int) int {
+	if !pathBoundary(line, p) {
+		return -1
+	}
+	for _, sep := range []string{`\`, `\\`} {
+		for _, host := range []string{"wsl$", "wsl.localhost"} {
+			rest, ok := bytes.CutPrefix(line[p:], []byte(sep+sep+host+sep))
+			if !ok {
+				continue
+			}
+			n := 0
+			for n < len(rest) && isUserNameByte(rest[n]) {
+				n++
+			}
+			if home := sep + "home" + sep; n > 0 && bytes.HasPrefix(rest[n:], []byte(home)) {
+				return len(line) - len(rest) + n + len(home)
+			}
+		}
+	}
+	return -1
+}
+
+// windowsSlashStart は、p の `/` の手前が、`C:`、`/C:`、`/c`、`/mnt/c`、`file:///C:` のどれかかを返す。
 func windowsSlashStart(line []byte, p int) bool {
 	if p < 2 {
 		return false
 	}
 	if line[p-1] == ':' {
-		return isASCIILetter(line[p-2]) && (pathBoundary(line, p-2) || fileURLStart(line, p-2, "file:///"))
+		if !isASCIILetter(line[p-2]) {
+			return false
+		}
+		return pathBoundary(line, p-2) || fileURLStart(line, p-2, "file:///") || p >= 3 && line[p-3] == '/' && pathBoundary(line, p-3)
 	}
 	if line[p-2] != '/' || !isASCIILetter(line[p-1]) {
 		return false

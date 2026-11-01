@@ -69,6 +69,8 @@ secret:
 - PEM の 1 行の形(`\n` が文字の形、改行を空白にした形)の本文が 1 つの `<secret_N>` になる
 - END のない PEM のブロックは、本文の形でない行で終わり、その行は通常どおり処理され、stderr に行番号だけが通知される。`"-----BEGIN PRIVATE KEY-----"` だけの行の後ろのログが伏せられない
 - 日時の付いた PEM の本文を伏せた出力を再度流しても、END のない PEM の通知が出ない
+- 行頭の長さが同じ日時の付いた PEM で、暗号化された鍵のヘッダーと短い最後の行も `<secret_N>` になる
+- 1 行ごとに文字列で包まれた PEM(`{"log":"…\n",…}`)の本文が行ごとに `<secret_N>` になる
 - PEM の秘密鍵を含む入力が、mask → restore で 1 バイトも違わずに戻り、再度流しても変わらない(mask、hash の両方)
 
 user_path:
@@ -77,6 +79,7 @@ user_path:
 - `PWD=/home/user`、`/home/ubuntu/`、`/home/$USER/`、`/var/home/x`、`https://example.com/home/x` は置換されない
 - `/home/yamada` と `/Users/yamada` が同じラベルになる
 - JSON の文字列の中の `\n/home/yamada/x`、`\/home\/yamada\/x`、`C:\/Users\/yamada\/x` のユーザー名が `<user_path_N>` になる
+- `C:\/Users\/Taro Yamada\/x`、`file:/C:/Users/yamada/x`、`C:\Users/yamada/x`、`\\wsl$\Ubuntu\home\yamada\x` のユーザー名が `<user_path_N>` になる
 - `--deny yamada` では、`/home/yamada/` も `<custom_1>` になる
 
 UUID:
