@@ -38,7 +38,8 @@ type PEMScanner struct {
 
 	inBlock   bool
 	bodySeen  bool
-	line      int // これまでのブロックの行数
+	line      int // data[:counted] までの行数
+	counted   int // data の中の、行数を数え終えた位置
 	beginLine int // 開いているブロックの BEGIN の行番号
 
 	// Unclosed は、END のないブロックの数。UnclosedLines は、その BEGIN の行番号(最初の MaxUnclosedLines 件まで)。
@@ -57,6 +58,7 @@ func (d *Detector) NewPEMScanner(line int) *PEMScanner {
 
 // Scan は、完全な行だけを含むブロック data の中の範囲を、行の順に dst に追記して返す。
 func (s *PEMScanner) Scan(data []byte, dst []PEMSpan) []PEMSpan {
+	s.counted = 0
 	for pos := 0; pos < len(data); {
 		if !s.inBlock {
 			i := bytes.Index(data[pos:], []byte(pemKeyHint))
@@ -69,7 +71,7 @@ func (s *PEMScanner) Scan(data []byte, dst []PEMSpan) []PEMSpan {
 		dst = s.scanLine(data, content, pos, dst)
 		pos += len(content) + len(eol)
 	}
-	s.line += bytes.Count(data, []byte{'\n'})
+	s.countLines(data, len(data))
 	if len(data) > 0 && data[len(data)-1] != '\n' {
 		s.line++
 	}
@@ -81,6 +83,12 @@ func (s *PEMScanner) Finish() {
 	if s.inBlock {
 		s.closeUnfinished()
 	}
+}
+
+// countLines は、data[:pos] までの行数を s.line に足す。数え終えた位置から続けて数えるので、BEGIN の行が続いても線形の時間で終わる。
+func (s *PEMScanner) countLines(data []byte, pos int) {
+	s.line += bytes.Count(data[s.counted:pos], []byte{'\n'})
+	s.counted = pos
 }
 
 func (s *PEMScanner) closeUnfinished() {
@@ -98,16 +106,21 @@ func (s *PEMScanner) scanLine(data, line []byte, pos int, dst []PEMSpan) []PEMSp
 		if ms, me, ok := findPEMMarker(line, 0, "-----END "); ok {
 			s.inBlock = false
 			from = me
-			// 印に密着した本文だけを見る。`t=3 -----END …` の `t=3` は、本文ではない。
-			if bs, _ := trimBlank(line, 0, ms); bs < ms && isBase64(line[bs:ms]) {
-				dst = append(dst, PEMSpan{Pos: pos, Start: bs, End: ms})
+			// 印から離れた語は、本文の長さのときだけ本文とする。`t=3 -----END …` の `t=3` は、本文ではない。
+			if bs, be := trimBlank(line, 0, ms); bs < be && isBase64(line[bs:be]) && (be == ms || be-bs >= pemMinTail) {
+				dst = append(dst, PEMSpan{Pos: pos, Start: bs, End: be})
 			}
 		} else {
 			var body bool
 			if dst, body = s.bodyLine(line, pos, dst); body {
 				return dst
 			}
-			s.closeUnfinished()
+			// 行末が置換済みなら、伏せた出力を再度流している。鍵の残りを知らせる理由がない。
+			if bs, be := trimBlank(line, 0, len(line)); s.secretTail(line[bs:be]) >= 0 {
+				s.inBlock = false
+			} else {
+				s.closeUnfinished()
+			}
 		}
 	}
 	for {
@@ -125,7 +138,8 @@ func (s *PEMScanner) scanLine(data, line []byte, pos int, dst []PEMSpan) []PEMSp
 		rest := line[me:]
 		if len(bytes.TrimRight(rest, " \t")) == 0 {
 			s.inBlock, s.bodySeen = true, false
-			s.beginLine = s.line + bytes.Count(data[:pos], []byte{'\n'}) + 1
+			s.countLines(data, pos)
+			s.beginLine = s.line + 1
 			return dst
 		}
 		if inlinePEMBody(rest) {
@@ -165,16 +179,25 @@ func (s *PEMScanner) bodyLine(line []byte, pos int, dst []PEMSpan) ([]PEMSpan, b
 // isReplacedSecret は、b の全体が、`secret` の置換済みの形かを返す。ほかの種別に限らないと、1 回目にブロックを終えた行
 // (`<email_1>` になる行)が 2 回目にブロックを続け、後ろの行の結果が変わる。
 func (s *PEMScanner) isReplacedSecret(b []byte) bool {
-	found := false
+	return s.secretTail(b) == 0
+}
+
+// secretTail は、b の末尾にある `secret` の置換済みの形の開始位置を返す。なければ -1。
+func (s *PEMScanner) secretTail(b []byte) int {
+	at := -1
 	s.format.Scan(b, func(start, end int, typ string, _ int) {
-		found = found || start == 0 && end == len(b) && typ == "secret"
+		if end == len(b) && typ == "secret" {
+			at = start
+		}
 	})
-	if !found && bytes.HasPrefix(b, []byte("secret_")) {
+	if at < 0 {
 		label.ScanHashed(b, s.hashLen, func(start, end int) {
-			found = found || start == 0 && end == len(b)
+			if end == len(b) && bytes.HasPrefix(b[start:], []byte("secret_")) {
+				at = start
+			}
 		})
 	}
-	return found
+	return at
 }
 
 // findPEMMarker は、line[from:] の最初の印(prefix + 語 + `-----`)の範囲を返す。
@@ -239,7 +262,7 @@ func isPEMHeader(b []byte) bool {
 
 // inlinePEMBody は、END のない BEGIN の印の後ろ rest が、本文で始まるかを返す。
 func inlinePEMBody(rest []byte) bool {
-	if bytes.HasPrefix(rest, []byte(`\n`)) || isBase64Byte(rest[0]) {
+	if bytes.HasPrefix(rest, []byte(`\n`)) || bytes.HasPrefix(rest, []byte(`\r\n`)) || isBase64Byte(rest[0]) {
 		return true
 	}
 	i := 0

@@ -100,8 +100,9 @@ func (e *Engine) Run(inputs []io.Reader, w io.Writer) error {
 	if err == nil && pem != nil { // err が nil なら、読み取りは終わっている
 		e.Stats.Unclosed += pem.Unclosed
 		// Run は、入力ごとに続けて呼ばれることがある(`--out-dir`)。
-		room := detect.MaxUnclosedLines - len(e.Stats.UnclosedLines)
-		e.Stats.UnclosedLines = append(e.Stats.UnclosedLines, pem.UnclosedLines[:min(room, len(pem.UnclosedLines))]...)
+		for _, line := range pem.UnclosedLines {
+			e.Stats.UnclosedLines = appendLine(e.Stats.UnclosedLines, line)
+		}
 	}
 	return err
 }

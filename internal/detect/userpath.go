@@ -50,6 +50,12 @@ func (userPathFinder) find(line []byte, dst []Match) []Match {
 		i = p + 1
 		rest := line[i:]
 		switch {
+		case bytes.HasPrefix(rest, []byte(`/home\/`)) && pathBoundary(line, p):
+			dst = appendUserName(dst, line, i+len(`/home\/`), false) // \/home\/(JSON の `/` のエスケープ)
+		case bytes.HasPrefix(rest, []byte(`/Users\/`)) && pathBoundary(line, p):
+			dst = appendUserName(dst, line, i+len(`/Users\/`), false)
+		case hasPrefixFold(rest, `/users\/`) && p >= 2 && isDrive(line, p-1):
+			dst = appendUserName(dst, line, i+len(`/users\/`), true) // C:\/Users\/
 		case hasPrefixFold(rest, `users\\`) && p >= 3 && line[p-1] == '\\' && isDrive(line, p-2):
 			dst = appendUserName(dst, line, i+len(`users\\`), true) // C:\\Users\\
 		case hasPrefixFold(rest, `users\`) && p >= 2 && isDrive(line, p-1):
@@ -71,6 +77,12 @@ func pathBoundary(line []byte, s int) bool {
 		return true
 	}
 	c := line[s-1]
+	if s >= 2 && line[s-2] == '\\' && (c == 'n' || c == 't' || c == 'r') {
+		return true // 文字の `\n` など(JSON の文字列の中の改行)
+	}
+	if bytes.HasSuffix(line[:s], []byte(`?\`)) || bytes.HasSuffix(line[:s], []byte(`?\\`)) {
+		return true // `\\?\C:\Users\`
+	}
 	return !isASCIIAlnum(c) && c != '-' && c != '_' && c != '.' && c != '/' && c != '\\'
 }
 

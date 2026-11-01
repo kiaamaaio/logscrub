@@ -28,6 +28,16 @@ func TestUserPathForms(t *testing.T) {
 		{"file:///Users/yamada/a.txt", []string{"yamada"}},
 		{"file:///C:/Users/yamada/a.txt", []string{"yamada"}},
 		{`url="file:///home/yamada/a.txt"`, []string{"yamada"}},
+		// JSON の文字列の中の形
+		{`{"stderr":"Traceback\n/home/yamada/app.py:3: boom"}`, []string{"yamada"}},
+		{`{"msg":"x\t/Users/hanako/a.py"}`, []string{"hanako"}},
+		{`{"msg":"x\r\nC:\\Users\\yamada\\x"}`, []string{"yamada"}},
+		{`{"file":"\/home\/yamada\/app\/x.php"}`, []string{"yamada"}},
+		{`{"file":"\/Users\/hanako\/x.php"}`, []string{"hanako"}},
+		{`{"file":"C:\/Users\/yamada\/x.php"}`, []string{"yamada"}},
+		{`{"file":"\/var\/home\/yamada"}`, nil},
+		{`\\?\C:\Users\yamada\x`, []string{"yamada"}},
+		{`\\\\?\\C:\\Users\\yamada\\x`, []string{"yamada"}},
 		// 値の範囲
 		{"HOME=/home/yamada", []string{"yamada"}},
 		{"/home/yamada:/bin/bash", []string{"yamada"}},

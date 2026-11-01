@@ -93,8 +93,9 @@ AI がファイルを直接読む使い方では、`--out-dir` で伏せた写�
 
 ```console
 $ logscrub mask --out-dir masked logs/a/app.log logs/b/app.log
-$ ls masked/*
-masked/a/app.log  masked/b/app.log
+$ find masked -type f
+masked/a/app.log
+masked/b/app.log
 ```
 
 - 番号はファイルをまたいで通しです。同じ値は、どのファイルでも同じラベルになります。

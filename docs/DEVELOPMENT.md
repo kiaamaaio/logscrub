@@ -4,7 +4,7 @@
 版ごとの実装計画と進捗は [plans/](plans/) にある(この資料の内容は、v1.0.0 の実装計画から移した)。
 
 - 仕様: [SPEC.md](SPEC.md)(以下「仕様」。節番号は仕様のもの。SPEC.md は目次で、4〜6 章・9 章の本文は [spec/](spec/) にある)
-- 文中の Q 番号は、Q1〜Q31 が [plans/v1.0.0/README.md](plans/v1.0.0/README.md)、Q32〜Q46 が [plans/v1.1.0/README.md](plans/v1.1.0/README.md)、Q47〜Q70 が [plans/v1.2.0/README.md](plans/v1.2.0/README.md)、Q71〜Q84 が [plans/v1.3.0/README.md](plans/v1.3.0/README.md) の 5 章「未確定事項」の項目、Q94〜Q99 が [plans/v1.4.0/questions.md](plans/v1.4.0/questions.md)、Q100〜Q111 が [plans/v1.5.0/questions.md](plans/v1.5.0/questions.md) の項目(すべて確定済み)
+- 文中の Q 番号は、Q1〜Q31 が [plans/v1.0.0/README.md](plans/v1.0.0/README.md)、Q32〜Q46 が [plans/v1.1.0/README.md](plans/v1.1.0/README.md)、Q47〜Q70 が [plans/v1.2.0/README.md](plans/v1.2.0/README.md)、Q71〜Q84 が [plans/v1.3.0/README.md](plans/v1.3.0/README.md) の 5 章「未確定事項」の項目、Q94〜Q99 が [plans/v1.4.0/questions.md](plans/v1.4.0/questions.md)、Q100〜Q112 が [plans/v1.5.0/questions.md](plans/v1.5.0/questions.md) の項目(すべて確定済み)
 
 ---
 
@@ -261,7 +261,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 
 - 連番の順序 = 入力の順(ファイルの指定順 → 行の順 → 行内の開始位置の順)。重なりの解決は 3.1 節のとおり決定的
 - 「同じ値」の判定キー = (種別名, 値のバイト列)。正規化しない場合、ラベル → 値の対応が一意になり、往復で 1 バイトも変わらないことが保証される(→ **Q3**)
-- 検出は並列に行う(v1.4。Q95)。処理は「読み取り(1 つ)→ 検出(ワーカー、複数)→ 書き換えと書き込み(1 つ、入力の順)」の 3 段で、連番を振る `Rep.Append` と `Stats`、`Inspect` は最後の段だけで呼ぶ。検出は行ごとに独立でなければならない。行をまたぐ状態が要る検出(PEM の秘密鍵)は、ワーカーに持たせず、読み取りの段の `detect.PEMScanner` が範囲を求めてブロックに記録し、ワーカーは `Detector.FindSpans` で候補に加える(Q98、Q105)。印のないブロックは `bytes.Index` 1 回で終わる
+- 検出は並列に行う(v1.4。Q95)。処理は「読み取り(1 つ)→ 検出(ワーカー、複数)→ 書き換えと書き込み(1 つ、入力の順)」の 3 段で、連番を振る `Rep.Append` と `Stats`、`Inspect` は最後の段だけで呼ぶ。検出は行ごとに独立でなければならない。行をまたぐ状態が要る検出(PEM の秘密鍵)は、ワーカーに持たせず、読み取りの段の `detect.PEMScanner` が範囲を求めてブロックに記録し、ワーカーは `Detector.FindSpans` で候補に加える(Q98、Q105)。印のないブロックは `bytes.Index` と、行番号のための `bytes.Count` の 1 回ずつで終わる
 - 番号を消費しないもの: `--allow` の値、特殊アドレス、`--ip-scope` 外、保護範囲
 - Go の map の反復順に依存する処理を、出力・連番・stats のどこにも入れない(stats は `label.Types` の固定順で出す)
 - 前処理(3.4 節)は「その種別が一致しうる必要条件」だけにする。前処理あり/なしで結果が同じことをファズテストで確認する(前処理の誤りが、mask と restore で同じように効いて気づきにくいのを防ぐ)

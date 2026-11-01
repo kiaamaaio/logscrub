@@ -6,7 +6,7 @@ import (
 )
 
 // MaxKeptLines は、Stats.KeptLines に記録する行番号の最大数(仕様 6 章)。
-const MaxKeptLines = 5
+const MaxKeptLines = detect.MaxUnclosedLines
 
 // TypeCount は、種別名と、その件数。
 type TypeCount struct {
@@ -54,18 +54,22 @@ func (s *Stats) add(m detect.Match) {
 func (s *Stats) addKept(n, line int) {
 	s.Kept += n
 	s.KeptLineCount++
-	if len(s.KeptLines) < MaxKeptLines {
-		s.KeptLines = append(s.KeptLines, line)
+	s.KeptLines = appendLine(s.KeptLines, line)
+}
+
+// appendLine は、通知の行番号の並びに line を足す(最初の MaxKeptLines 件まで)。
+func appendLine(lines []int, line int) []int {
+	if len(lines) < MaxKeptLines {
+		lines = append(lines, line)
 	}
+	return lines
 }
 
 // addSuspects は、行番号 line の行の、怪しい語を n 件数える(1 行につき 1 回呼ぶ)。
 func (s *Stats) addSuspects(n, line int) {
 	s.Suspects += n
 	s.SuspectLineCount++
-	if len(s.SuspectLines) < MaxKeptLines {
-		s.SuspectLines = append(s.SuspectLines, line)
-	}
+	s.SuspectLines = appendLine(s.SuspectLines, line)
 }
 
 // Count は、種別名 typ(label.Types のいずれか)の、置換した出現回数を返す。

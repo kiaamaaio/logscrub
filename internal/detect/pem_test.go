@@ -51,6 +51,7 @@ func TestPEMScanner(t *testing.T) {
 		{"indented", "  " + b + "\n  AAAA  \n  " + e + "\n", []string{"AAAA"}, 0},
 		{"key on the END line", b + "\nAAAA\nBBBB" + e + "\n", []string{"AAAA", "BBBB"}, 0},
 		{"a time stamp on each line", "t=1 " + b + "\nt=2 " + tail + "\nt=3 " + e + "\n", []string{tail}, 0},
+		{"a body before a blank and END", b + "\n" + tail + " " + e + "\n", []string{tail}, 0},
 		{"no END: the log goes on", b + "\nAAAA\nerror: connection closed\nBBBB\n", []string{"AAAA"}, 1},
 		{"no END at the end of the input", b + "\nAAAA\n", []string{"AAAA"}, 1},
 		{"a header after the body ends the block", b + "\nAAAA\nINFO: done\nBBBB\n", []string{"AAAA"}, 1},
@@ -62,9 +63,12 @@ func TestPEMScanner(t *testing.T) {
 		{"one line with spaces", "KEY=" + b + " AAAA BBBB " + e + "\n", []string{" AAAA BBBB "}, 0},
 		{"two keys on one line", b + "AAAA" + e + " " + b + "BBBB" + e + "\n", []string{"AAAA", "BBBB"}, 0},
 		{"one line without END", `{"pem":"` + b + `\nAAAA...` + `"}` + "\n", []string{`\nAAAA...`}, 0},
+		{"one line without END, \\r\\n", `{"pem":"` + b + `\r\nAAAA\r\n` + "\n", []string{`\r\nAAAA\r\n`}, 0},
 		{"one line without END, escaped quote", `{\"pem\":\"` + b + `\nAAAA\"}` + "\n", []string{`\nAAAA`}, 0},
 		{"one line without END after a space", b + " " + strings.Repeat("A", 16) + " x\n", []string{" " + strings.Repeat("A", 16) + " x"}, 0},
 		{"replaced lines keep the block", b + "\n<secret_1>\nsecret_3f9a1c0b7d2e\nAAAA\n" + e + "\n", []string{"AAAA"}, 0},
+		{"a replaced line with a time stamp", "t=1 " + b + "\nt=2 <secret_1>\nt=3 " + e + "\n", nil, 0},
+		{"a hashed line with a time stamp", "t=1 " + b + "\nt=2 secret_3f9a1c0b7d2e\nt=3 " + e + "\n", nil, 0},
 		{"other labels end the block", b + "\n<email_1>\nAAAA\n", nil, 1},
 		{"an incomplete marker", "-----BEGIN RSA PRIVATE KEY\nAAAA\n", nil, 0},
 	}
@@ -92,6 +96,14 @@ func TestPEMScannerLineNumbers(t *testing.T) {
 	s.Scan([]byte(b), nil) // 17 行目
 	s.Finish()
 	if s.Unclosed != 2 || len(s.UnclosedLines) != 2 || s.UnclosedLines[0] != 14 || s.UnclosedLines[1] != 17 {
+		t.Errorf("%d %v", s.Unclosed, s.UnclosedLines)
+	}
+}
+
+// 同じブロックの中の BEGIN の行を、前の位置から続けて数える。
+func TestPEMScannerLineNumbersInOneBlock(t *testing.T) {
+	const b = "-----BEGIN PRIVATE KEY-----\nnot a body line\n"
+	if _, s := scanPEM(t, "a\n"+b+"c\n"+b); s.Unclosed != 2 || s.UnclosedLines[0] != 2 || s.UnclosedLines[1] != 5 {
 		t.Errorf("%d %v", s.Unclosed, s.UnclosedLines)
 	}
 }
