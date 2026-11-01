@@ -219,3 +219,13 @@ PR の説明の「`c64e9c7` の時点では PASS でした」は誤り。記録�
 
 - 2026-11-02 に、ユーザーの許可を得て 68f6e93 まで push し、PR の説明を更新した
 - 修正のあとの別のセッションのレビュー(5 回目)はまだ
+
+## 5 回目の `/code-review`
+
+別のセッションで `43be60f..974ef5c` を中心に high で行った。指摘の全体と扱いは PR の説明に書く。判断が必要なものは Q123 に書いた。修正はまだしていない。
+
+- 974ef5c のバイナリで、Q121 の形(素の形、行の継続、CRLF、`--mode hash`、`--mask-format '{type}_{n}'`)を確かめた。本文は伏せられ、2 回目で変わらず、`restore` で戻る
+- `\/\/wsl$\/…`、`\/\/wsl.localhost\/…`、`//?/UNC/wsl$/…` のユーザー名が残ることを確かめた。LIMITATIONS.md に書く指摘で、まだ書いていない
+- `./scripts/go test ./...`: すべて ok(キャッシュの結果)。`./scripts/go vet ./...`、`GOOS=windows GOARCH=amd64 ./scripts/go vet ./...`、`./scripts/go run cmd/gofmt -l cmd internal`、`./scripts/doc-size-check`: 通った
+- ファズテスト、`-perf`、`-race` は実行していない(`ea8351b` のあとに実装の変更はない)
+- Q の範囲の記述(SPEC.md 11 章、DEVELOPMENT.md、`docs/plans/README.md`、計画の README)は、Q123 の確定のときに直す
