@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# git がコミットの前に実行する hook(有効にする手順は docs/DEVELOPMENT.md 1 章)。
+# main へのコミットを止め、資料の長さ、gofmt、test、vet(Linux・Windows)を確かめる。
+# どれかが失敗したら終了コード 1 でコミットを止める。
+# 確かめるのは作業ツリーの内容で、ステージした内容だけではない。
+# 人の判断でコミットするときは git commit --no-verify で飛ばせる。
+set -uo pipefail
+
+repo="$(git rev-parse --show-toplevel)"
+cd "$repo" || exit 1
+
+if [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ]; then
+  printf 'コミットを中止しました: main には直接コミットしません(CLAUDE.md のブランチ運用)。\n' >&2
+  exit 1
+fi
+
+if ! out="$(scripts/doc-size-check 2>&1)"; then
+  printf 'コミットを中止しました: 資料の長さが上限を超えています。\n%s\n' "$out" >&2
+  exit 1
+fi
+
+# gofmt -l は、未整形のファイルがあっても終了コード 0 で終えるので、出力でも判定する
+if ! out="$(scripts/go run cmd/gofmt -l cmd internal 2>&1)" || [ -n "$out" ]; then
+  printf 'コミットを中止しました: gofmt が通りません。\n%s\n' "$out" >&2
+  exit 1
+fi
+
+if ! out="$(scripts/go test ./... 2>&1)"; then
+  printf 'コミットを中止しました: ./scripts/go test ./... が失敗しました。\n%s\n' "$out" >&2
+  exit 1
+fi
+
+if ! out="$(scripts/go vet ./... 2>&1)"; then
+  printf 'コミットを中止しました: ./scripts/go vet ./... が失敗しました。\n%s\n' "$out" >&2
+  exit 1
+fi
+
+if ! out="$(GOOS=windows GOARCH=amd64 scripts/go vet ./... 2>&1)"; then
+  printf 'コミットを中止しました: Windows 向けの vet が失敗しました。\n%s\n' "$out" >&2
+  exit 1
+fi
+
+exit 0

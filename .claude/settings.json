@@ -9,7 +9,7 @@
             "command": "bash \"$CLAUDE_PROJECT_DIR\"/scripts/claude-commit-check",
             "timeout": 600,
             "onFailure": "block",
-            "statusMessage": "コミット前の test と vet を実行中..."
+            "statusMessage": "コミット前の確認を実行中..."
           }
         ]
       }

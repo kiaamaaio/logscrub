@@ -214,7 +214,7 @@ CLAUDE.md の形式は `feature/<版>-<内容>` だが、この対応には版�
 |---|---|---|
 | 計画 | 完了 | 2026-11-01 作成。Q85〜Q90 は確定 |
 | 0. 未整形の修正 | 完了 | 2026-11-01。`gofmt` のみで、動作の変更はない |
-| 1. git の pre-commit hook | 未着手 | |
+| 1. git の pre-commit hook | 完了 | 2026-11-01。検査を `.githooks/pre-commit` へ移した |
 | 2. 権限の設定 | 未着手 | |
 | 3. 条件付きの確認 | 未着手 | |
 | 4. 依存の許可制 | 未着手 | |
@@ -222,4 +222,14 @@ CLAUDE.md の形式は `feature/<版>-<内容>` だが、この対応には版�
 
 ### 段階ごとの記録
 
-(まだない)
+#### 段階 1: git の pre-commit hook
+
+- `gofmt` は `./scripts/go run cmd/gofmt -l cmd internal` で実行する(`scripts/go` は変えない)。未整形でも終了コードは 0 なので、出力の有無でも判定する
+- `scripts/claude-commit-check` は、検査の代わりに `core.hooksPath` を確かめる。hook を有効にし忘れると、Claude のコミットが無検査になるため。無効のとき終了コード 2、有効のとき 0 を確認した
+- 実際に失敗させて確かめた(いずれもコミットされず、HEAD は変わらない)
+  - 書き方: `git -c user.name=x commit`、`git --no-pager commit`、`git -C "./" commit`
+  - 検査: `gofmt`、test、vet(unreachable code)、Windows 向けの vet(`//go:build windows` のファイル)、資料の長さ
+  - `main` へのコミット: 別のクローンで止まることを確認した
+  - `--no-verify`: 検査を飛ばしてコミットできることを確認した(確認のコミットは取り消した)
+- 所要時間: キャッシュありで 1.3 秒、テストのキャッシュなしで 16.6 秒。Bash の既定の時間制限(120 秒)に収まる
+- 確認の途中で、確認用のファイルが別の検査で止まっていたものを直した。`go test` は vet の一部(`printf` など)を実行するので、vet だけの確認には `unreachable` を使う
