@@ -3,7 +3,7 @@
 - 仕様: [SPEC.md](../../SPEC.md)(以下「仕様」。節番号は仕様のもの。v1.3 の内容は「v1.3 で追加」と書いた箇所と、決定事項 22〜26)
 - 開発環境・パッケージ構成・設計の注意点: [DEVELOPMENT.md](../../DEVELOPMENT.md)
 - 前提: v1.2.0 の構成(種別の表、`resolve` の重なりの解決、`Engine`、`hostRunCache`、`isHostEnd`)をそのまま使う。標準ライブラリのみ
-- ブランチ: `feature/v1.3.0-custom-values`(develop から作成)。段階ごとにコミットし、develop へのマージは指示があってから `--no-ff` で行う
+- ブランチ: `feature/v1.3.0-custom-values`(develop から作成)。段階ごとにコミットし、develop へは、指示があってから、`/code-review` のあとで AI が PR を作り、人がマージする(CLAUDE.md)
 - 各段階の完了条件: `./scripts/go test ./...` と `./scripts/go vet ./...` が通ること(CLAUDE.md)
 - **5 章の回答待ちの項目は、推測で実装しない。** 各段階の「前提となる確認」に挙げた項目が決まるまで、その段階には入らない
 

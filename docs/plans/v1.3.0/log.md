@@ -44,3 +44,11 @@
 - 試しのタグを `v9.9.9` にすると、版がタグにならなかった(v2 以上は、モジュールのパスに `/v9` が要るため)。スクリプトの確認で止まることも確かめた
 - darwin と arm64 は、ビルドと `SHA256SUMS` までの確認
 - `GOOS=windows` の `go vet` の失敗(2 節)は、配布する環境で検査の指摘が出続けないように直した。最大メモリの読み取りを `perf_rss_unix_test.go`・`perf_rss_other_test.go` に分け、測れない環境では、メモリのテストを skip する。あわせて、macOS の `Maxrss` の単位(バイト)も直した
+
+#### マージ前のレビューの修正
+
+- `--email-hash local`: `@` をまたいでドメインにかかる語(`--deny @acme.co.jp`)でも全体をハッシュするようにした。仕様 5.2 に追記した
+- restore: `ScanEscaped` を `Scan` と同じ位置へ進めて、崩れた形の内側の形も集めるようにした(`{n}_{type}` で往復が壊れていた。Q82)。レビューの案の「`Scan` で end まで進める」は、`<{type}_{n}` の `\<email_1` の内側の本物のラベルが戻らなくなり、`FuzzRestoreRoundTrip` のシードが失敗したので採らなかった。内側の形も数えるので、`--source` の通知の件数は、この形では多くなる
+- `mask --help` の既定で無効の種別に `host`・`custom` を加えた
+- 計画の入口のマージの記述を、CLAUDE.md の PR の運用に合わせた
+- `BenchmarkLiteralMatcher` の記録がないという指摘は誤りで、`docs/development/performance.md` にあった

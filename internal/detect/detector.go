@@ -256,13 +256,16 @@ func (d *Detector) Find(line []byte, dst []Match) ([]Match, int) {
 	return dst, kept
 }
 
-// domainHasValue は、メールアドレス email のドメインの部分に、利用者が指定した語・ドメインがあるかを返す(仕様 5.2)。
+// domainHasValue は、メールアドレス email のドメインの部分に、利用者が指定した語・ドメインがかかるかを返す(仕様 5.2)。
+// `@` をまたぐ語(`@acme.co.jp`)も見るため、全体を走査して、一致の終わりがドメインに入るかで判定する。
 func (d *Detector) domainHasValue(email []byte) bool {
-	domain := email[bytes.IndexByte(email, '@')+1:]
+	domain := bytes.IndexByte(email, '@') + 1
 	for _, f := range d.valueFinders {
-		d.raw = f.find(domain, d.raw[:0])
-		if len(d.raw) > 0 {
-			return true
+		d.raw = f.find(email, d.raw[:0])
+		for _, m := range d.raw {
+			if m.End > domain {
+				return true
+			}
 		}
 	}
 	return false

@@ -525,6 +525,19 @@ func TestRestoreRoundTripEscapeShapedSources(t *testing.T) {
 	}
 }
 
+// 崩れた形の内側に別の崩れた形があっても、内側だけを戻さない(連番が先に来る書式。Q82)。
+func TestRestoreRoundTripNestedEscapedForm(t *testing.T) {
+	f, err := label.ParseFormat("{n}_{type}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := detect.Options{Format: f}
+	src := "12\\_email a@b.co c@d.co\n"
+	if _, got, _ := roundTrip(t, opts, src); got != src {
+		t.Errorf("got %q", got)
+	}
+}
+
 // 元の入力にあった崩れた形は、置換済みの形の通知に含める。mask の Stats には影響しない。
 func TestRestoreReportsEscapedFormsInSource(t *testing.T) {
 	src := "x\n&lt;email_1&gt; taro@example.com\n"

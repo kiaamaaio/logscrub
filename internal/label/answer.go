@@ -155,6 +155,8 @@ func (a *AnswerScanner) Scan(line []byte, skip map[string]struct{}, fn func(star
 }
 
 // ScanEscaped は、line の中の崩れた形だけを報告する。崩れた形には、必ず `\` か `&` が含まれる。
+// 報告した形を skip にして Scan を呼ぶと、Scan はその形の次のバイトから読むので、ここでも同じ位置へ進む
+// (`12\_email` の内側の `2\_email`、`<{type}_{n}` の `\<email_1` の内側の `<email_1`)。
 func (a *AnswerScanner) ScanEscaped(line []byte, fn func(form []byte)) {
 	if !a.f.ok || bytes.IndexByte(line, '\\') < 0 && bytes.IndexByte(line, '&') < 0 {
 		return
@@ -171,6 +173,8 @@ func (a *AnswerScanner) ScanEscaped(line []byte, fn func(form []byte)) {
 		}
 		if escaped {
 			fn(line[i:end])
+			i++
+			continue
 		}
 		i = end
 	}
