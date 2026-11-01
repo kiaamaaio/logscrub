@@ -80,6 +80,9 @@ Options (they may be written before or after FILE):
   --stats                   print the number of replacements per type to stderr.
   --fail-on-detect          exit with status 2 when something was replaced.
   -o, --output FILE         write to FILE instead of stdout.
+  --out-dir DIR             write one masked file per FILE into DIR (numbering continues
+                            across files). Paths are kept relative to the common parent
+                            of the FILEs; existing files are never overwritten.
   -h, --help                show this help.
 
 Exit status: 0 success, 1 error, 2 something was replaced (--fail-on-detect).

@@ -19,6 +19,7 @@ func runMask(e *env, args []string) int {
 	var output string
 	fs.StringVar(&output, "output", "", "output file")
 	fs.StringVar(&output, "o", "", "output file (short)")
+	outDir := fs.String("out-dir", "", "directory for one masked file per input")
 
 	files, code, done := e.parseFlags("mask", usageMask, fs, args)
 	if done {
@@ -37,6 +38,14 @@ func runMask(e *env, args []string) int {
 			if set[name] {
 				return e.fail("--%s can be used only with --mode hash", name)
 			}
+		}
+	}
+	if set["out-dir"] {
+		if *outDir == "" {
+			return e.fail("--out-dir needs a directory")
+		}
+		if set["output"] || set["o"] {
+			return e.fail("--out-dir cannot be used with --output")
 		}
 	}
 	opts, format, err := df.options(set)
@@ -75,25 +84,32 @@ func runMask(e *env, args []string) int {
 		return e.fail("%v", err)
 	}
 
-	// 入力と出力を、すべて開く(開けないものがあれば、何も書かずにエラー)。
-	if len(files) == 0 {
-		files = []string{stdinPath}
-	}
-	in, err := e.openInputs(files)
-	if err != nil {
-		return e.fail("%v", err)
-	}
-	defer in.Close()
-	w, closeOut, err := e.openOutput(output, append(files, df.inputFiles()...))
-	if err != nil {
-		return e.fail("%v", err)
-	}
-
 	eng := &transform.Engine{Det: det, Rep: rep}
-	runErr := eng.Run(in.readers, w)
-	closeErr := closeOut()
-	if runErr == nil {
-		runErr = closeErr
+	var runErr error
+	if set["out-dir"] {
+		plan, err := planOutDir(*outDir, files)
+		if err != nil {
+			return e.fail("%v", err)
+		}
+		runErr = writeOutDir(eng, plan)
+	} else {
+		// 入力と出力を、すべて開く(開けないものがあれば、何も書かずにエラー)。
+		if len(files) == 0 {
+			files = []string{stdinPath}
+		}
+		in, err := e.openInputs(files)
+		if err != nil {
+			return e.fail("%v", err)
+		}
+		defer in.Close()
+		w, closeOut, err := e.openOutput(output, append(files, df.inputFiles()...))
+		if err != nil {
+			return e.fail("%v", err)
+		}
+		runErr = eng.Run(in.readers, w)
+		if closeErr := closeOut(); runErr == nil {
+			runErr = closeErr
+		}
 	}
 	if runErr != nil {
 		// Q28: エラー(1)は、終了コード 2 より優先する。

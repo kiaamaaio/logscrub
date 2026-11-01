@@ -75,6 +75,22 @@ $ pbpaste | logscrub restore --source <(grep ERROR app.log)
 
 AI の回答でラベルがエスケープされていても(`&lt;email_1&gt;`、`\<email_1\>`)、元の値に戻します。括りを外した `email_1` は戻しません。
 
+### AI エージェントにファイルを読ませる
+
+AI がファイルを直接読む使い方では、`--out-dir` で伏せた写しのディレクトリを作り、AI にはそちらを読ませます。
+
+```console
+$ logscrub mask --out-dir masked logs/a/app.log logs/b/app.log
+$ ls masked/*
+masked/a/app.log  masked/b/app.log
+```
+
+- 番号はファイルをまたいで通しです。同じ値は、どのファイルでも同じラベルになります。
+- `restore` には、`--source` を同じ順に指定します: `logscrub restore --source logs/a/app.log --source logs/b/app.log answer.txt`
+- 書き出し先は、入力の共通の親ディレクトリからの相対パスです。
+- 既存のファイルは上書きせず、エラーにします。入力を変えてやり直すときは、前の写しを消してください(番号の違うファイルが混ざらないように)。
+- 伏せた写しだけを読めるように、AI の作業ディレクトリや権限を分けてください。元のファイルが読める状態では、この使い方の意味がありません。
+
 ### hash: 鍵つきのハッシュに置き換える
 
 同じ値は、同じ鍵なら、常に同じ出力になります。別のマシンでも同じです。元には戻せません。
@@ -130,6 +146,7 @@ $ logscrub types --verbose                          # 対応する種別と、se
 | `--stats` | 置換した件数を、種別ごとに stderr に出す |
 | `--fail-on-detect` | 1 件でも置換したら、終了コード 2 で終える(出力は通常どおり) |
 | `-o`, `--output FILE` | 出力先のファイル(入力と同じファイルは指定できない) |
+| `--out-dir DIR` | 入力ごとに、伏せたファイルを DIR に書く。番号は通し([使い方](#ai-エージェントにファイルを読ませる)) |
 
 hash モード専用のオプション(`--hash-length`、`--email-hash`、`--key-file`)を、mask モードで指定するとエラーです。
 

@@ -208,7 +208,7 @@ CLI:
 
 - `logscrub mask --out-dir DIR logs/a/app.log logs/b/app.log` が `DIR/a/app.log`、`DIR/b/app.log` を書き、連結した内容が `logscrub mask logs/a/app.log logs/b/app.log` の出力と同じになる
 - 書き出したファイルのラベルが、`--source` を同じ順に指定した `restore` で戻る
-- 書き出し先に既存のファイルがあると、何も書かずにエラー終了する。`-`、ディレクトリ、書き出し先の重なり、`--output`・`--review` との同時指定も同じ
+- 書き出し先に既存のファイルがあると、何も書かずにエラー終了する。`-`、ディレクトリ、同じファイルの 2 回指定、`--output`・`--review` との同時指定も同じ
 - 処理の途中で失敗すると、今回書いたファイルが残らない
 
 `--review`:
