@@ -83,6 +83,17 @@ func readers(inputs [][]byte) []io.Reader {
 	return rs
 }
 
+// longLines は、長さの違う長い行と短い行が混ざった入力を返す。
+func longLines() []byte {
+	var b bytes.Buffer
+	for i, n := range []int{3 << 20, 2 << 20, 10, 5 << 20, 1 << 20, 20, 4 << 20, 4 << 20, 1<<20 + 1, 30} {
+		fmt.Fprintf(&b, "u%d@example.com ", i)
+		b.Write(bytes.Repeat([]byte("x"), n))
+		fmt.Fprintf(&b, " v%d@example.com\n", i)
+	}
+	return b.Bytes()
+}
+
 // 出力、集計、通知の行番号が、ワーカー数によらず、1 行ずつの処理と同じであること。
 func TestEngineMatchesSequential(t *testing.T) {
 	log, awsLog := synth(t, 6<<20, false), synth(t, 6<<20, true)
@@ -112,6 +123,8 @@ func TestEngineMatchesSequential(t *testing.T) {
 		}},
 		{"labels in the input", detect.Options{}, masker, [][]byte{bytes.Repeat([]byte("<email_1> email_3f9a1c0b7d2e x@example.com\n"), 20000)}},
 		{"empty", detect.Options{}, masker, nil},
+		// 長い行のバッファを、次のブロックに使い回す場合。
+		{"long lines", detect.Options{}, masker, [][]byte{longLines(), longLines()}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

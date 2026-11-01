@@ -217,7 +217,41 @@ func TestPerfThroughput(t *testing.T) {
 	}
 }
 
+// 値の種類数が一定なら、最大メモリ使用量は、入力の大きさに比例して増えない(受け入れ基準)。
+func TestPerfMemoryDoesNotGrowWithInputSize(t *testing.T) {
+	if !*perf {
+		t.Skip("run with -perf")
+	}
+	if !canMeasureRSS {
+		t.Skip("the maximum memory usage cannot be measured on this OS")
+	}
+	bin := buildBinary(t)
+	dir := t.TempDir()
+	const pool = 1000
+	sizes := []int{*perfSize / 5, *perfSize / 2, *perfSize}
+	var rss []float64
+	for _, mb := range sizes {
+		log := genLog(t, dir, fmt.Sprintf("pool-%d.log", mb), mb, pool)
+		m := runMask(t, bin, log, true)
+		t.Logf("%4d MB log, %d distinct values: max RSS %.1f MB (%.1f MB/s)", mb, pool, m.maxRSSM, float64(mb)/m.seconds)
+		rss = append(rss, m.maxRSSM)
+		os.Remove(log)
+	}
+	// 入力が 5 倍でも、最大メモリ使用量は、ほぼ同じ(実行環境の揺れの範囲)
+	if grown := rss[len(rss)-1] - rss[0]; grown > 16 {
+		t.Errorf("max RSS grew by %.1f MB (%.1f MB -> %.1f MB) when the input grew %dx", grown, rss[0], rss[len(rss)-1], sizes[len(sizes)-1]/sizes[0])
+	}
+
+	// 参考: 値が、行ごとにほぼ異なる場合は、対応表(値の種類数に比例)のぶん、増える。
+	log := genLog(t, dir, "unique.log", *perfSize, 0)
+	m := runMask(t, bin, log, true)
+	t.Logf("%4d MB log, nearly every value distinct: max RSS %.1f MB (the table grows with the number of distinct values)", *perfSize, m.maxRSSM)
+}
+
 // 長い行が続く入力でも、最大メモリ使用量は、処理中の行の数倍に収まる(仕様 7 章)。
+//
+// このテストは、ファイルの最後に置く。Linux の Maxrss は、子プロセスの起動のときの親の使用量が下限になるので、
+// 長い行を作ったあとに実行するテストの値が、大きく見えるため。
 func TestPerfMemoryWithLongLines(t *testing.T) {
 	if !*perf {
 		t.Skip("run with -perf")
@@ -248,35 +282,4 @@ func TestPerfMemoryWithLongLines(t *testing.T) {
 			t.Errorf("%s: max RSS %.1f MB is over %.0f MB", procs, m.maxRSSM, limit)
 		}
 	}
-}
-
-// 値の種類数が一定なら、最大メモリ使用量は、入力の大きさに比例して増えない(受け入れ基準)。
-func TestPerfMemoryDoesNotGrowWithInputSize(t *testing.T) {
-	if !*perf {
-		t.Skip("run with -perf")
-	}
-	if !canMeasureRSS {
-		t.Skip("the maximum memory usage cannot be measured on this OS")
-	}
-	bin := buildBinary(t)
-	dir := t.TempDir()
-	const pool = 1000
-	sizes := []int{*perfSize / 5, *perfSize / 2, *perfSize}
-	var rss []float64
-	for _, mb := range sizes {
-		log := genLog(t, dir, fmt.Sprintf("pool-%d.log", mb), mb, pool)
-		m := runMask(t, bin, log, true)
-		t.Logf("%4d MB log, %d distinct values: max RSS %.1f MB (%.1f MB/s)", mb, pool, m.maxRSSM, float64(mb)/m.seconds)
-		rss = append(rss, m.maxRSSM)
-		os.Remove(log)
-	}
-	// 入力が 5 倍でも、最大メモリ使用量は、ほぼ同じ(実行環境の揺れの範囲)
-	if grown := rss[len(rss)-1] - rss[0]; grown > 16 {
-		t.Errorf("max RSS grew by %.1f MB (%.1f MB -> %.1f MB) when the input grew %dx", grown, rss[0], rss[len(rss)-1], sizes[len(sizes)-1]/sizes[0])
-	}
-
-	// 参考: 値が、行ごとにほぼ異なる場合は、対応表(値の種類数に比例)のぶん、増える。
-	log := genLog(t, dir, "unique.log", *perfSize, 0)
-	m := runMask(t, bin, log, true)
-	t.Logf("%4d MB log, nearly every value distinct: max RSS %.1f MB (the table grows with the number of distinct values)", *perfSize, m.maxRSSM)
 }

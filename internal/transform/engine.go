@@ -15,7 +15,7 @@ const (
 	maxWorkers = 8
 	// blocksPerWorker は、処理中のブロックの数(ワーカーあたり)。使い回すので、メモリの上限になる。
 	blocksPerWorker = 3
-	// largeBlock は、長い行のブロックとして扱う大きさ。これより大きいバッファは、使い回さない。
+	// largeBlock は、長い行のブロックとして扱う大きさ。これより大きいバッファは、プールに残さない。
 	largeBlock = 1 << 20
 )
 
@@ -53,7 +53,7 @@ type block struct {
 	matches  []detect.Match
 	err      error         // 読み取りエラー。これを持つブロックは、データも検出の結果もない
 	detected chan struct{} // 検出が終わると通知する
-	released chan struct{} // 長い行のブロックだけ。書き換えが終わると閉じる
+	released chan []byte   // 長い行のブロックだけ。書き換えが終わると、data を読み取りに返す(容量は 1)
 }
 
 // Run は、inputs を順に読んで(行は入力ごとに区切る。Q22)、変換した結果を w に書く。
@@ -92,11 +92,12 @@ func (e *Engine) Run(inputs []io.Reader, w io.Writer) error {
 
 // readBlocks は、読み取りの段。入力を順にブロックに分けて、work と ordered に送る。
 //
-// 長い行のブロックは、書き換えが終わるまで次を読まない。ブロックの数だけでは、長い行が続く入力で、
-// メモリが行の長さの何倍にもなるため(メモリは、処理中の最長の行の程度に収める。仕様 7 章)。
+// 長い行のブロックは、書き換えが終わるまで次を読まず、そのバッファを次のブロックに使う。ブロックの数だけでは、
+// 長い行が続く入力で、メモリが行の長さの何倍にもなるため(メモリは、処理中の最長の行の程度に収める。仕様 7 章)。
 func readBlocks(inputs []io.Reader, free chan *block, work, ordered chan<- *block, done <-chan struct{}) {
 	defer close(work)
 	defer close(ordered)
+	var long []byte // 前の長い行のブロックのバッファ
 	for _, in := range inputs {
 		r := stream.NewBlockReader(in)
 		for {
@@ -105,6 +106,9 @@ func readBlocks(inputs []io.Reader, free chan *block, work, ordered chan<- *bloc
 			case b = <-free:
 			case <-done:
 				return
+			}
+			if long != nil {
+				b.data, long = long, nil
 			}
 			var err error
 			b.data, err = r.Next(b.data)
@@ -117,16 +121,16 @@ func readBlocks(inputs []io.Reader, free chan *block, work, ordered chan<- *bloc
 				ordered <- b
 				return
 			}
-			var released chan struct{}
+			var released chan []byte
 			if len(b.data) > largeBlock {
-				released = make(chan struct{})
+				released = make(chan []byte, 1)
 				b.released = released
 			}
 			ordered <- b
 			work <- b
 			if released != nil {
 				select {
-				case <-released:
+				case long = <-released:
 				case <-done:
 					return
 				}
@@ -177,10 +181,10 @@ func (e *Engine) writeBlocks(w io.Writer, ordered <-chan *block, free chan<- *bl
 			first = l.matchEnd
 		}
 		if b.released != nil {
-			close(b.released)
-			b.released = nil
+			b.released <- b.data
+			b.released, b.data = nil, nil
 		}
-		if cap(b.data) > largeBlock {
+		if cap(b.data) > largeBlock || cap(b.matches) > largeBlock {
 			b.data, b.lines, b.matches = nil, nil, nil
 		}
 		free <- b

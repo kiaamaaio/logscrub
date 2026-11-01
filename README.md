@@ -25,11 +25,11 @@ $ echo "taro@example.com 192.168.0.1 password=hunter2" | logscrub mask
 ファイル名は `logscrub-<版>-<OS>-<CPU>` で、OS は `linux`・`darwin`・`windows`、CPU は `amd64`・`arm64` です(Windows は末尾に `.exe`)。
 
 ```console
-$ curl -fLO https://github.com/kiaamaaio/logscrub/releases/download/v1.3.0/logscrub-v1.3.0-linux-amd64
-$ curl -fLO https://github.com/kiaamaaio/logscrub/releases/download/v1.3.0/SHA256SUMS
+$ curl -fLO https://github.com/kiaamaaio/logscrub/releases/download/v1.4.0/logscrub-v1.4.0-linux-amd64
+$ curl -fLO https://github.com/kiaamaaio/logscrub/releases/download/v1.4.0/SHA256SUMS
 $ sha256sum --check --ignore-missing SHA256SUMS
-$ chmod +x logscrub-v1.3.0-linux-amd64
-$ sudo mv logscrub-v1.3.0-linux-amd64 /usr/local/bin/logscrub
+$ chmod +x logscrub-v1.4.0-linux-amd64
+$ sudo mv logscrub-v1.4.0-linux-amd64 /usr/local/bin/logscrub
 $ logscrub --version
 ```
 
@@ -212,16 +212,22 @@ IP アドレスだけを隠しても、ホスト名から元の値が読めて�
 
 | 実行 | 速度 | 最大メモリ |
 |---|---|---|
-| `logscrub mask < big.log > /dev/null` | 約 222 MB/s | 30 MB |
-| `cat big.log \| logscrub mask > /dev/null` | 約 198 MB/s | 32 MB |
-| 同上(`--types default,uuid`) | 約 211 MB/s | 32 MB |
-| AWS の値(ホスト名、URL のパスワードを含む)を含む合成ログを `--types default,aws` で | 約 168 MB/s | 36 MB |
-| 同上(`aws_host` なし: `--types default,aws_account,aws_s3_bucket`) | 約 192 MB/s | 32 MB |
-| 語を 1000 個指定(`--deny-file`) | 約 155 MB/s | 30 MB |
-| `--domain` を指定 | 約 154 MB/s | 30 MB |
+| `logscrub mask < big.log > /dev/null` | 約 374 MB/s | 36 MB |
+| 同上(`GOMAXPROCS=1`) | 約 208 MB/s | 38 MB |
+| `cat big.log \| logscrub mask > /dev/null` | 約 332 MB/s | 40 MB |
+| `logscrub mask --types default,uuid < big.log` | 約 370 MB/s | 38 MB |
+| AWS の値(ホスト名、URL のパスワードを含む)を含む合成ログを `--types default,aws` で | 約 290 MB/s | 42 MB |
+| 同上(`aws_host` なし: `--types default,aws_account,aws_s3_bucket`) | 約 334 MB/s | 38 MB |
+| 語を 1000 個指定(`--deny-file`) | 語の綴りにより 約 270〜345 MB/s | 36 MB |
+| `--domain` を指定 | 約 333 MB/s | 36 MB |
+| `--mode hash` | 約 407 MB/s | 18 MB |
+| `logscrub restore --source big.log`(MB/s は元の入力の大きさ) | 約 326 MB/s | 46 MB |
 
 - **メモリ**: 対応表(検出した値の種類数に比例)が主です。値の種類数が一定(1,000 種類)なら、入力が
-  20MB でも 100MB でも、最大 15MB ほどで変わりません。ほぼすべての値が異なる 100MB のログでは、29.8MB でした。
+  20MB でも 100MB でも、最大 15〜17MB ほどです。ほぼすべての値が異なる 100MB のログでは、36.1MB でした。
+  ほかに、ワーカーごとの固定の作業領域と、処理中の最長の行の分を使います。
+- **並列処理**: 検出は、複数のワーカーで並列に行います。ワーカー数は `GOMAXPROCS`(既定は CPU の数)から決め、上限は 8 です。
+  連番を振る処理は 1 か所なので、ワーカー数によらず出力は同じです。上の値は 2 CPU での測定で、3 CPU 以上では測っていません。
 - **測定条件**: 合成ログ(1 行 200 バイト前後、約 30% の行に検出対象があり、1MB の JSON を 1 行で数行含む)、
   既定の種別、mask モード。AMD Ryzen 9 9950X、WSL2 上の Docker コンテナ(`golang:1.27.2`、2 CPU)内で測定し、
   3 回のうちの最速の値です。実際のログでは、検出対象の割合や行の長さで変わります。
