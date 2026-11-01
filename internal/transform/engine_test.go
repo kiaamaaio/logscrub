@@ -195,11 +195,15 @@ func TestEngineReadError(t *testing.T) {
 	second := strings.NewReader("b@example.com\n")
 	first := io.MultiReader(strings.NewReader("a@example.com\npartial@example.com"), iotest.ErrReader(boom))
 	e := &Engine{Det: newDet(t, detect.Options{}), Rep: NewMasker(label.DefaultFormat)}
-	if err := e.Run([]io.Reader{first, second}, io.Discard); err != boom {
+	var out bytes.Buffer
+	if err := e.Run([]io.Reader{first, second}, &out); err != boom {
 		t.Fatalf("got %v", err)
 	}
 	if e.Stats.Lines != 1 {
 		t.Errorf("lines = %d, want 1", e.Stats.Lines)
+	}
+	if got, want := out.String(), "<email_1>\n"; got != want {
+		t.Errorf("output = %q, want %q", got, want)
 	}
 	if second.Len() == 0 {
 		t.Error("the next input was read")

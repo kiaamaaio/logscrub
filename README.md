@@ -212,19 +212,19 @@ IP アドレスだけを隠しても、ホスト名から元の値が読めて�
 
 | 実行 | 速度 | 最大メモリ |
 |---|---|---|
-| `logscrub mask < big.log > /dev/null` | 約 374 MB/s | 36 MB |
-| 同上(`GOMAXPROCS=1`) | 約 208 MB/s | 38 MB |
-| `cat big.log \| logscrub mask > /dev/null` | 約 332 MB/s | 40 MB |
-| `logscrub mask --types default,uuid < big.log` | 約 370 MB/s | 38 MB |
-| AWS の値(ホスト名、URL のパスワードを含む)を含む合成ログを `--types default,aws` で | 約 290 MB/s | 42 MB |
-| 同上(`aws_host` なし: `--types default,aws_account,aws_s3_bucket`) | 約 334 MB/s | 38 MB |
-| 語を 1000 個指定(`--deny-file`) | 語の綴りにより 約 270〜345 MB/s | 36 MB |
-| `--domain` を指定 | 約 333 MB/s | 36 MB |
-| `--mode hash` | 約 407 MB/s | 18 MB |
-| `logscrub restore --source big.log`(MB/s は元の入力の大きさ) | 約 326 MB/s | 46 MB |
+| `logscrub mask < big.log > /dev/null` | 約 365 MB/s | 42 MB |
+| 同上(`GOMAXPROCS=1`) | 約 208 MB/s | 37 MB |
+| `cat big.log \| logscrub mask > /dev/null` | 約 328 MB/s | 38 MB |
+| `logscrub mask --types default,uuid < big.log` | 約 360 MB/s | 38 MB |
+| AWS の値(ホスト名、URL のパスワードを含む)を含む合成ログを `--types default,aws` で | 約 297 MB/s | 39 MB |
+| 同上(`aws_host` なし: `--types default,aws_account,aws_s3_bucket`) | 約 328 MB/s | 36 MB |
+| 語を 1000 個指定(`--deny-file`) | 語の綴りにより 約 269〜337 MB/s | 37 MB |
+| `--domain` を指定 | 約 334 MB/s | 40 MB |
+| `--mode hash` | 約 407 MB/s | 19 MB |
+| `logscrub restore --source big.log`(MB/s は元の入力の大きさ) | 約 320 MB/s | 41 MB |
 
 - **メモリ**: 対応表(検出した値の種類数に比例)が主です。値の種類数が一定(1,000 種類)なら、入力が
-  20MB でも 100MB でも、最大 15〜17MB ほどです。ほぼすべての値が異なる 100MB のログでは、36.1MB でした。
+  20MB でも 100MB でも、最大 17MB ほどです。ほぼすべての値が異なる 100MB のログでは、39.3MB でした。
   ほかに、ワーカーごとの固定の作業領域と、処理中の最長の行の分を使います。
 - **並列処理**: 検出は、複数のワーカーで並列に行います。ワーカー数は `GOMAXPROCS`(既定は CPU の数)から決め、上限は 8 です。
   連番を振る処理は 1 か所なので、ワーカー数によらず出力は同じです。上の値は 2 CPU での測定で、3 CPU 以上では測っていません。

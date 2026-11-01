@@ -196,3 +196,49 @@ v1.2.0、v1.3.0、今の版の比較。`-bench … -cpu 1,2 -benchtime 1s` を 3
 - `-perf` の 3 つのテストが PASS。README の性能の表は、この結果の値
 - 既存のゴールデンは変えていない
 - `-race` は、`internal/transform`・`internal/cli`・`internal/stream` を最後の製品のコードで通した。`internal/detect` は段階 5 で通し、そのあと変更していない
+
+### マージ前のレビューの修正
+
+`/code-review` の指摘を直した。いずれも検出の結果と連番を変えない。
+
+- 長い行のメモリ: 値が密な長い行で、最大メモリが develop の数倍になっていた(下の表)。`largeBlock` を 1MB から 512KB(行が `Read` をまたがないブロックの上限)にした。長い行のブロックは、バッファだけでなくブロックごと読み取りに返して次に使い、1 つの `Detector` で検出する(同時に 1 つなので、作業領域がワーカー数倍にならない)。プールに残す一致の領域の判定を、要素数の上限 `maxPooledMatches`(約 1MB)にした
+- ブロックの作り方: 最初に全部作らず、必要なときに作って使い回す(`takeBlock`)。`BlockReader` の `Read` は 4KB から始め、埋まるたびに倍にする(上限 256KB)
+- 改行の走査: `lineResult` に行の位置を持たせ、書き換えの段では `NextLine` を呼ばない
+- 読み取りエラー: エラーの前の完全な行を書き出してから、エラーを返す。変更前は最大 64KB を書かずに捨てていた。**出力が変わる**ので CHANGELOG に書いた。`TestEngineReadError` で出力も確かめる。ゴールデンは変えていない
+- `TestPerfMemoryWithLongLines` に、値が密な 10MB の行を加えた(上限 400MB)
+- 見送り: 処理中の合計バイト数で止める形は、読み取りと書き換えの間の仕組みが増えるので採らなかった。512KB 以下の行が続く入力では、ブロックの数だけバッファが残るが、上限は固定(ブロック 24 個 × 512KB)
+
+最大メモリの実測(`/usr/bin/time`、MB。修正前は `5222c57`):
+
+| 入力 | `GOMAXPROCS` | develop | 修正前 | 修正後 |
+|---|---|---|---|---|
+| IP が密な 5MB の行、40 行 | 2 | 145 | 348 | 148 |
+| 同上 | 8 | 147 | 1,050 | 152 |
+| IP が密な 1MB 弱の行、200 行 | 8 | 36 | 288 | 42 |
+| 検出対象のない 1MB 弱の行、200 行 | 8 | 11 | 159 | 11 |
+| IP が密な 400KB の行、500 行 | 2 / 8 | 未測定 | 未測定 | 43 / 163 |
+
+最後の行は、長い行の扱いにならない長さで、ワーカーごとの作業領域が残る。行が短いので上限は固定で、受け入れた。
+
+`./scripts/go test -run Perf -v ./cmd/logscrub -perf`(修正後、100MB、3 回の最速、2 コア)。3 つのテストが PASS。README と CHANGELOG の性能の値は、この結果に更新した(段階 7 の値は、出所を記録していなかった)。
+
+| 測定 | 速度 | 最大メモリ |
+|---|---|---|
+| mask、ファイルから / パイプから | 364.9 / 328.2 MB/s | 42 / 38 MB |
+| mask、`GOMAXPROCS=1` / `2` / `8` | 207.6 / 379.8 / 359.5 MB/s | 37 / 36 / 46 MB |
+| uuid あり | 359.9 MB/s | 38 MB |
+| AWS のログ、既定 / `default,aws` / `aws_host` なし | 393.2 / 297.2 / 327.6 MB/s | 36 / 39 / 36 MB |
+| 語 10 個 / 語 1000 個 / 綴りが多様な語 1000 個 | 345.3 / 337.0 / 268.6 MB/s | 36 / 36 / 37 MB |
+| `--domain` | 334.2 MB/s | 40 MB |
+| `--mode hash` | 407.2 MB/s | 19 MB |
+| restore | 319.6 MB/s | 41 MB |
+| 値の種類が 1000 個、20 / 50 / 100 MB | 341.5 / 339.2 / 361.1 MB/s | 17.0 / 17.0 / 17.4 MB |
+| ほぼすべての値が異なる 100MB | | 39.3 MB |
+| 10MB の行、検出対象なし(`GOMAXPROCS=1` / `2` / `8`) | 2,007.8 / 1,650.2 / 1,734.7 MB/s | 34.3 / 34.3 / 34.4 MB |
+| 10MB の行、値が密(`GOMAXPROCS=1` / `2` / `8`) | 23.0 / 22.6 / 22.7 MB/s | 278.3 / 288.7 / 282.0 MB |
+
+修正の後の確認:
+
+- ファズテスト(各 90 秒): `FuzzMaskStable` 約 110 万回、`FuzzHashStable` 約 51 万回、`FuzzRestoreRoundTrip` 約 19 万回。失敗なし。`FuzzRestoreRoundTrip` は段階 7 の約 6.7 万回から増えた
+- `-race`: `CGO_ENABLED=1 ./scripts/go test -race -timeout 40m ./...` は、`internal/transform` だけが `signal: killed` で終わった。ほかの 6 パッケージは `ok`(`internal/detect` は段階 5 の結果のキャッシュ)
+- `internal/transform` の `signal: killed` は、テストの失敗ではなく、この VM(メモリ 2GB)の OOM(`dmesg` で確認)。`TestEngineMatchesSequential` と `TestEngineDoesNotReadAheadOfLongLines` の `-race` の最大メモリは、修正前 1,257MB、修正後 1,344MB。同じテストバイナリを `GOGC=25` で全テスト実行して PASS(最大メモリ 1,018MB)。既定の `GOGC` のままの全テストは、修正後のコードでは通っていない

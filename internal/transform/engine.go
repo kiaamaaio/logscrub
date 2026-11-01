@@ -15,8 +15,11 @@ const (
 	maxWorkers = 8
 	// blocksPerWorker は、処理中のブロックの数(ワーカーあたり)。使い回すので、メモリの上限になる。
 	blocksPerWorker = 3
-	// largeBlock は、長い行のブロックとして扱う大きさ。これより大きいバッファは、プールに残さない。
-	largeBlock = 1 << 20
+	// largeBlock は、長い行のブロックとして扱う大きさ。行が Read をまたがないブロック(読みかけの部分と 1 回の Read)は、
+	// これを超えない。これより大きいバッファは、プールに残さない。
+	largeBlock = 512 * 1024
+	// maxPooledMatches は、プールに残す一致の領域の要素数の上限(1 件 32 バイトなので、約 1MB)。
+	maxPooledMatches = 1 << 15
 )
 
 // Engine は、入力を行の単位で読み、検出した範囲を Rep で置き換えて、w に書く。
@@ -42,8 +45,10 @@ type Engine struct {
 
 // lineResult は、ブロックの 1 行の検出の結果。
 type lineResult struct {
-	matchEnd int // block.matches の中の、この行の一致の終わり(始まりは前の行の matchEnd)
-	kept     int
+	matchEnd   int // block.matches の中の、この行の一致の終わり(始まりは前の行の matchEnd)
+	kept       int
+	contentEnd int // block.data の中の、行の中身の終わり(行の始まりは前の行の lineEnd)
+	lineEnd    int // block.data の中の、改行コードまで含めた行の終わり
 }
 
 // block は、3 段の間で受け渡す、完全な行の並びと、その検出の結果。
@@ -53,7 +58,7 @@ type block struct {
 	matches  []detect.Match
 	err      error         // 読み取りエラー。これを持つブロックは、データも検出の結果もない
 	detected chan struct{} // 検出が終わると通知する
-	released chan []byte   // 長い行のブロックだけ。書き換えが終わると、data を読み取りに返す(容量は 1)
+	released chan *block   // 長い行のブロックだけ。書き換えが終わると、このブロックを読み取りに返す(容量は 1)
 }
 
 // Run は、inputs を順に読んで(行は入力ごとに区切る。Q22)、変換した結果を w に書く。
@@ -66,22 +71,22 @@ func (e *Engine) Run(inputs []io.Reader, w io.Writer) error {
 		workers = min(runtime.GOMAXPROCS(0), maxWorkers)
 	}
 	n := workers * blocksPerWorker
+	// ブロックは、読み取りが必要なときに、n 個まで作る(takeBlock)。
 	free := make(chan *block, n)
-	for range n {
-		free <- &block{detected: make(chan struct{}, 1)}
-	}
 	// どちらも、ブロックの総数の容量があるので、送信で止まらない。
 	work := make(chan *block, n)
 	ordered := make(chan *block, n)
 	done := make(chan struct{})
 
 	go readBlocks(inputs, free, work, ordered, done)
+	// 長い行のブロックは同時に 1 つなので、長い行の作業領域を、ワーカーの数だけ持たないように 1 つの Detector で検出する。
+	long := e.Det.Clone()
 	var wg sync.WaitGroup
 	for range workers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			detectBlocks(e.Det.Clone(), work, done)
+			detectBlocks(e.Det.Clone(), long, work, done)
 		}()
 	}
 	err := e.writeBlocks(w, ordered, free)
@@ -92,23 +97,22 @@ func (e *Engine) Run(inputs []io.Reader, w io.Writer) error {
 
 // readBlocks は、読み取りの段。入力を順にブロックに分けて、work と ordered に送る。
 //
-// 長い行のブロックは、書き換えが終わるまで次を読まず、そのバッファを次のブロックに使う。ブロックの数だけでは、
+// 長い行のブロックは、書き換えが終わるまで次を読まず、そのブロックを次に使う。ブロックの数だけでは、
 // 長い行が続く入力で、メモリが行の長さの何倍にもなるため(メモリは、処理中の最長の行の程度に収める。仕様 7 章)。
 func readBlocks(inputs []io.Reader, free chan *block, work, ordered chan<- *block, done <-chan struct{}) {
 	defer close(work)
 	defer close(ordered)
-	var long []byte // 前の長い行のブロックのバッファ
+	var long *block // 前の長い行のブロック
+	created := 0
 	for _, in := range inputs {
 		r := stream.NewBlockReader(in)
 		for {
-			var b *block
-			select {
-			case b = <-free:
-			case <-done:
-				return
-			}
-			if long != nil {
-				b.data, long = long, nil
+			b := long
+			long = nil
+			if b == nil {
+				if b = takeBlock(free, &created, done); b == nil {
+					return
+				}
 			}
 			var err error
 			b.data, err = r.Next(b.data)
@@ -121,9 +125,9 @@ func readBlocks(inputs []io.Reader, free chan *block, work, ordered chan<- *bloc
 				ordered <- b
 				return
 			}
-			var released chan []byte
+			var released chan *block
 			if len(b.data) > largeBlock {
-				released = make(chan []byte, 1)
+				released = make(chan *block, 1)
 				b.released = released
 			}
 			ordered <- b
@@ -139,21 +143,47 @@ func readBlocks(inputs []io.Reader, free chan *block, work, ordered chan<- *bloc
 	}
 }
 
-// detectBlocks は、検出の段。d は、このワーカーだけが使う。
-func detectBlocks(d *detect.Detector, work <-chan *block, done <-chan struct{}) {
+// takeBlock は、使うブロックを返す。空きを優先し、なければ cap(free) 個まで作り、それ以上は空くのを待つ。
+// 処理が追いついている間は、少ないブロックを使い回す。done が閉じると nil を返す。
+func takeBlock(free chan *block, created *int, done <-chan struct{}) *block {
+	select {
+	case b := <-free:
+		return b
+	default:
+	}
+	if *created < cap(free) {
+		*created++
+		return &block{detected: make(chan struct{}, 1)}
+	}
+	select {
+	case b := <-free:
+		return b
+	case <-done:
+		return nil
+	}
+}
+
+// detectBlocks は、検出の段。d は、このワーカーだけが使う。long は、長い行のブロックだけに使う(ワーカーで共有するが、
+// 長い行のブロックは、書き換えが終わるまで次を読まないので、同時に使われない)。
+func detectBlocks(d, long *detect.Detector, work <-chan *block, done <-chan struct{}) {
 	for {
 		select {
 		case b, ok := <-work:
 			if !ok {
 				return
 			}
+			det := d
+			if b.released != nil {
+				det = long
+			}
 			b.lines, b.matches = b.lines[:0], b.matches[:0]
-			for rest := b.data; len(rest) > 0; {
-				var content []byte
+			for pos := 0; pos < len(b.data); {
 				var kept int
-				content, _, rest = stream.NextLine(rest)
-				b.matches, kept = d.Find(content, b.matches)
-				b.lines = append(b.lines, lineResult{len(b.matches), kept})
+				content, eol, _ := stream.NextLine(b.data[pos:])
+				b.matches, kept = det.Find(content, b.matches)
+				contentEnd := pos + len(content)
+				pos = contentEnd + len(eol)
+				b.lines = append(b.lines, lineResult{len(b.matches), kept, contentEnd, pos})
 			}
 			b.detected <- struct{}{}
 		case <-done:
@@ -163,28 +193,30 @@ func detectBlocks(d *detect.Detector, work <-chan *block, done <-chan struct{}) 
 }
 
 // writeBlocks は、書き換えの段。ブロックを入力の順に受け取り、1 行ずつ置き換えて書く。
+// 読み取りエラーでは、エラーの前の完全な行を書き出してから、読み取りエラーを返す。
 func (e *Engine) writeBlocks(w io.Writer, ordered <-chan *block, free chan<- *block) error {
 	bw := bufio.NewWriterSize(w, 64<<10)
 	var out []byte
 	for b := range ordered {
 		if b.err != nil {
+			bw.Flush()
 			return b.err
 		}
 		<-b.detected
-		rest, first := b.data, 0
+		start, first := 0, 0
 		for _, l := range b.lines {
-			var content, eol []byte
-			content, eol, rest = stream.NextLine(rest)
+			content, eol := b.data[start:l.contentEnd], b.data[l.contentEnd:l.lineEnd]
 			if err := e.writeLine(bw, &out, content, eol, b.matches[first:l.matchEnd], l.kept); err != nil {
 				return err
 			}
-			first = l.matchEnd
+			start, first = l.lineEnd, l.matchEnd
 		}
-		if b.released != nil {
-			b.released <- b.data
-			b.released, b.data = nil, nil
+		if released := b.released; released != nil {
+			b.released = nil
+			released <- b
+			continue
 		}
-		if cap(b.data) > largeBlock || cap(b.matches) > largeBlock {
+		if cap(b.data) > largeBlock || cap(b.matches) > maxPooledMatches {
 			b.data, b.lines, b.matches = nil, nil, nil
 		}
 		free <- b

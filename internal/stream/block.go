@@ -7,8 +7,10 @@ import (
 )
 
 const (
-	// blockSize は、1 回の Read で読む大きさ。ブロックの大きさの目安にもなる。
+	// blockSize は、1 回の Read で読む大きさの上限。ブロックの大きさの目安にもなる。
 	blockSize = 256 * 1024
+	// firstRead は、最初の Read の大きさ。Read が埋まるたびに倍にする(小さい入力で、blockSize の領域を確保しないため)。
+	firstRead = 4 * 1024
 	// maxEmptyReads は、データもエラーも返さない Read を続けて許す回数(bufio と同じ)。
 	maxEmptyReads = 100
 )
@@ -18,14 +20,14 @@ const (
 type BlockReader struct {
 	r    io.Reader
 	size int
-	// carry は、前の Read の、最後の改行より後ろ。必ず 1 回の Read の大きさ以下。
+	// carry は、前の Read の、最後の改行より後ろ。必ず blockSize 以下。
 	carry []byte
 	err   error
 }
 
 // NewBlockReader は r を読む BlockReader を返す。
 func NewBlockReader(r io.Reader) *BlockReader {
-	return &BlockReader{r: r, size: blockSize}
+	return &BlockReader{r: r, size: firstRead}
 }
 
 // Next は次のブロックを、buf の領域を使い回して返す(足りなければ大きくする)。
@@ -47,6 +49,9 @@ func (b *BlockReader) Next(buf []byte) ([]byte, error) {
 		start := len(buf)
 		n, err := b.r.Read(buf[start : start+b.size])
 		buf = buf[:start+n]
+		if n == b.size {
+			b.size = min(2*b.size, blockSize)
+		}
 		// ここまでの buf に改行はないので、新しい部分だけを探す(長い行で 2 乗の時間にしない)。
 		last := bytes.LastIndexByte(buf[start:], '\n')
 		switch {

@@ -261,25 +261,36 @@ func TestPerfMemoryWithLongLines(t *testing.T) {
 	}
 	bin := buildBinary(t)
 	const lineMB = 10
-	line := append([]byte(strings.Repeat("0123456789", lineMB<<20/10-1)), "012345678\n"...)
-	p := filepath.Join(t.TempDir(), "long-lines.log")
-	f, err := os.Create(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for range *perfSize / lineMB {
-		if _, err := f.Write(line); err != nil {
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		name  string
+		unit  string
+		limit float64 // MB
+	}{
+		{"no values", "0123456789", 8 * lineMB},
+		// 値が密な行は、一致と候補の領域が、行の長さの数十倍になる(ブロックとワーカーの数倍にはしない)。
+		{"dense values", "10.0.0.1 ", 40 * lineMB},
+	} {
+		line := append([]byte(strings.Repeat(tc.unit, lineMB<<20/len(tc.unit))), '\n')
+		p := filepath.Join(dir, "long-lines.log")
+		f, err := os.Create(p)
+		if err != nil {
 			t.Fatal(err)
 		}
-	}
-	if err := f.Close(); err != nil {
-		t.Fatal(err)
-	}
-	for _, procs := range []string{"GOMAXPROCS=1", "GOMAXPROCS=2", "GOMAXPROCS=8"} {
-		m := runBin(t, bin, p, false, []string{procs}, "mask")
-		t.Logf("%s, %d MB lines: max RSS %.1f MB (%.1f MB/s)", procs, lineMB, m.maxRSSM, float64(*perfSize)/m.seconds)
-		if limit := float64(8 * lineMB); m.maxRSSM > limit {
-			t.Errorf("%s: max RSS %.1f MB is over %.0f MB", procs, m.maxRSSM, limit)
+		for range *perfSize / lineMB {
+			if _, err := f.Write(line); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := f.Close(); err != nil {
+			t.Fatal(err)
+		}
+		for _, procs := range []string{"GOMAXPROCS=1", "GOMAXPROCS=2", "GOMAXPROCS=8"} {
+			m := runBin(t, bin, p, false, []string{procs}, "mask")
+			t.Logf("%s, %d MB lines, %s: max RSS %.1f MB (%.1f MB/s)", procs, lineMB, tc.name, m.maxRSSM, float64(*perfSize)/m.seconds)
+			if m.maxRSSM > tc.limit {
+				t.Errorf("%s, %s: max RSS %.1f MB is over %.0f MB", procs, tc.name, m.maxRSSM, tc.limit)
+			}
 		}
 	}
 }
