@@ -43,6 +43,11 @@ func (userPathFinder) find(line []byte, dst []Match) []Match {
 			case bytes.HasPrefix(rest, []byte("Users/")) && unixPathStart(line, p):
 				dst = appendUserName(dst, line, i+len("users/"), false)
 			}
+		case bytes.HasPrefix(rest, []byte("/wsl")):
+			// `https://wsl.localhost/…` は、ドメインのある URL なので対象にしない。
+			if s := wslHomeStart(line, p); s >= 0 && (p == 0 || line[p-1] != ':') {
+				dst = appendUserName(dst, line, s, false)
+			}
 		}
 	}
 	for i := 0; ; {
@@ -66,7 +71,7 @@ func (userPathFinder) find(line []byte, dst []Match) []Match {
 			dst = appendUserName(dst, line, i+len(`users\`), true)
 		case hasPrefixFold(rest, "users/") && p >= 2 && isDrive(line, p-1):
 			dst = appendUserName(dst, line, i+len("users/"), true) // C:\Users/(区切りが混ざる形)
-		default:
+		case bytes.HasPrefix(rest, []byte(`\`)):
 			if s := wslHomeStart(line, p); s >= 0 {
 				dst = appendUserName(dst, line, s, false)
 			}
@@ -106,25 +111,32 @@ func fileURLStart(line []byte, s int, prefix string) bool {
 	return bytes.HasSuffix(line[:s], []byte(prefix)) && pathBoundary(line, s-len(prefix))
 }
 
-// wslHomeStart は、p の `\` から `\\wsl$\<配布>\home\`、`\\wsl.localhost\<配布>\home\`(`\` を 2 重にしたものも含む)が
-// 始まるなら、ユーザー名の開始位置を返す。そうでなければ -1。
+// wslForms は、WSL の形の、配布の名前の手前と、後ろの `home`。
+var wslForms = []struct{ host, home string }{
+	{`\\wsl$\`, `\home\`},
+	{`\\wsl.localhost\`, `\home\`},
+	{`\\\\wsl$\\`, `\\home\\`},
+	{`\\\\wsl.localhost\\`, `\\home\\`},
+	{`//wsl$/`, `/home/`},
+	{`//wsl.localhost/`, `/home/`},
+}
+
+// wslHomeStart は、p の位置から wslForms のどれかの形が始まるなら、ユーザー名の開始位置を返す。そうでなければ -1。
 func wslHomeStart(line []byte, p int) int {
 	if !pathBoundary(line, p) {
 		return -1
 	}
-	for _, sep := range []string{`\`, `\\`} {
-		for _, host := range []string{"wsl$", "wsl.localhost"} {
-			rest, ok := bytes.CutPrefix(line[p:], []byte(sep+sep+host+sep))
-			if !ok {
-				continue
-			}
-			n := 0
-			for n < len(rest) && isUserNameByte(rest[n]) {
-				n++
-			}
-			if home := sep + "home" + sep; n > 0 && bytes.HasPrefix(rest[n:], []byte(home)) {
-				return len(line) - len(rest) + n + len(home)
-			}
+	for _, f := range wslForms {
+		rest, ok := bytes.CutPrefix(line[p:], []byte(f.host))
+		if !ok {
+			continue
+		}
+		n := 0
+		for n < len(rest) && isUserNameByte(rest[n]) {
+			n++
+		}
+		if n > 0 && bytes.HasPrefix(rest[n:], []byte(f.home)) {
+			return len(line) - len(rest) + n + len(f.home)
 		}
 	}
 	return -1

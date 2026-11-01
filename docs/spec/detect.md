@@ -223,12 +223,12 @@ EC2 のホスト名は、IP アドレスを `-` 区切りで含む。IP アド�
 
 | 形 | 例 | 大文字・小文字 |
 |---|---|---|
-| Linux | `/home/`、`file:///home/`、`\/home\/`(`/` をエスケープした JSON)、`\\wsl$\<配布>\home\`、`\\wsl.localhost\<配布>\home\`(`\` を 2 重にした形も含む) | 区別する |
+| Linux | `/home/`、`file:///home/`、`\/home\/`(`/` をエスケープした JSON)、`\\wsl$\<配布>\home\`、`\\wsl.localhost\<配布>\home\`(`\` を 2 重にした形も含む)、`//wsl$/<配布>/home/`、`//wsl.localhost/<配布>/home/` | 区別する |
 | macOS | `/Users/`、`file:///Users/`、`\/Users\/` | 区別する |
 | Windows | `<ドライブ>:\Users\`、`<ドライブ>:\\Users\\`(JSON、Python の repr)、`<ドライブ>:\/Users\/`、`<ドライブ>:/Users/`、`<ドライブ>:\Users/`、`<ドライブ>:/Users\`、`/mnt/<ドライブ>/Users/`(WSL)、`/<ドライブ>/Users/`(Git Bash)、`file:///<ドライブ>:/Users/`、`file:/<ドライブ>:/Users/`、`/<ドライブ>:/Users/` | 区別しない |
 
 - `<ドライブ>` は英字 1 文字。
-- 形の前の条件: 行頭か、英数字・`-`・`_`・`.`・`/`・`\` 以外の文字か、文字の `\n`・`\t`・`\r`(JSON の文字列の中の改行など)か、`\\?\`(エスケープした `\\\\?\\` も含む)の直後(`file:///` の形は `file:` の前で判定する)。`https://example.com/home/x`、`/var/home/x`、`/api/Users/x` は対象外。
+- 形の前の条件: 行頭か、英数字・`-`・`_`・`.`・`/`・`\` 以外の文字か、文字の `\n`・`\t`・`\r`(JSON の文字列の中の改行など)か、`\\?\`(エスケープした `\\\\?\\` も含む)の直後(`file:///` の形は `file:` の前で判定する)。`//wsl` の形は、前が `:` でないこと。`https://example.com/home/x`、`https://wsl.localhost/Ubuntu/home/x`、`/var/home/x`、`/api/Users/x` は対象外。
 - ユーザー名の範囲:
   - 英数字・`.`・`_`・`-`・`@`・`+` と非 ASCII のバイトの連なり。末尾の `.` は含めない(文末の `/home/yamada.`)
   - `$USER`、`*`、`<user>`、`%USERNAME%` は、文字の条件で対象にならない

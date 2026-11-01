@@ -21,3 +21,13 @@ KEY=-----BEGIN RSA PRIVATE KEY----- QUJDREVGR0hJSktMTU5PUFFSU1RVVldY -----END RS
 QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5YWJjZGVmZ2hpamts
 2026-11-01T12:00:02Z ERROR key is cut here, src=10.0.0.1
 2026-11-01T12:00:03Z INFO done
+{"log":"-----BEGIN RSA PRIVATE KEY-----\n","stream":"stderr","time":"2026-11-01T12:00:04Z"}
+{"log":"QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5YWJjZGVmZ2hpamts\n","stream":"stderr","time":"2026-11-01T12:00:04Z"}
+{"log":"ZmFrZQ==\n","stream":"stderr","time":"2026-11-01T12:00:04Z"}
+{"log":"-----END RSA PRIVATE KEY-----\n","stream":"stderr","time":"2026-11-01T12:00:04Z"}
+{"log":"2026-11-01 INFO -----BEGIN ENCRYPTED PRIVATE KEY-----\n","stream":"stderr"}
+{"log":"2026-11-01 INFO Proc-Type: 4,ENCRYPTED\n","stream":"stderr"}
+{"log":"2026-11-01 INFO \n","stream":"stderr"}
+{"log":"2026-11-01 INFO QUJDREVG\n","stream":"stderr"}
+{"log":"2026-11-01 WARN ZmFrZQ==\n","stream":"stderr"}
+{"log":"2026-11-01 INFO -----END ENCRYPTED PRIVATE KEY-----\n","stream":"stderr"}

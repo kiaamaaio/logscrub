@@ -100,6 +100,19 @@ func TestMaskGoldenPEM(t *testing.T) {
 	}
 }
 
+// ゴールデンの入力の PEM とパスの形は、2 回流しても変わらない。
+func TestGoldenInputsAreStable(t *testing.T) {
+	optsList, dets := fuzzOptions(t)
+	for _, name := range []string{"testdata/paths.log", "testdata/pem.log"} {
+		in, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkMaskStable(t, optsList, dets, string(in))
+		checkHashStable(t, optsList, dets, string(in))
+	}
+}
+
 // 書式が `{type}_{n}` でも、ホームディレクトリのパスのラベルは再度置換されず、戻る。
 func TestUserPathWithBareFormat(t *testing.T) {
 	f, err := label.ParseFormat("{type}_{n}")

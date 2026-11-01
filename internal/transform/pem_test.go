@@ -111,12 +111,25 @@ func TestPEMIsStable(t *testing.T) {
 	key := fakeKey(3, 2)
 	in := "taro@example.com\n" + pemBegin + "\nProc-Type: 4,ENCRYPTED\n\n" + strings.Join(key, "\n") + "\n" + pemEnd + "\n" +
 		"t=1 " + pemBegin + "\nt=2 " + key[0] + "\nt=3 " + pemEnd + "\n" +
-		`{"pem":"` + pemBegin + `\nAAAA\n` + pemEnd + `\n"}` + "\n"
+		`{"pem":"` + pemBegin + `\nAAAA\n` + pemEnd + `\n"}` + "\n" +
+		`{"log":"t=1 ` + pemBegin + `\n"}` + "\n" + `{"log":"t=2 Proc-Type: 4,ENCRYPTED\n"}` + "\n" + `{"log":"t=3 ` + key[1] + `\n"}` + "\n" + `{"log":"t=4 ` + pemEnd + `\n"}` + "\n"
 	optsList, dets := fuzzOptions(t)
 	checkMaskStable(t, optsList, dets, in)
 	checkHashStable(t, optsList, dets, in)
 	if _, restored, _ := roundTrip(t, detect.Options{}, in); restored != in {
 		t.Errorf("restored %q", restored)
+	}
+}
+
+// 文字列で包まれた形でブロックが閉じたとき、伏せた出力を再度流しても、END なしの通知は 1 回目より増えない(仕様 4.1)。
+func TestPEMReplacedTailInAString(t *testing.T) {
+	in := `{"log":"` + pemBegin + `\n"}` + "\n" + `{"log":"AAAA\n"}` + "\n" + `{"log":"password: abc\n","t":"1"}` + "\n"
+	masked, st := mask(t, detect.Options{}, in)
+	if st.Unclosed != 1 {
+		t.Errorf("first pass: %+v", st)
+	}
+	if twice, st := mask(t, detect.Options{}, masked); twice != masked || st.Unclosed != 0 {
+		t.Errorf("second pass %q: %+v", twice, st)
 	}
 }
 

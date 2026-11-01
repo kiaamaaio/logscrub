@@ -71,6 +71,8 @@ secret:
 - 日時の付いた PEM の本文を伏せた出力を再度流しても、END のない PEM の通知が出ない
 - 行頭の長さが同じ日時の付いた PEM で、暗号化された鍵のヘッダーと短い最後の行も `<secret_N>` になる
 - 1 行ごとに文字列で包まれた PEM(`{"log":"…\n",…}`)の本文が行ごとに `<secret_N>` になる
+- 文字列の中の行頭の長さが同じ PEM(`{"log":"2026-11-01 INFO …\n",…}`)で、暗号化された鍵のヘッダーと短い最後の行も `<secret_N>` になる
+- 文字列で包まれた PEM で、末尾が置換済みの行でブロックが終わる出力を再度流しても、END のない PEM の通知が出ない
 - PEM の秘密鍵を含む入力が、mask → restore で 1 バイトも違わずに戻り、再度流しても変わらない(mask、hash の両方)
 
 user_path:
@@ -79,7 +81,8 @@ user_path:
 - `PWD=/home/user`、`/home/ubuntu/`、`/home/$USER/`、`/var/home/x`、`https://example.com/home/x` は置換されない
 - `/home/yamada` と `/Users/yamada` が同じラベルになる
 - JSON の文字列の中の `\n/home/yamada/x`、`\/home\/yamada\/x`、`C:\/Users\/yamada\/x` のユーザー名が `<user_path_N>` になる
-- `C:\/Users\/Taro Yamada\/x`、`file:/C:/Users/yamada/x`、`C:\Users/yamada/x`、`\\wsl$\Ubuntu\home\yamada\x` のユーザー名が `<user_path_N>` になる
+- `C:\/Users\/Taro Yamada\/x`、`file:/C:/Users/yamada/x`、`C:\Users/yamada/x`、`\\wsl$\Ubuntu\home\yamada\x`、`//wsl$/Ubuntu/home/yamada/x` のユーザー名が `<user_path_N>` になる
+- `https://wsl.localhost/Ubuntu/home/yamada` は置換されない
 - `--deny yamada` では、`/home/yamada/` も `<custom_1>` になる
 
 UUID:

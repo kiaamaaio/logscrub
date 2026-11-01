@@ -41,7 +41,7 @@ type PEMScanner struct {
 	line      int  // data[:counted] までの行数
 	counted   int  // data の中の、行数を数え終えた位置
 	beginLine int  // 開いているブロックの BEGIN の行番号
-	column    int  // 開いているブロックの BEGIN の印の列。手前が空白だけなら 0(行頭に日時などが付くログ。仕様 4.1)
+	column    int  // 開いているブロックの BEGIN の印の列。文字列で包まれた形では開き引用符の次から数える。手前が空白だけなら 0(行頭に日時などが付くログ。仕様 4.1)
 	escaped   bool // 開いているブロックが、1 行ごとに文字列で包まれた形(`{"log":"…\n",…}`。仕様 4.1)
 
 	// Unclosed は、END のないブロックの数。UnclosedLines は、その BEGIN の行番号(最初の MaxUnclosedLines 件まで)。
@@ -117,8 +117,9 @@ func (s *PEMScanner) scanLine(data, line []byte, pos int, dst []PEMSpan) []PEMSp
 			if dst, body = s.bodyLine(line, pos, dst); body {
 				return dst
 			}
-			// 行末が置換済みなら、伏せた出力を再度流している。鍵の残りを知らせる理由がない。
-			if bs, be := trimBlank(line, 0, len(line)); s.secretTail(line[bs:be]) >= 0 {
+			// 本文の範囲の末尾が置換済みなら、伏せた出力を再度流している。鍵の残りを知らせる理由がない。
+			from, to := s.bodyRange(line)
+			if bs, be := trimBlank(line, from, to); s.secretTail(line[bs:be]) >= 0 {
 				s.inBlock = false
 			} else {
 				s.closeUnfinished()
@@ -141,9 +142,13 @@ func (s *PEMScanner) scanLine(data, line []byte, pos int, dst []PEMSpan) []PEMSp
 		escaped := endsWithEscapedNewline(rest)
 		if escaped || len(bytes.TrimRight(rest, " \t")) == 0 {
 			s.inBlock, s.bodySeen, s.escaped = true, false, escaped
+			base := 0
+			if escaped {
+				base = bytes.LastIndexAny(line[:ms], `"'`) + 1
+			}
 			s.column = 0
-			if bs, be := trimBlank(line, 0, ms); bs < be {
-				s.column = ms
+			if bs, be := trimBlank(line, base, ms); bs < be {
+				s.column = ms - base
 			}
 			s.countLines(data, pos)
 			s.beginLine = s.line + 1
@@ -157,9 +162,15 @@ func (s *PEMScanner) scanLine(data, line []byte, pos int, dst []PEMSpan) []PEMSp
 }
 
 // bodyLine は、ブロックの中の 1 行が本文の形かを返し、置換する範囲を dst に追記する(仕様 4.1)。
-// 行の一部(bodyView)を先に調べ、本文の形でなければ、行全体を調べる。
+// BEGIN の印の列(列で語が切れる行は除く)、本文の範囲(bodyRange)、行全体の順に、狭い範囲から調べる。
 func (s *PEMScanner) bodyLine(line []byte, pos int, dst []PEMSpan) ([]PEMSpan, bool) {
-	if from, to, ok := s.bodyView(line); ok {
+	from, to := s.bodyRange(line)
+	if c := from + s.column; s.column > 0 && c <= to && !isBase64Byte(line[c-1]) {
+		if d, body := s.bodyForm(line, c, to, pos, dst); body {
+			return d, true
+		}
+	}
+	if from > 0 || to < len(line) {
 		if d, body := s.bodyForm(line, from, to, pos, dst); body {
 			return d, true
 		}
@@ -167,23 +178,17 @@ func (s *PEMScanner) bodyLine(line []byte, pos int, dst []PEMSpan) ([]PEMSpan, b
 	return s.bodyForm(line, 0, len(line), pos, dst)
 }
 
-// bodyView は、行の中で本文が入るはずの範囲を返す。文字列で包まれた形では、開き引用符から文字の `\n` まで。
-// 行頭に日時などが付く形では、BEGIN の印の列から行末まで(列で語が切れる行は除く)。
-func (s *PEMScanner) bodyView(line []byte) (from, to int, ok bool) {
-	switch {
-	case s.escaped:
-		i := bytes.Index(line, []byte(`\n`))
-		if i < 0 {
-			return 0, 0, false
+// bodyRange は、行の中で本文が入る範囲を返す。文字列で包まれた形では、開き引用符から文字の `\n` まで。それ以外は行全体。
+func (s *PEMScanner) bodyRange(line []byte) (from, to int) {
+	if s.escaped {
+		if i := bytes.Index(line, []byte(`\n`)); i >= 0 {
+			if bytes.HasSuffix(line[:i], []byte(`\r`)) {
+				i -= len(`\r`)
+			}
+			return bytes.LastIndexAny(line[:i], `"'`) + 1, i
 		}
-		if bytes.HasSuffix(line[:i], []byte(`\r`)) {
-			i -= len(`\r`)
-		}
-		return bytes.LastIndexAny(line[:i], `"'`) + 1, i, true
-	case s.column > 0 && s.column <= len(line) && !isBase64Byte(line[s.column-1]):
-		return s.column, len(line), true
 	}
-	return 0, 0, false
+	return 0, len(line)
 }
 
 // bodyForm は、line[from:to] が本文の形かを返し、置換する範囲を dst に追記する。

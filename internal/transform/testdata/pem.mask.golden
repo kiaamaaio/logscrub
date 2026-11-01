@@ -21,3 +21,13 @@ KEY=-----BEGIN RSA PRIVATE KEY-----<secret_7>-----END RSA PRIVATE KEY-----
 <secret_1>
 2026-11-01T12:00:02Z ERROR key is cut here, src=<ipv4_private_1>
 2026-11-01T12:00:03Z INFO done
+{"log":"-----BEGIN RSA PRIVATE KEY-----\n","stream":"stderr","time":"2026-11-01T12:00:04Z"}
+{"log":"<secret_1>\n","stream":"stderr","time":"2026-11-01T12:00:04Z"}
+{"log":"<secret_3>\n","stream":"stderr","time":"2026-11-01T12:00:04Z"}
+{"log":"-----END RSA PRIVATE KEY-----\n","stream":"stderr","time":"2026-11-01T12:00:04Z"}
+{"log":"2026-11-01 INFO -----BEGIN ENCRYPTED PRIVATE KEY-----\n","stream":"stderr"}
+{"log":"2026-11-01 INFO <secret_4>\n","stream":"stderr"}
+{"log":"2026-11-01 INFO \n","stream":"stderr"}
+{"log":"2026-11-01 INFO <secret_9>\n","stream":"stderr"}
+{"log":"2026-11-01 WARN <secret_3>\n","stream":"stderr"}
+{"log":"2026-11-01 INFO -----END ENCRYPTED PRIVATE KEY-----\n","stream":"stderr"}

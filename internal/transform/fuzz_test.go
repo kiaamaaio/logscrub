@@ -65,7 +65,8 @@ var fuzzFragments = []string{
 	"-----BEGIN RSA PRIVATE KEY-----\nQUJDREVG\n", "expected -----BEGIN RSA PRIVATE KEY----- here",
 	"{\"log\":\"-----BEGIN RSA PRIVATE KEY-----\\n\"}\n{\"log\":\"QUJD\\n\"}\n{\"log\":\"-----END RSA PRIVATE KEY-----\\n\"}", "{\"log\":\"<secret_1>\\n\"}",
 	"t=1 -----BEGIN RSA PRIVATE KEY-----\nt=2 Proc-Type: 4,ENCRYPTED\nt=3 QUJD\nt=4 -----END RSA PRIVATE KEY-----", "t=2 <secret_1>",
-	`\\wsl$\Ubuntu\home\yamada\x`, `C:\Users/yamada/x`, `C:/Users\yamada\x`, "jar:file:/C:/Users/yamada/app.jar", `C:\/Users\/Taro Yamada\/x`,
+	"{\"log\":\"2026-11-01 INFO -----BEGIN RSA PRIVATE KEY-----\\n\"}\n{\"log\":\"2026-11-01 INFO Proc-Type: 4,ENCRYPTED\\n\"}\n{\"log\":\"2026-11-01 INFO QUJD\\n\"}\n{\"log\":\"2026-11-01 INFO -----END RSA PRIVATE KEY-----\\n\"}", "{\"log\":\"token=<secret_1>\\n\"}",
+	`\\wsl$\Ubuntu\home\yamada\x`, "//wsl$/Ubuntu/home/yamada/x", "//wsl.localhost/Ubuntu/home/yamada/x", `C:\Users/yamada/x`, `C:/Users\yamada\x`, "jar:file:/C:/Users/yamada/app.jar", `C:\/Users\/Taro Yamada\/x`,
 	// 崩れたラベル(v1.3)
 	"&lt;email_1&gt;", `\<email_1\>`, `\\10.0.0.5\share`, "&lt;taro@example.com&gt;",
 	// 文脈(値でないもの)

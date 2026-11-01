@@ -11,3 +11,6 @@ PWD=/home/user SHELL=/bin/bash /home/ubuntu/deploy /home/ec2-user/x /root/x C:\U
 /home/$USER/.ssh /home/*/x /var/home/x https://example.com/home/x
 token=/home/yamada/.token mail=/home/taro@example.com/x
 GET /home/dashboard HTTP/1.1 200
+java=file:/C:/Users/kato/app.jar slash=/C:/Users/kato/x mixed=C:\Users/kato/x other=C:/Users\kato\x
+wsl=\\wsl$\Ubuntu\home\ito\x json={"p":"\\\\wsl.localhost\\Ubuntu\\home\\ito\\x"} slashes=//wsl$/Ubuntu/home/ito/x //wsl.localhost/Ubuntu-22.04/home/ito
+https://wsl.localhost/Ubuntu/home/ito
