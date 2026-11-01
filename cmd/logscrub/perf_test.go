@@ -189,6 +189,7 @@ func TestPerfThroughput(t *testing.T) {
 		{"mask, stdin from a pipe", log, true, nil, []string{"mask"}},
 		{"mask, GOMAXPROCS=1", log, false, []string{"GOMAXPROCS=1"}, []string{"mask"}},
 		{"mask, GOMAXPROCS=2", log, false, []string{"GOMAXPROCS=2"}, []string{"mask"}},
+		{"mask, GOMAXPROCS=8", log, false, []string{"GOMAXPROCS=8"}, []string{"mask"}},
 		{"mask with uuid", log, false, nil, []string{"mask", "--types", "default,uuid"}},
 		{"aws log, default types", awsLog, false, nil, []string{"mask"}},
 		{"aws log, default,aws", awsLog, false, nil, []string{"mask", "--types", "default,aws"}},
@@ -212,6 +213,39 @@ func TestPerfThroughput(t *testing.T) {
 		t.Logf("%-28s %6.1f MB/s (%.2f s for %d MB, best of 3), max RSS %.0f MB", tc.name, mbps, best.seconds, *perfSize, best.maxRSSM)
 		if mbps < targetMBps {
 			t.Errorf("%s: %.1f MB/s is below the target of %.0f MB/s", tc.name, mbps, targetMBps)
+		}
+	}
+}
+
+// 長い行が続く入力でも、最大メモリ使用量は、処理中の行の数倍に収まる(仕様 7 章)。
+func TestPerfMemoryWithLongLines(t *testing.T) {
+	if !*perf {
+		t.Skip("run with -perf")
+	}
+	if !canMeasureRSS {
+		t.Skip("the maximum memory usage cannot be measured on this OS")
+	}
+	bin := buildBinary(t)
+	const lineMB = 10
+	line := append([]byte(strings.Repeat("0123456789", lineMB<<20/10-1)), "012345678\n"...)
+	p := filepath.Join(t.TempDir(), "long-lines.log")
+	f, err := os.Create(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range *perfSize / lineMB {
+		if _, err := f.Write(line); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, procs := range []string{"GOMAXPROCS=1", "GOMAXPROCS=2", "GOMAXPROCS=8"} {
+		m := runBin(t, bin, p, false, []string{procs}, "mask")
+		t.Logf("%s, %d MB lines: max RSS %.1f MB (%.1f MB/s)", procs, lineMB, m.maxRSSM, float64(*perfSize)/m.seconds)
+		if limit := float64(8 * lineMB); m.maxRSSM > limit {
+			t.Errorf("%s: max RSS %.1f MB is over %.0f MB", procs, m.maxRSSM, limit)
 		}
 	}
 }
