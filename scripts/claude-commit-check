@@ -1,23 +1,78 @@
 #!/usr/bin/env bash
 # Claude Code の PreToolUse hook(.claude/settings.json)から呼ばれる。
-# 検査そのものは git の pre-commit hook(.githooks/pre-commit)が行う。
-# ここでは、Claude が Bash で git commit を実行する前に、その hook が有効かを確かめ、
-# 有効でなければ終了コード 2 でコミットを止める(stderr は Claude に返る)。
+# 検査そのものは git の pre-commit hook(.githooks/pre-commit)が行う。ここでは、Claude が Bash で git commit を
+# 実行する前に、次のことを行う(stderr と確認の理由は Claude やユーザーに返る)。
+#   - pre-commit hook が有効でなければ、終了コード 2 でコミットを止める
+#   - 人が確かめるべき変更を含むなら、ユーザーに確認を求める(permissionDecision: ask)
 # 標準入力は hook の入力(JSON)。git commit を含まないコマンドは何もせず通す。
 set -uo pipefail
 
 input="$(cat)"
 
-# JSON を解析せず、コマンド文字列に「git commit」(git -C <dir> commit も含む)があるかだけを見る
-if ! grep -Eq '(^|[^[:alnum:]_-])git[[:space:]]+(-C[[:space:]]+[^[:space:]]+[[:space:]]+)?commit([[:space:]]|\\|"|$)' <<<"$input"; then
+# JSON を解析せず、コマンド文字列に「git [オプション] commit」の形があるかだけを見る。
+# 取りこぼしても、検査は pre-commit hook が行う
+opt_value='(\\"[^"]*\\"|'"'"'[^'"'"']*'"'"'|[^-[:space:]][^[:space:]]*)'
+if ! grep -Eq '(^|[^[:alnum:]_-])git([[:space:]]+-[^[:space:]]*([[:space:]]+'"$opt_value"')?)*[[:space:]]+commit([[:space:]]|\\|"|$)' <<<"$input"; then
   exit 0
 fi
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo" || exit 2
 
-if [ "$(git -C "$repo" config core.hooksPath)" != ".githooks" ]; then
+if [ "$(git config core.hooksPath)" != ".githooks" ]; then
   printf 'コミットを中止しました: git の pre-commit hook が有効ではありません。\n次を実行してください: git config core.hooksPath .githooks\n' >&2
   exit 2
+fi
+
+reasons=()
+
+branch="$(git rev-parse --abbrev-ref HEAD)"
+case "$branch" in
+  feature/*) ;;
+  *) reasons+=("ブランチ $branch へのコミット") ;;
+esac
+
+# 同じコマンドの git add は、この時点では実行されていないので、ステージしていない変更も含めて見る
+mapfile -t untracked < <(git ls-files --others --exclude-standard)
+mapfile -t changed < <(
+  {
+    git diff --name-only HEAD
+    printf '%s\n' "${untracked[@]}"
+  } | sort -u
+)
+
+for f in "${changed[@]}"; do
+  case "$f" in
+    internal/transform/testdata/*.golden) reasons+=("ゴールデンの変更: $f") ;;
+    go.mod | CLAUDE.md | docs/SPEC.md | docs/spec/* | .claude/* | .githooks/*) reasons+=("確認する資料・設定の変更: $f") ;;
+    scripts/claude-commit-check | scripts/doc-size-check | scripts/go | scripts/allowed-modules) reasons+=("検査に関わるスクリプトの変更: $f") ;;
+  esac
+done
+
+test_diff="$(git diff HEAD -- '*_test.go')"
+if grep -Eq '^\+.*\bt\.Skip' <<<"$test_diff"; then
+  reasons+=("テストの t.Skip の追加")
+fi
+if grep -Eq '^-[[:space:]]*func (Test|Fuzz)' <<<"$test_diff"; then
+  reasons+=("テストの関数の削除")
+fi
+if grep -Eq '^-.*\bf\.Add\(' <<<"$test_diff"; then
+  reasons+=("ファズテストのシードの削除")
+fi
+for f in "${untracked[@]}"; do
+  case "$f" in
+    *_test.go)
+      if grep -Eq '\bt\.Skip' "$f"; then
+        reasons+=("テストの t.Skip の追加: $f")
+      fi
+      ;;
+  esac
+done
+
+if [ "${#reasons[@]}" -gt 0 ]; then
+  # JSON の文字列を壊さないよう、ファイル名の中の " と \ を取り除く
+  reason="$(printf '%s、' "${reasons[@]}" | tr -d '"\\')"
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"%s"}}\n' "${reason%、}"
 fi
 
 exit 0

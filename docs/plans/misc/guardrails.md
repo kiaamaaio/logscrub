@@ -216,7 +216,7 @@ CLAUDE.md の形式は `feature/<版>-<内容>` だが、この対応には版�
 | 0. 未整形の修正 | 完了 | 2026-11-01。`gofmt` のみで、動作の変更はない |
 | 1. git の pre-commit hook | 完了 | 2026-11-01。検査を `.githooks/pre-commit` へ移した |
 | 2. 権限の設定 | 完了 | 2026-11-01。deny を 6 通り、ask を push で確認した |
-| 3. 条件付きの確認 | 未着手 | |
+| 3. 条件付きの確認 | 完了 | 2026-11-01。`scripts/claude-commit-check` が `"ask"` を返す |
 | 4. 依存の許可制 | 未着手 | |
 | 5. 資料の形式と運用 | 未着手 | |
 
@@ -244,3 +244,12 @@ CLAUDE.md の形式は `feature/<版>-<内容>` だが、この対応には版�
 - `Write(path)` のルールは一致しないので、パスのルールは `Edit(path)` で書く
 - `bypassPermissions` での hook の `"ask"` の動きは未確認のまま。使わないので、確かめない
 - deny の `*--no-verify*` はコマンド全体を照合するので、コミットメッセージにこの語を含むコミットも止まる
+
+#### 段階 3: 条件付きの確認
+
+- 使い捨てのクローンで確かめた
+  - コマンドの判定: 6 通りの `git commit` の書き方(`-C "a b"`、`-c`、`--no-pager` を含む)を検出し、`git status`、`git log`、`echo git`、`git commit-graph` は通した
+  - 確認が出ない: `docs/plans/`、`scripts/build-release` の変更
+  - 確認が出る: ゴールデン、`CLAUDE.md`、仕様、検査に関わるスクリプト、新しい `.claude/` のファイル、`t.Skip` の追加(既存と新規のテスト)、`func Test` の削除、`f.Add` の削除、`feature/` 以外のブランチ
+  - ファイル名に `"` があっても、出力は JSON として読める
+- 判定の取りこぼしは、確認が飛ばされるだけで、検査は pre-commit hook が行う
