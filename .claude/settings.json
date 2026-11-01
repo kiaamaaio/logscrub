@@ -1,4 +1,40 @@
 {
+  "permissions": {
+    "ask": [
+      "Bash(git push *)",
+      "Bash(git * push *)",
+      "Bash(git merge *)",
+      "Bash(git * merge *)",
+      "Bash(./scripts/go get *)",
+      "Bash(scripts/go get *)",
+      "Edit(/.claude/**)",
+      "Edit(/.githooks/**)",
+      "Edit(/scripts/claude-commit-check)",
+      "Edit(/scripts/doc-size-check)",
+      "Edit(/scripts/go)",
+      "Edit(/scripts/allowed-modules)",
+      "Edit(/CLAUDE.md)",
+      "Edit(/go.mod)"
+    ],
+    "deny": [
+      "Bash(git push *--force*)",
+      "Bash(git * push *--force*)",
+      "Bash(git push -f*)",
+      "Bash(git push * -f*)",
+      "Bash(git * push -f*)",
+      "Bash(git * push * -f*)",
+      "Bash(git commit *--no-verify*)",
+      "Bash(git * commit *--no-verify*)",
+      "Bash(git commit -n*)",
+      "Bash(git commit * -n *)",
+      "Bash(git * commit -n*)",
+      "Bash(go *)",
+      "Bash(/usr/bin/go *)",
+      "Edit(/docs/plans/v1.0.0.md)",
+      "Edit(/docs/plans/v1.1.0.md)",
+      "Edit(/docs/plans/v1.2.0.md)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {

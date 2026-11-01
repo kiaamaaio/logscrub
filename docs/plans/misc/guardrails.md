@@ -215,7 +215,7 @@ CLAUDE.md の形式は `feature/<版>-<内容>` だが、この対応には版�
 | 計画 | 完了 | 2026-11-01 作成。Q85〜Q90 は確定 |
 | 0. 未整形の修正 | 完了 | 2026-11-01。`gofmt` のみで、動作の変更はない |
 | 1. git の pre-commit hook | 完了 | 2026-11-01。検査を `.githooks/pre-commit` へ移した |
-| 2. 権限の設定 | 未着手 | |
+| 2. 権限の設定 | 完了 | 2026-11-01。deny を 6 通り、ask を push で確認した |
 | 3. 条件付きの確認 | 未着手 | |
 | 4. 依存の許可制 | 未着手 | |
 | 5. 資料の形式と運用 | 未着手 | |
@@ -233,3 +233,14 @@ CLAUDE.md の形式は `feature/<版>-<内容>` だが、この対応には版�
   - `--no-verify`: 検査を飛ばしてコミットできることを確認した(確認のコミットは取り消した)
 - 所要時間: キャッシュありで 1.3 秒、テストのキャッシュなしで 16.6 秒。Bash の既定の時間制限(120 秒)に収まる
 - 確認の途中で、確認用のファイルが別の検査で止まっていたものを直した。`go test` は vet の一部(`printf` など)を実行するので、vet だけの確認には `unreachable` を使う
+
+#### 段階 2: 権限の設定
+
+- `.claude/settings.json` の変更は、実行中のセッションにすぐ反映された
+- auto モードのセッションで確かめた。公式資料では、ask ルールは auto モードでも確認の画面を強制し、deny ルールはすべてのモードで止める
+- deny: `go version`、`git -C . commit -n`、`git commit --no-verify`、`git push --force`、`git -C . push --force`、完了した版の計画への `>>` が止まることを確認した
+- ask: `git -c push.default=current push --dry-run` で確認の画面が出ることを、セッションの記録(`ruleSource: projectSettings`)で確認した。ユーザーが承認したが、SSH の認証の失敗で送信はされていない
+- ask の `Edit` ルールは、リダイレクト(`>> go.mod`)を覆わない。公式資料では、リダイレクトの検査の対象は `Edit` の allow と deny だけ。`go.mod` は段階 4 の pre-commit で守る
+- `Write(path)` のルールは一致しないので、パスのルールは `Edit(path)` で書く
+- `bypassPermissions` での hook の `"ask"` の動きは未確認のまま。使わないので、確かめない
+- deny の `*--no-verify*` はコマンド全体を照合するので、コミットメッセージにこの語を含むコミットも止まる
