@@ -30,7 +30,7 @@
 - 前提: ホストのユーザーが Docker を使えること
   - ホストの Docker は snap 版(29.8.0、サービス名は `snap.docker.dockerd.service`、再起動は `sudo snap restart docker`)。snap 版はホームディレクトリ配下しかマウントできない
   - 2026-10-11 に `docker` グループを作成し、ソケットが `root:docker` になったことを確認した。上の表の `-u`、`--network none`、`GOTOOLCHAIN=local`、リポジトリと `.` で始まるディレクトリのマウントが動くことも確認済み。`.cache/` への書き込みも、段階 1 で動くことを確認した(ビルドキャッシュが作られ、所有者はホストのユーザー)
-- コミットの前の検査: git の pre-commit hook(`.githooks/pre-commit`)が、`main` へのコミットを止め、資料の長さ、`gofmt`、test、vet(Linux・Windows)を確かめる。失敗の出力は、コミットの結果として表示される
+- コミットの前の検査: git の pre-commit hook(`.githooks/pre-commit`)が、`main` へのコミットを止め、資料の長さ、`go.mod` の依存(`scripts/allowed-modules` にないものを止める)、`gofmt`、test、vet(Linux・Windows)を確かめる。失敗の出力は、コミットの結果として表示される
   - クローンごとに、最初に 1 回だけ `git config core.hooksPath .githooks` を実行して有効にする
   - git が実行するので、Claude のコミットにも人のコミットにも、コマンドの書き方によらず動く。人の判断でコミットするときは `git commit --no-verify` で飛ばせる
   - 確認するのは作業ツリーの状態で、ステージした内容だけではない
