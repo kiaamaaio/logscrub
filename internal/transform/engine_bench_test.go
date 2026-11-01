@@ -2,6 +2,7 @@ package transform
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -77,6 +78,32 @@ func BenchmarkEngineHash(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		eng := &Engine{Det: det, Rep: h}
+		if err := eng.Run([]io.Reader{bytes.NewReader(data)}, io.Discard); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkEngineMaskDeny は、同じ合成ログを、語 1000 個と `--domain` を指定して変換する時間を測る。
+func BenchmarkEngineMaskDeny(b *testing.B) {
+	var sb strings.Builder
+	if _, err := synthlog.Generate(&sb, synthlog.Config{Size: 8 << 20, Seed: 1, LongLineEvery: 4 << 20}); err != nil {
+		b.Fatal(err)
+	}
+	data := []byte(sb.String())
+	words := make([]string, 1000)
+	for i := range words {
+		words[i] = fmt.Sprintf("project-%d-name", i)
+	}
+	det, err := detect.New(detect.Options{Deny: words, Domains: []string{"example.com"}})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.SetBytes(int64(len(data)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		eng := &Engine{Det: det, Rep: NewMasker(label.DefaultFormat)}
 		if err := eng.Run([]io.Reader{bytes.NewReader(data)}, io.Discard); err != nil {
 			b.Fatal(err)
 		}

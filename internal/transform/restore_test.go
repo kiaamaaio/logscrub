@@ -415,6 +415,10 @@ func FuzzRestoreRoundTrip(f *testing.F) {
 		"\xff\xfe a@b.co\r\n", "0@0.AA@0.AA\n", "ssh user@example.com@bastion.example.org\n", "a@b.co a@b.co c@d.co",
 		"postgres://app:s3cret@db.example.com:5432/app redis://:s3cret@10.0.0.5:6379 ftp://u:a:b@host\n",
 		"https://taro@example.com/ http://u:p@h@x.com password=s3cret\n",
+		// v1.3: 語・ドメインと、崩れた形に似た入力
+		"Acme acme_prod ACME taro@acme.co.jp db.corp.example.jp\n", "postgres://app:s3cret@DB.Corp.Example.JP/\n",
+		"taro@example.com &lt;email_1&gt;\n", "taro@example.com \\<email_1\\>\n", "\\\\10.0.0.5\\share \\taro@example.com\\>\n",
+		"taro@example.com email\\_1\n",
 	} {
 		f.Add(s)
 	}
@@ -422,13 +426,25 @@ func FuzzRestoreRoundTrip(f *testing.F) {
 		f.Add(s)
 	}
 	optsList, _ := fuzzOptions(f)
-	f.Fuzz(func(t *testing.T, in string) {
-		found := false
-		label.DefaultFormat.Scan([]byte(in), func(int, int, string, int) { found = true })
-		if found {
-			t.Skip("the input contains a label-like string (limitation in SPEC 5.3)")
+	// 崩れた形の作られ方は書式で変わるので、括りのない書式と、終わりのない書式も試す。
+	for _, s := range []string{"{type}_{n}", "<{type}_{n}", "<{type}&{n}>"} {
+		format, err := label.ParseFormat(s)
+		if err != nil {
+			f.Fatal(err)
 		}
+		optsList = append(optsList, detect.Options{Format: format})
+	}
+	f.Fuzz(func(t *testing.T, in string) {
 		for _, opts := range optsList {
+			found := false
+			format := opts.Format
+			if format.IsZero() {
+				format = label.DefaultFormat
+			}
+			format.Scan([]byte(in), func(int, int, string, int) { found = true })
+			if found {
+				continue // the input contains a label-like string (limitation in SPEC 5.3)
+			}
 			masked, restored, res := roundTrip(t, opts, in)
 			if restored != in {
 				t.Fatalf("restore(mask(x)) != x\n x:        %q\n masked:   %q\n restored: %q", in, masked, restored)
@@ -438,4 +454,98 @@ func FuzzRestoreRoundTrip(f *testing.F) {
 			}
 		}
 	})
+}
+
+// AI が崩したラベルも戻す(仕様 5.3)。戻す値は、エスケープしない。
+func TestRestoreEscapedLabels(t *testing.T) {
+	src := "taro@example.com 10.0.0.1 password=a<b\n"
+	answer := "&lt;email_1&gt; \\<email_1\\> \\<ipv4\\_private\\_1\\> &lt;secret_1&gt; \\<email_1> email_1\n"
+	want := "taro@example.com taro@example.com 10.0.0.1 a<b \\taro@example.com email_1\n"
+	got, res := restoreWith(t, detect.Options{}, answer, src)
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if len(res.Missing) != 0 || res.Source.Kept != 0 {
+		t.Errorf("result %+v", res)
+	}
+}
+
+func TestRestoreEscapedLabelsOtherFormats(t *testing.T) {
+	for _, tt := range []struct{ format, label, escaped string }{
+		{"[{type}-{n}]", "[email-1]", `\[email-1\]`},
+		{"<{type}:{n}>", "<email:1>", "&lt;email:1&gt;"},
+		{"{type}_{n}", "email_1", `email\_1`},
+	} {
+		f, err := label.ParseFormat(tt.format)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, _ := restoreWith(t, detect.Options{Format: f}, tt.escaped+" "+tt.label+"\n", "taro@example.com\n")
+		if want := "taro@example.com taro@example.com\n"; got != want {
+			t.Errorf("format %q: got %q", tt.format, got)
+		}
+	}
+}
+
+// 対応のない崩れたラベルは、そのまま残し、本来のラベルで 1 件に数える。
+func TestRestoreEscapedLabelsMissing(t *testing.T) {
+	answer := "&lt;email_9&gt; <email_9> \\<email_9\\> \\<uuid_4\\>\n"
+	got, res := restoreWith(t, detect.Options{}, answer, "taro@example.com\n")
+	if got != answer {
+		t.Errorf("got %q", got)
+	}
+	if want := []string{"<email_9>", "<uuid_4>"}; !slices.Equal(res.Missing, want) {
+		t.Errorf("missing %q, want %q", res.Missing, want)
+	}
+}
+
+// 元の入力に崩れた形や、それに似た形があっても、mask の出力の restore は、1 バイトも違わずに戻る(Q82)。
+func TestRestoreRoundTripEscapeShapedSources(t *testing.T) {
+	for _, src := range []string{
+		"\\\\10.0.0.5\\share\n",
+		"C:\\logs\\taro@example.com\\>x\n",
+		"\\taro@example.com\\>\n",
+		"taro@example.com \\<email_1\\>\n",
+		"taro@example.com &lt;email_1&gt;\n",
+		"&lt;taro@example.com&gt;\n",
+		"taro@example.com \\<email\\_1\\> \\<email_1\\>\n",
+	} {
+		det, err := detect.New(detect.Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var masked bytes.Buffer
+		eng := &Engine{Det: det, Rep: NewMasker(label.DefaultFormat)}
+		if err := eng.Run([]io.Reader{strings.NewReader(src)}, &masked); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := restoreWith(t, detect.Options{}, masked.String(), src); got != src {
+			t.Errorf("source %q, masked %q: got %q", src, masked.String(), got)
+		}
+	}
+}
+
+// 崩れた形の内側に別の崩れた形があっても、内側だけを戻さない(連番が先に来る書式。Q82)。
+func TestRestoreRoundTripNestedEscapedForm(t *testing.T) {
+	f, err := label.ParseFormat("{n}_{type}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := detect.Options{Format: f}
+	src := "12\\_email a@b.co c@d.co\n"
+	if _, got, _ := roundTrip(t, opts, src); got != src {
+		t.Errorf("got %q", got)
+	}
+}
+
+// 元の入力にあった崩れた形は、置換済みの形の通知に含める。mask の Stats には影響しない。
+func TestRestoreReportsEscapedFormsInSource(t *testing.T) {
+	src := "x\n&lt;email_1&gt; taro@example.com\n"
+	_, res := restoreWith(t, detect.Options{}, "&lt;email_1&gt;\n", src)
+	if res.Source.Kept != 1 || !slices.Equal(res.Source.KeptLines, []int{2}) {
+		t.Errorf("kept %d, lines %v", res.Source.Kept, res.Source.KeptLines)
+	}
+	if res.Restored != 0 {
+		t.Errorf("restored %d", res.Restored)
+	}
 }

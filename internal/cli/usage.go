@@ -1,16 +1,18 @@
 package cli
 
-// usageTop は、全体の使い方。
+// usageTop は、全体の使い方。種別は列挙しない(一覧は `logscrub types`。種別を足しても古くならないように)。
 const usageTop = `Usage:
   logscrub mask    [FILE ...] [options]
   logscrub restore --source FILE [--source FILE ...] [ANSWER_FILE] [options]
   logscrub types   [--verbose]
+  logscrub version
 
-mask replaces email addresses, IP addresses, tokens, UUIDs and AWS values
-(account IDs, S3 bucket names) in text with labels such as <email_1> (or with
-keyed hashes). restore puts the original values back into text (for example
-an AI's answer) that contains such labels. The text is read from FILE (stdin
-when FILE is omitted or "-") and written to stdout.
+mask replaces values such as email addresses, IP addresses and secrets (tokens,
+passwords, including the ones in URLs) in text with labels such as <email_1>
+(or with keyed hashes). More types can be enabled; run "logscrub types" for the
+list. restore puts the original values back into text (for example an AI's
+answer) that contains such labels. The text is read from FILE (stdin when FILE
+is omitted or "-") and written to stdout.
 
 Run "logscrub <command> --help" for the options of a command.
 `
@@ -41,24 +43,31 @@ Tokens in any other format are not detected.
 
 const usageMask = `Usage: logscrub mask [FILE ...] [options]
 
-Replace email addresses, IP addresses, tokens, UUIDs and AWS values in FILE
-(stdin when omitted or "-") with labels or hashes. Several FILEs are read in
-the given order as one input (numbering continues across files).
+Replace the values of the selected types in FILE (stdin when omitted or "-")
+with labels or hashes. By default these are email addresses, IP addresses and
+secrets; see --types. Several FILEs are read in the given order as one input
+(numbering continues across files).
 
 Options (they may be written before or after FILE):
   --mode mask|hash          mask: <email_1> style labels (default).
                             hash: <type>_<hex> using HMAC-SHA256; cannot be restored.
   --types LIST              comma separated types: email, ipv4, ipv6, secret, uuid,
-                            aws_account, aws_s3_bucket, aws_host; or groups:
-                            default, aws, cloud. Only the listed types are
+                            host, custom, aws_account, aws_s3_bucket, aws_host;
+                            or groups: default, aws, cloud. Only the listed types are
                             replaced (add "default" to keep the default ones).
-                            Default: default (email, ipv4, ipv6, secret; uuid
-                            and aws_* are off).
+                            Default: default (email, ipv4, ipv6, secret; uuid,
+                            host, custom and aws_* are off).
                             Run "logscrub types" for the list.
   --uuid-versions 4,7       replace only these UUID versions (1-8); enables uuid.
   --ip-scope all|global|private
                             which IP addresses to replace (default: all).
   --allow VALUE             never replace this exact value (repeatable).
+  --deny VALUE              replace this word as <custom_N> (repeatable; ASCII case
+                            is ignored; acme does not match acmerica). Enables custom.
+  --deny-file FILE          read words from FILE, one per line; empty lines and lines
+                            starting with # are ignored (repeatable).
+  --domain DOMAIN           replace the host names in this domain and its subdomains
+                            as <host_N> (repeatable). Enables host.
   --mask-format FMT         label format containing {type} and {n} once each
                             (default: <{type}_{n}>).
   --email-hash full|local   hash mode: hash the whole address (email_<hex>, default)
@@ -90,10 +99,14 @@ Options (they may be written before or after ANSWER_FILE):
   --ip-scope all|global|private
                             same as mask.
   --allow VALUE             same as mask (repeatable).
+  --deny VALUE              same as mask (repeatable).
+  --deny-file FILE          same as mask (repeatable).
+  --domain DOMAIN           same as mask (repeatable).
   --mask-format FMT         same as mask.
   -o, --output FILE         write to FILE instead of stdout.
   -h, --help                show this help.
 
+Labels escaped by an AI as &lt;email_1&gt; or \<email_1\> are restored too.
 Labels that cannot be restored are left as they are and listed on stderr;
 the exit status is still 0. Output of "mask --mode hash" cannot be restored.
 `
@@ -104,5 +117,13 @@ List the types that can be given to --types.
 
 Options:
   --verbose   also list the supported secret formats.
+  -h, --help  show this help.
+`
+
+const usageVersion = `Usage: logscrub version
+
+Print the version of logscrub. "logscrub --version" does the same.
+
+Options:
   -h, --help  show this help.
 `

@@ -134,6 +134,39 @@ URL のパスワード(v1.2 で追加):
 - キー名ベースの値が、パスワードが置換されていない URL で、ユーザーの部分か `@` の直後が置換済みの形のもの(`password=https://<uuid_1>:s3cret@db-host/`、`password=https://u:s3cret@<aws_host_1>.ap-northeast-1.rds.amazonaws.com/`)は、値全体がキー名ベースの値として置換され、パスワードが出力に残らない。mask・hash とも再度流しても変わらない(Q68)
 - 置換される値の直後にキー名の語が続く形(`0.0.0.1passwd=0`)は、1 回目が `<ipv4_global_1>passwd=0` になり、再度流しても変わらない(hash も同様)。置換済みのラベルの直後のキー名(`<email_1>password=abc`)の値は置換されない(Q66)
 
+語の指定(v1.3 で追加):
+
+- `--deny acme` で `Acme` と `ACME` が別のラベル(`<custom_1>`、`<custom_2>`)になり、`restore` で 1 バイトも違わずに戻る
+- `--deny acme` は `acmerica`・`AcmeCorp` に一致せず、`acme-prod`・`acme_prod`・`acme.internal`・`Acmeの` に一致する。`--deny アクメ` は `株式会社アクメの` に一致する
+- `--types email --deny acme` ではメールアドレスと語だけが置換される。`--types custom --deny acme` では語だけが置換される。語の指定がない `--types custom` はエラー終了する
+- `--deny acme` で `taro@acme.co.jp` は `<email_1>` になる。`--deny email` で `<email_1>` は再置換されない
+- `--deny acme --allow Acme` で、`Acme` は残り、`ACME` は置換される
+- `--deny-file` は、BOM・CRLF・前後の空白を除き、空行と `#` の行を無視する。語のないファイルはエラーにならない
+- 空の `--deny` はエラー終了する。`--deny-file` と同じファイルへの `--output` は、ファイルを変えずにエラー終了する。エラーメッセージに語が出ない
+- `--deny`・`--deny-file` の mask・hash の出力を、同じオプションで再度流しても変わらない
+
+ドメインの指定(v1.3 で追加):
+
+- `--domain example.co.jp` で `curl https://internal.corp.example.co.jp/api` が `curl https://<host_1>/api` に、`--domain mycompany.internal` で `connecting to db.mycompany.internal` が `connecting to <host_1>` になる
+- `example.co.jp` そのものも置換され、`notexample.co.jp`・`example.co.jp.evil.org` は置換されない
+- 文末の `.`、FQDN の末尾の `.`、ポート(`:8080`)は範囲に含まれない。`DB.Example.CO.JP` は置換され、`接続先はdb.example.co.jpです` はホスト名だけが置換される
+- `--domain example.co.jp` で、email が有効なら `taro@example.co.jp` は `<email_1>`、`--types host --domain example.co.jp` なら `taro@<host_1>` になる
+- `https://example.jp`・`*.example.jp`・`.example.jp`・空の値の `--domain` はエラー終了する
+- `postgres://app:s3cret@db.example.co.jp/` が `postgres://app:<secret_1>@<host_1>/` になり、再度流しても変わらない。mask の出力は `restore` で元に戻る
+- `--mode hash --email-hash local --deny acme` で `taro@acme.co.jp` は `email_<hex>` に、`taro@example.org` は `hash_<hex>@example.org` になる(`--domain` も同様)
+
+版(v1.3 で追加):
+
+- `logscrub version` と `logscrub --version` が、同じ 1 行を stdout に出し、終了コード 0 で終わる
+
+崩れたラベルの復元(v1.3 で追加):
+
+- 回答の `&lt;email_1&gt;`・`\<email_1\>`・`\<email\_1\>`・`\<ipv4\_private\_1\>` が元の値に戻る
+- `\<email_1>`・`&lt;email_1>`・`email_1` は戻らない(`\<email_1>` の `<email_1>` は戻り、`\` は残る)
+- `--mask-format '[{type}-{n}]'` で `\[email-1\]` が、`--mask-format '<{type}:{n}>'` で `&lt;email:1&gt;` が戻る
+- 対応のない `&lt;email_9&gt;` はそのまま残り、`<email_9>` として通知される。`<email_9>` と同時に現れても 1 件に数える
+- 元の入力が `\\10.0.0.5\share`、`\taro@example.com\>`、`taro@example.com \<email_1\>`、`taro@example.com &lt;email_1&gt;`、`&lt;taro@example.com&gt;` でも、mask の出力の restore は 1 バイトも違わずに戻る
+
 除外の確認:
 
 - 電話番号形式(`03-1234-5678`、`09012345678`)や郵便番号形式(`123-4567`)は検出されない
@@ -157,4 +190,5 @@ CLI:
 - `--stats` と `-stats`、`--output` と `-o` が同じ動作になる
 - `--allow` と `--source` を複数回指定すると、すべての値が反映される
 - サブコマンドなし、または不明なサブコマンドで、使い方が stderr に出て終了コード 1 になる
+- すべての種別名が `mask --help` に載っている
 - `go.mod` に外部の依存がない(標準ライブラリのみ)

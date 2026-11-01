@@ -1,4 +1,42 @@
 {
+  "permissions": {
+    "ask": [
+      "Bash(git push *)",
+      "Bash(git * push *)",
+      "Bash(./scripts/go get *)",
+      "Bash(scripts/go get *)",
+      "Edit(/.claude/**)",
+      "Edit(/.githooks/**)",
+      "Edit(/scripts/claude-commit-check)",
+      "Edit(/scripts/doc-size-check)",
+      "Edit(/scripts/go)",
+      "Edit(/scripts/allowed-modules)",
+      "Edit(/CLAUDE.md)",
+      "Edit(/go.mod)"
+    ],
+    "deny": [
+      "Bash(git push *--force*)",
+      "Bash(git * push *--force*)",
+      "Bash(git push -f*)",
+      "Bash(git push * -f*)",
+      "Bash(git * push -f*)",
+      "Bash(git * push * -f*)",
+      "Bash(git commit *--no-verify*)",
+      "Bash(git * commit *--no-verify*)",
+      "Bash(git commit -n*)",
+      "Bash(git commit * -n *)",
+      "Bash(git * commit -n*)",
+      "Bash(git * commit * -n *)",
+      "Bash(git *core.hooksPath=*)",
+      "Bash(git merge *)",
+      "Bash(git * merge *)",
+      "Bash(gh pr merge *)",
+      "Bash(gh * pr merge *)",
+      "Edit(/docs/plans/v1.0.0/**)",
+      "Edit(/docs/plans/v1.1.0/**)",
+      "Edit(/docs/plans/v1.2.0/**)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -9,7 +47,7 @@
             "command": "bash \"$CLAUDE_PROJECT_DIR\"/scripts/claude-commit-check",
             "timeout": 600,
             "onFailure": "block",
-            "statusMessage": "コミット前の test と vet を実行中..."
+            "statusMessage": "コミット前の確認を実行中..."
           }
         ]
       }

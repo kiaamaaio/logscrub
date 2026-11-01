@@ -98,7 +98,7 @@ AWS のサービスのホスト名には、利用者ごとの部分(DB の名前
 - 末尾の形の決まった部分は、小文字の形だけを対象にする(Q42)。末尾の形の後ろの条件は、4.4 のホスト名の末尾と同じ(Q41)
 - 利用者ごとの部分: 英字(大文字・小文字)・数字・`-`・`.` からなる 1 文字以上で、先頭と末尾が英数字、`.` が 2 つ続かないこと。その前が、英数字・`-`・`_`・`.` でないこと
   - 英大文字を許すのは、EKS の ID のように、AWS が大文字で付ける値があるため(DNS の名前は大文字・小文字を区別しない)
-- 利用者ごとの部分が次の名前そのものの場合は、検出しない(AWS 共通のエンドポイントで、利用者ごとの値ではないため)。IoT Core の `data-ats`(`data-ats.iot.us-east-1.amazonaws.com`)、`api.tunneling`・`data.tunneling`(Secure Tunneling の `api.tunneling.iot.us-east-1.amazonaws.com` など。[plans/v1.2.0.md](../plans/v1.2.0.md) Q61)。表の行ごとに持ち、必要な行にだけ加える。名前と完全に一致する場合だけ除く(`x.api.tunneling` や、Jobs の `<接頭辞>.jobs` は置換する)
+- 利用者ごとの部分が次の名前そのものの場合は、検出しない(AWS 共通のエンドポイントで、利用者ごとの値ではないため)。IoT Core の `data-ats`(`data-ats.iot.us-east-1.amazonaws.com`)、`api.tunneling`・`data.tunneling`(Secure Tunneling の `api.tunneling.iot.us-east-1.amazonaws.com` など。[plans/v1.2.0/README.md](../plans/v1.2.0/README.md) Q61)。表の行ごとに持ち、必要な行にだけ加える。名前と完全に一致する場合だけ除く(`x.api.tunneling` や、Jobs の `<接頭辞>.jobs` は置換する)
 - 1 つのホスト名に、複数の末尾の形が当てはまる場合(`.<リージョン>.elasticbeanstalk.com` と `.elasticbeanstalk.com`)は、長いほうの形を採る(利用者ごとの部分が短くなるほう)
 - 置換するのは、利用者ごとの部分だけ。`dualstack.`(ELB)、`internal-`(内部向けの ELB)、アベイラビリティゾーンの接頭辞(NLB)なども、利用者ごとの部分に含める
 - 同じ値の判定は、通常どおりバイト列で行う。`dualstack.my-alb-1234567890` と `my-alb-1234567890` は、別の値として扱う
@@ -112,7 +112,7 @@ AWS のサービスのホスト名には、利用者ごとの部分(DB の名前
 - デュアルスタックのドメイン `api.aws` の形(`<ID>.<リージョン>.api.aws`)。AWS 自体の API のエンドポイント(`sqs.us-east-1.api.aws` など)と区別できないため
 - 表にない新しい形: OpenSearch Serverless の NextGen(`<ID>.aoss.<リージョン>.on.aws`、`<アカウント ID>.aoss.<リージョン>.on.aws`)、Cognito の FIPS(`<接頭辞>.auth-fips.<リージョン>.amazoncognito.com`)。必要になったら、表に行を足すだけで追加できる
 
-表の形は、2026-10-18 に AWS の公式ドキュメントで確認した([plans/v1.2.0.md](../plans/v1.2.0.md) Q47)。
+表の形は、2026-10-18 に AWS の公式ドキュメントで確認した([plans/v1.2.0/README.md](../plans/v1.2.0/README.md) Q47)。
 
 範囲が重なった場合:
 

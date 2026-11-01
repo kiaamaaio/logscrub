@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// stringList は、複数回指定できるオプション(--allow、--source)の値を、蓄積する。
+// stringList は、複数回指定できるオプション(--allow、--source、--deny、--deny-file、--domain)の値を、蓄積する。
 type stringList []string
 
 func (l *stringList) String() string { return strings.Join(*l, ",") }

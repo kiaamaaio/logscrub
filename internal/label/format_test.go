@@ -104,7 +104,7 @@ func TestAppendKeepsExistingBytes(t *testing.T) {
 }
 
 func TestTypesAreTheDocumentedSet(t *testing.T) {
-	want := []string{"email", "ipv4_global", "ipv4_private", "ipv6_global", "ipv6_private", "secret", "uuid", "aws_account", "aws_s3_bucket", "aws_host"}
+	want := []string{"email", "ipv4_global", "ipv4_private", "ipv6_global", "ipv6_private", "secret", "uuid", "aws_account", "aws_s3_bucket", "aws_host", "host", "custom"}
 	if !equal(Types, want) {
 		t.Errorf("Types = %q, want %q", Types, want)
 	}
@@ -236,5 +236,19 @@ func TestScanReportsPositionsInOrder(t *testing.T) {
 	})
 	if len(starts) != 2 || starts[0] != 1000 || starts[1] != 2009 {
 		t.Errorf("starts = %v, want [1000 2009]", starts)
+	}
+}
+
+// host と custom は、種別を有効にしなくても、置換済みの形として読む(Q83)。
+func TestNewTypesAreRecognized(t *testing.T) {
+	for _, s := range []string{"<host_1>", "<custom_2>"} {
+		if !DefaultFormat.IsLabel([]byte(s)) {
+			t.Errorf("%q is not a label", s)
+		}
+	}
+	for _, s := range []string{"host_3f9a1c0b7d2e", "custom_3f9a1c0b7d2e"} {
+		if !IsHashedLocalPart([]byte(s), 12) {
+			t.Errorf("%q is not a hashed form", s)
+		}
 	}
 }

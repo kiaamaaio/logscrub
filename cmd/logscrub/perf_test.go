@@ -7,14 +7,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kiaamaaio/logscrub/internal/synthlog"
 )
 
-// 性能とメモリの測定(仕様 7 章、plans/v1.0.0.md の段階 11、Q29)。時間がかかるので、-perf を付けたときだけ実行する。
+// 性能とメモリの測定(仕様 7 章、plans/v1.0.0/README.md の段階 11、Q29)。時間がかかるので、-perf を付けたときだけ実行する。
 //
 //	./scripts/go test -run Perf -v ./cmd/logscrub -perf [-perf-size 100]
 //
@@ -42,7 +42,7 @@ func genLog(t *testing.T, dir, name string, mb int, pool int) string {
 	return genLogWith(t, dir, name, mb, pool, false)
 }
 
-// genLogWith は、genLog に、AWS の値を含めるか(synthlog.Config.AWS。plans/v1.1.0.md の Q39)を加えたもの。
+// genLogWith は、genLog に、AWS の値を含めるか(synthlog.Config.AWS。plans/v1.1.0/README.md の Q39)を加えたもの。
 func genLogWith(t *testing.T, dir, name string, mb int, pool int, aws bool) string {
 	t.Helper()
 	p := filepath.Join(dir, name)
@@ -107,11 +107,7 @@ func runMask(t *testing.T, bin, logPath string, viaPipe bool, args ...string) me
 		t.Fatalf("logscrub: %v", err)
 	}
 	elapsed := time.Since(start).Seconds()
-	ru, ok := cmd.ProcessState.SysUsage().(*syscall.Rusage)
-	if !ok {
-		t.Fatal("no rusage")
-	}
-	return measurement{seconds: elapsed, maxRSSM: float64(ru.Maxrss) / 1024} // Linux: Maxrss は KB
+	return measurement{seconds: elapsed, maxRSSM: maxRSSMB(t, cmd.ProcessState)}
 }
 
 func TestPerfThroughput(t *testing.T) {
@@ -122,6 +118,17 @@ func TestPerfThroughput(t *testing.T) {
 	dir := t.TempDir()
 	log := genLog(t, dir, "big.log", *perfSize, 0)
 	awsLog := genLogWith(t, dir, "big-aws.log", *perfSize, 0, true)
+	words := func(n int) string {
+		p := filepath.Join(dir, fmt.Sprintf("words-%d", n))
+		var sb strings.Builder
+		for i := range n {
+			fmt.Fprintf(&sb, "project-%d-name\n", i)
+		}
+		if err := os.WriteFile(p, []byte(sb.String()), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
 	for _, tc := range []struct {
 		name string
 		log  string
@@ -134,6 +141,9 @@ func TestPerfThroughput(t *testing.T) {
 		{"aws log, default types", awsLog, false, nil},
 		{"aws log, default,aws", awsLog, false, []string{"--types", "default,aws"}},
 		{"aws log, without aws_host", awsLog, false, []string{"--types", "default,aws_account,aws_s3_bucket"}},
+		{"10 words", log, false, []string{"--deny-file", words(10)}},
+		{"1000 words", log, false, []string{"--deny-file", words(1000)}},
+		{"--domain", log, false, []string{"--domain", "example.com"}},
 	} {
 		best := measurement{seconds: 1e9}
 		for i := 0; i < 3; i++ {
@@ -154,6 +164,9 @@ func TestPerfThroughput(t *testing.T) {
 func TestPerfMemoryDoesNotGrowWithInputSize(t *testing.T) {
 	if !*perf {
 		t.Skip("run with -perf")
+	}
+	if !canMeasureRSS {
+		t.Skip("the maximum memory usage cannot be measured on this OS")
 	}
 	bin := buildBinary(t)
 	dir := t.TempDir()

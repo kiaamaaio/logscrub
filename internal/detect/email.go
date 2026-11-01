@@ -7,7 +7,7 @@ import (
 	"github.com/kiaamaaio/logscrub/internal/label"
 )
 
-// emailRe は、メールアドレスの正規表現(仕様 4 章、plans/v1.0.0.md の Q5)。
+// emailRe は、メールアドレスの正規表現(仕様 4 章、plans/v1.0.0/README.md の Q5)。
 //
 //   - ローカルパート: `[A-Za-z0-9._%+-]+`(非 ASCII は英数字でない扱い)
 //   - ドメイン: `([A-Za-z0-9-]+\.)+[A-Za-z]{2,}`。TLD は英字 2 文字以上(`pass@10.0.0.1` は対象外)

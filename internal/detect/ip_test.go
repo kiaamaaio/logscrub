@@ -256,7 +256,7 @@ func TestIPv4HostNamesWithScope(t *testing.T) {
 }
 
 // 置換済みの形は、再度検出しない。mask のラベルと、hash の出力(`ec2-ipv4_global_<hex>.…`。
-// `-` の後ろの hash の出力が保護範囲として見つかること。plans/v1.1.0.md 2.4)。
+// `-` の後ろの hash の出力が保護範囲として見つかること。plans/v1.1.0/README.md 2.4)。
 func TestIPv4HostNamesAlreadyReplaced(t *testing.T) {
 	d, err := New(Options{Kinds: DefaultKinds})
 	if err != nil {
@@ -862,7 +862,7 @@ func TestIPv6FinderMatchesRegexpReference(t *testing.T) {
 	}
 }
 
-// 実装(前処理つき)と、前処理なしの正規表現の速度。plans/v1.0.0.md の Q2 の記録用。
+// 実装(前処理つき)と、前処理なしの正規表現の速度。plans/v1.0.0/README.md の Q2 の記録用。
 func BenchmarkIPv4Unfiltered(b *testing.B) {
 	lines, size := benchCorpus(b)
 	b.SetBytes(int64(size))

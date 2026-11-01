@@ -28,7 +28,7 @@ const (
 //   - HMAC に渡すのは、値のバイト列だけ(`local` は、ローカルパートだけ。Q18)。正規化はしない(Q3)。
 //     種別名は、入力に含めない
 //   - 出力は、`<種別>_<小文字の 16 進数>`(種別は、IP アドレスの区別を含む。例: `ipv4_global_a1b2c3d4e5f6`)。
-//     `local` のメールアドレスは、`hash_<16 進数>@ドメイン`
+//     `local` のメールアドレスは、`hash_<16 進数>@ドメイン`。ドメインに利用者が指定した値があれば、全体をハッシュする
 //   - 決定的(同じ鍵・同じ入力 → 同じ出力)。鍵が同じなら、別のマシンでも同じになる
 //
 // 出力の形は、検出器が置換済みとして認識する(label.ScanHashed、email の除外)ので、再度流しても変わらない。
@@ -76,7 +76,7 @@ func (h *Hasher) Append(dst []byte, line []byte, m detect.Match) []byte {
 	if typ == "" {
 		return append(dst, v...)
 	}
-	if h.email == EmailHashLocal && m.Kind == detect.KindEmail {
+	if h.email == EmailHashLocal && m.Kind == detect.KindEmail && !m.HideDomain {
 		if at := bytes.IndexByte(v, '@'); at > 0 {
 			dst = append(dst, "hash_"...)
 			dst = append(dst, h.digest(v[:at])...)
