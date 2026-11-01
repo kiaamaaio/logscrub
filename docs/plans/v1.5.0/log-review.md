@@ -175,3 +175,47 @@ abc993d で実行した。
 `pem.log` の末尾に 7 行を足し、`pem.mask.golden` にも同じ数の行を足した。v1.5.0 で加えたファイルで、前からある行の期待値は変えていない(`mask` の出力と今のゴールデンの `diff` は、足した 7 行だけ)。`develop` にあるゴールデンは変えていない。
 
 理由は、Q121 の形(行末が `\n`、行の継続)に、エンジンの段のゴールデンがないため。`TestGoldenInputsAreStable` で 2 回目も確かめる。期待値は `mask` の出力を目で確かめた。
+
+### 修正のあとの確認
+
+ea8351b で実行した。
+
+- `./scripts/go test ./...`、`./scripts/go vet ./...`、`GOOS=windows GOARCH=amd64 ./scripts/go vet ./...`、`./scripts/go run cmd/gofmt -l cmd internal`、`./scripts/doc-size-check`: 通った(gofmt の出力なし)。test は最後のテストの修正のあとに再度実行した
+
+`./scripts/go test ./internal/transform -run '^$' -fuzz … -fuzztime 90s`: 失敗なし。
+
+| 対象 | 実行回数 |
+|---|---|
+| `FuzzMaskStable` | 1,018,066 |
+| `FuzzHashStable` | 511,855 |
+| `FuzzRestoreRoundTrip` | 403,663 |
+
+`./scripts/go test -run Perf -v -timeout 40m ./cmd/logscrub -perf`(100MB、3 回の最速、2 コア): 3 つのテストが PASS。mask(ファイルから)は 360.0 MB/s、パイプからは 303.6 MB/s、`GOMAXPROCS=1` は 184.7 MB/s、hash は 347.9 MB/s、restore は 295.3 MB/s。README の性能の表は変えない。
+
+修正の前(6ba303a)と後のバイナリを交互に 9 回ずつ、`.cache/big.log`(105MB)。計画の 4.1 節の基準の範囲内。
+
+| 測定 | 前(最速) | 後(最速) | 差(最速 / 中央値) |
+|---|---|---|---|
+| mask、`GOMAXPROCS=1` | 192.1 MB/s | 193.9 MB/s | +0.9% / +0.8% |
+| mask、`GOMAXPROCS=2` | 358.3 MB/s | 356.6 MB/s | -0.5% / -0.8% |
+
+`-race` は、「版の完了条件の確認」と同じ方法で、`CGO_ENABLED=1 ./scripts/go test -race -c` で作ったバイナリ(`./scripts/go version -m` で `-race=true`)を、ホストで `GOGC=25 GOMEMLIMIT=300MiB`、`-test.count=1` で 1 つずつ実行した。どれも PASS で、`DATA RACE` の報告は 0 件。
+
+| 対象 | 時間 | 最大メモリ |
+|---|---|---|
+| `transform`(`TestEngineMatchesSequential` を除く) | 17 秒 | 398MB |
+| `detect` | 19 分 45 秒 | 460MB |
+| `cli` | 2 秒 | 80MB |
+| `stream` | 13 秒 | 55MB |
+| `TestEngineMatchesSequential` だけ(`-test.run`、9 個のサブテスト) | 27 秒 | 888MB |
+
+**`TestEngineMatchesSequential` を、v1.5.0 で初めて `-race` で実行し、PASS した。** ほかの確認と重ねず、最後に単独で実行した。実行の時点の `free -m` の total は 3921MB で、段階 2 の記録の約 2GB より多い。`./scripts/go test -race` のまま(`GOGC` を下げない方法)では実行していないので、OOM が解消したかは確かめていない。
+
+### PR の説明の訂正
+
+PR の説明の「`c64e9c7` の時点では PASS でした」は誤り。記録のとおり、それまで `TestEngineMatchesSequential` は `-race` では実行していない。今回の結果に置き換える案を示した。
+
+### 残っていること(4 回目の修正のあと)
+
+- PR の説明の更新と push はしていない(ユーザーの許可を待つ)。ea8351b とそのあとのコミットは push していない
+- 修正のあとの別のセッションのレビュー(5 回目)はまだ
