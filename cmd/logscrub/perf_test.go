@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -108,11 +107,7 @@ func runMask(t *testing.T, bin, logPath string, viaPipe bool, args ...string) me
 		t.Fatalf("logscrub: %v", err)
 	}
 	elapsed := time.Since(start).Seconds()
-	ru, ok := cmd.ProcessState.SysUsage().(*syscall.Rusage)
-	if !ok {
-		t.Fatal("no rusage")
-	}
-	return measurement{seconds: elapsed, maxRSSM: float64(ru.Maxrss) / 1024} // Linux: Maxrss は KB
+	return measurement{seconds: elapsed, maxRSSM: maxRSSMB(t, cmd.ProcessState)}
 }
 
 func TestPerfThroughput(t *testing.T) {
@@ -169,6 +164,9 @@ func TestPerfThroughput(t *testing.T) {
 func TestPerfMemoryDoesNotGrowWithInputSize(t *testing.T) {
 	if !*perf {
 		t.Skip("run with -perf")
+	}
+	if !canMeasureRSS {
+		t.Skip("the maximum memory usage cannot be measured on this OS")
 	}
 	bin := buildBinary(t)
 	dir := t.TempDir()
