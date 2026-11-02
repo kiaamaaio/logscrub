@@ -1,6 +1,6 @@
 # logscrub v1.5.0 `/code-review` の修正の記録(1〜4 回目)
 
-[計画](README.md)へ戻る。5〜6 回目は [log-review-2.md](log-review-2.md)、7 回目と Q126 は [log-review-3.md](log-review-3.md)、8 回目以降は [log-review.md](log-review.md)。節の見出しと内容は、分ける前のまま。
+[計画](README.md)へ戻る。5〜6 回目は [log-review-2.md](log-review-2.md)、7 回目と Q126 は [log-review-3.md](log-review-3.md)、8 回目は [log-review-4.md](log-review-4.md)、9 回目以降は [log-review.md](log-review.md)。節の見出しと内容は、分ける前のまま。
 
 ## `/code-review` の修正
 
