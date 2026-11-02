@@ -198,4 +198,5 @@ a05c16b のバイナリ(`.go` は今と同じ)で確かめた。値はすべて�
 
 ### 残っていること(10 回目の修正のあと)
 
-- push と PR の説明の更新(8〜10 回目の指摘、[#29](https://github.com/kiaamaaio/logscrub/issues/29) のリンクを含む)。push はユーザーが実行する
+- 2026-11-02 に、ユーザーの許可を得て PR の説明を更新した(`gh api -X PATCH`。8〜10 回目の指摘、[#29](https://github.com/kiaamaaio/logscrub/issues/29) のリンクを含む)
+- push。ユーザーが実行する(194498a より後のコミットは、まだ push していない)
