@@ -283,3 +283,17 @@ END のない 1 行の形を 1 つ処理すると、その行の処理を終え�
 - 別案: 1 行の形の範囲の後ろから、同じ行の BEGIN を探し続ける。2 つ目も同じ規則で 1 つのラベルにし、通知も 2 件にする(同じ行番号が 2 回並ぶので、`(lines 1, 1)` の形を決める必要がある)。stdout の期待値は変えないが、今は残る値が置換されるので、`<secret_N>` の番号が変わる
 
 **回答(2026-11-02)**: 案のとおり
+
+## 7 回目の `/code-review` の指摘
+
+別のセッションで `e403f7a..7da1ab3` を中心に high で行った。実バイナリで確かめた形だけを書く。ほかの指摘は [log-review.md](log-review.md)。
+
+### Q125: `/cygdrive/` と UNC の共有のパス
+
+次の形のユーザー名が残る。通知は出ず、LIMITATIONS.md の対象外の一覧にもない。Q115、Q120 と同じく、形を足すかの判断が要る。
+
+- `/cygdrive/c/Users/yamada/x`(Cygwin。`/c/Users/` の前が `e` なので、形の前の条件に当たらない)、`file:///cygdrive/c/Users/yamada/x`、`C:\cygwin64\home\yamada\x`、`/cygdrive/c/cygwin64/home/yamada/x`
+- `\\fs01\users\yamada\x`、`\\fs01\home\yamada\x`、`\\fs01\c$\Users\yamada\x`、`\\.\UNC\wsl$\Ubuntu\home\yamada\x`
+
+- 案: `/cygdrive/<ドライブ>/Users/` だけを Windows の形に足す(`/cygdrive/` は誤検出が少ない)。残りは LIMITATIONS.md に書く。UNC はサーバーと共有の名前が自由で、形が弱い。実装を変えるので、テスト、ファズテスト、`-perf`、別のセッションのレビューをやり直す
+- 別案: 実装は変えず、すべて LIMITATIONS.md に書く(Q118、Q122、Q124 と同じ理由)。残る確認は資料のレビューだけになる
