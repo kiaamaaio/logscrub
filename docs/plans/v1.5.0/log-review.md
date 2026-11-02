@@ -213,3 +213,47 @@ d9e37a6 で実行した。
 - 修正: LIMITATIONS.md の 53 行目、95 行目、Q127 の分。Q の範囲を Q127 までに直す(SPEC.md 11 章、DEVELOPMENT.md、`docs/plans/README.md`、計画の README)
 - 修正のあとの別のセッションのレビュー(9 回目)
 - push と PR の説明の更新(8 回目の指摘を含む)。push はユーザーが実行する
+
+## 8 回目の `/code-review` の修正
+
+上の「残っていること」の修正。実装は変えていない(`git diff --stat -- '*.go'` は空)。資料だけの修正。
+
+- LIMITATIONS.md 53 行目: 「それ以外の形では、2 回目の出力は変わりません」をやめ、「たとえば」で 4 つの形を挙げた(トークンの行、`{type}{n}` の `email1`、ラベルと空白の長さが BEGIN の印の列と同じになる行、`--hash-length` が 40 以上で行末がハッシュ値になる行)。mask のラベルが 1 回目と同じ番号になることも書いた
+- LIMITATIONS.md 95 行目: 振り分けどおりの形を足した。MSYS2 のホームディレクトリ、ドライブ名だけの形で区切りが混ざるパス、UNC の `/` の形(既存の UNC の項目に足した)
+- 同じ行に Q127 の `/` が重なるパス(6 形)を足した
+- Q の範囲を Q127 までに直した(SPEC.md 11 章、DEVELOPMENT.md、`docs/plans/README.md`、計画の README)
+
+### 確認の結果
+
+1cb3532 のバイナリ(`./scripts/go build -o /cache/lgr9 ./cmd/logscrub`)で確かめた。値はすべて架空。
+
+書いた文字列を打ち直さず、修正のあとの LIMITATIONS.md の 53 行目、95 行目から、`` ` `` の中身を取り出して通した。
+
+- 95 行目: `…` を含まない 48 形(足した 13 形をすべて含む)を、そのまま `mask` に通して 1 バイトも変わらない。`path=` を前に付けた形、`"` で囲んだ形、`/x` を後ろに付けた形の 144 行も変わらない。足した 13 形は、`\x` を後ろに付けた形も変わらない。stderr の通知も出ない
+- 53 行目の、変わる形: 下の表のとおり
+
+| 形 | 1 回目 | 2 回目に変わるところ |
+|---|---|---|
+| BEGIN、`AAAA`、`ghp_…`(行全体)、`BBBB` | `<secret_2>` のあとの `BBBB` が残る | `BBBB` が `<secret_1>` |
+| `--mask-format '{type}{n}'` で、BEGIN、`AAAA`、`x@example.org`、`BBBB` | `email1` のあとの `BBBB` が残る | `BBBB` が `secret1` |
+| `12:00:01: -----BEGIN PRIVATE KEY-----`、`12:00:02: AAAA`、`x@example.org BBBB`、`12:00:04: CCCC` | `<email_1> BBBB` でブロックが終わる | `<email_1> <secret_1>`、`12:00:04: <secret_2>` |
+| `--mode hash --hash-length 64`(40 も同じ)で、BEGIN、`AAAA`、`contact taro@example.com`、`BBBB` | `contact email_<16 進数>` のあとの `BBBB` が残る | `BBBB` が `secret_<16 進数>` |
+
+- `--hash-length 39` では変わらない。`--hash-length 64` の `t=1 ghp_…` の行は変わる(行末がハッシュ値になる行に含まれる)
+- `<email_1> ` は 10 文字、`12:00:01: ` の BEGIN の列は 10 で、書いたとおり
+- 53 行目の、変わらない形: `-----BEGIN PRIVATE KEY-----` と `<secret_1>` の 2 行、本文の形でない行で終わるブロック、1 行の形(`{"log":…,"stream":"x"}`、`"…" x`)の単独と、ブロックのあとの形は、2 回目の stdout が変わらない。BEGIN の行番号の通知は、1 行の形の単独を除いて残る(単独の 1 行の形は、範囲の全体が置換済みなので通知しない。仕様 4.1)
+
+### 確認のコマンド
+
+- `./scripts/go test ./...`: すべて ok(キャッシュの結果。`.go` の変更がないため)。`./scripts/go vet ./...`、`GOOS=windows GOARCH=amd64 ./scripts/go vet ./...`、`./scripts/go run cmd/gofmt -l cmd internal`、`./scripts/doc-size-check`: 通った(gofmt の出力なし)
+- ファズテスト、`-perf`、`-race` は実行していない(実装を変えていない)
+
+### 見つかったこと
+
+- 判断が必要なこと、仕様との食い違いは、見つからなかった。Q は足していない
+- README の「冪等」の項は、例外の説明を LIMITATIONS.md の「冪等性」へリンクしているが、END のないブロックの例外は「secret」の 44、53 行目にある。44 行目の時点からの配置で、依頼の範囲の外なので変えていない
+
+### 残っていること(8 回目の修正のあと)
+
+- 修正のあとの別のセッションのレビュー(9 回目)。範囲は資料の差分
+- push と PR の説明の更新(8 回目の指摘を含む)。push はユーザーが実行する
