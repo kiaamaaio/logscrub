@@ -4,7 +4,7 @@
 版ごとの実装計画と進捗は [plans/](plans/) にある(この資料の内容は、v1.0.0 の実装計画から移した)。
 
 - 仕様: [SPEC.md](SPEC.md)(以下「仕様」。節番号は仕様のもの。SPEC.md は目次で、4〜6 章・9 章の本文は [spec/](spec/) にある)
-- 文中の Q 番号は、Q1〜Q31 が [plans/v1.0.0/README.md](plans/v1.0.0/README.md)、Q32〜Q46 が [plans/v1.1.0/README.md](plans/v1.1.0/README.md)、Q47〜Q70 が [plans/v1.2.0/README.md](plans/v1.2.0/README.md)、Q71〜Q84 が [plans/v1.3.0/README.md](plans/v1.3.0/README.md) の 5 章「未確定事項」の項目、Q94〜Q99 が [plans/v1.4.0/questions.md](plans/v1.4.0/questions.md) の項目(すべて確定済み)
+- 文中の Q 番号は、Q1〜Q31 が [plans/v1.0.0/README.md](plans/v1.0.0/README.md)、Q32〜Q46 が [plans/v1.1.0/README.md](plans/v1.1.0/README.md)、Q47〜Q70 が [plans/v1.2.0/README.md](plans/v1.2.0/README.md)、Q71〜Q84 が [plans/v1.3.0/README.md](plans/v1.3.0/README.md) の 5 章「未確定事項」の項目、Q94〜Q99 が [plans/v1.4.0/questions.md](plans/v1.4.0/questions.md)、Q100〜Q129 が [plans/v1.5.0/questions.md](plans/v1.5.0/questions.md) の項目(すべて確定済み)
 
 ---
 
@@ -87,8 +87,8 @@ func Copy(w io.Writer, inputs ...io.Reader) error
 ```go
 // 置換後の種別名。IP は区別を含む。並びは連番・--stats の出力順にも使う(aws_account・aws_s3_bucket は v1.1、aws_host は v1.2 で追加)。
 var Types = []string{"email", "ipv4_global", "ipv4_private", "ipv6_global", "ipv6_private", "secret", "uuid",
-    "aws_account", "aws_s3_bucket", "aws_host", "host", "custom"}
-const NumTypes = 12                                 // len(Types)。統計・連番の表を固定長の配列で持つため
+    "aws_account", "aws_s3_bucket", "aws_host", "host", "custom", "user_path"}
+const NumTypes = 13                                 // len(Types)。統計・連番の表を固定長の配列で持つため
 
 type Format struct { ... }                          // '<{type}_{n}>' を前後・中間のリテラルに分解したもの
 func ParseFormat(s string) (Format, error)          // {type} と {n} を含まなければエラー
@@ -108,7 +108,7 @@ func (a *AnswerScanner) ScanEscaped(line []byte, fn func(form []byte))
 **detect**
 
 ```go
-type Kind uint8   // KindEmail, KindIPv4, KindIPv6, KindSecret, KindUUID, KindAWSAccount, KindAWSS3Bucket, KindAWSHost, KindHost, KindCustom(0 は無効)
+type Kind uint8   // KindEmail, KindIPv4, KindIPv6, KindSecret, KindUUID, KindAWSAccount, KindAWSS3Bucket, KindAWSHost, KindHost, KindCustom, KindUserPath(0 は無効)
 type KindSet uint32 // ビット k が Kind k(v1.1 で uint8 から広げた。v1.2 の aws_host で 8 ビットを超えるため)
 type Class uint8  // ClassNone, ClassGlobal, ClassPrivate, ClassSpecial(IP のみ使用)
 
@@ -175,6 +175,8 @@ v1.3 では、`custom.go` に `customFinder`(`--deny`)と `hostFinder`(`--domain
 語の読み込み(`--deny-file`)は `internal/cli` で行い、`detect` には語の一覧だけを渡す。語・ドメインを指定しなければ、検出器を作らない。
 `--email-hash local` のために、`Detector.Find` は、email の一致のドメインの部分を `customFinder`・`hostFinder` で確かめ、`Match.HideDomain` を立てる。
 
+v1.5 では、`userpath.go` に `userPathFinder` を置いた。既定で有効なので、手がかりの語を照合器で探さず、`/` と `\` の位置だけを `IndexByte` で飛んで調べる。
+
 前処理(3.4 節)用の `may(line, hint)` と `lineHint` は設けない。各検出器が `find` の先頭で、自分の手がかり
 (email は `'@'` の `bytes.IndexByte` など)を探し、なければすぐ戻る。
 行ごとに 1 回の走査でヒントを作る方式は、実測で約 0.95GB/s、種別ごとの `IndexByte`(ベクトル化されている)は
@@ -195,7 +197,7 @@ type Stats struct { ... }    // 種別名ごとの件数(→ Q19)
 
 // Engine は入力群を行ごとに検出・置換して w に書く。
 // Inspect は任意で、変換した 1 行を受け取り、置換済みの形として数える数を返す(restore が、崩れた形を集めるために使う。Q82)。
-type Engine struct { Det *detect.Detector; Rep Replacer; Stats Stats; Inspect func(out []byte) int }
+type Engine struct { Det *detect.Detector; Rep Replacer; Stats Stats; Inspect func(out []byte) int; Review *Review }
 func (e *Engine) Run(inputs []io.Reader, w io.Writer) error
 
 // Restore は sources から mask と同じ規則で対応を作り直し、answer 中のラベルを戻して w に書く。
@@ -245,8 +247,10 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
   - この方式は仕様の「置換済みの形の文字列は検出しない」の解釈を含むため、**Q1** で確認する
 - mask の出力が、周囲の文字とつながって新しい候補を生まないことは、例を挙げて確かめきれないため、ファズテスト(`mask(mask(x)) == mask(x)`、hash も同様)で確認する
 - 見つかった問題の振り分け(v1.2 で決めた。仕様 7 章の冪等の但し書き):
-  - 直す: 現実にありうる形で、値が置換されずに残るもの。置換済みのログを流し直す使い方で、結果が変わるもの
+  - 直す: 広く使われるツールや形式の出力だと示せる形で、値が置換されずに残るもの。置換済みのログを流し直す使い方で、結果が変わるもの(次の PEM の例外を除く)
+  - 直さず、[LIMITATIONS.md](../LIMITATIONS.md) の原則の範囲とする: 広く使われるツールや形式の出力だと示せない形で、値が残るもの。一覧にない形を指摘にしない(v1.5 の[調査](research/2026-11-02-v1.5.0-review-count.md)で決めた)
   - 直さず、[LIMITATIONS.md](../LIMITATIONS.md) の「冪等性」に書く: 値どうし・値と記号が区切りなしで密着するなど、手で作らない限り現れない形の冪等性の違反。その入力は `testdata/fuzz/` に加えない(`go test` が失敗し続けるため)
+  - 直さず、[LIMITATIONS.md](../LIMITATIONS.md) の「冪等性」に書く(例外。Q129): PEM の鍵のブロックが END の印まで続かず、ブロックを終えた行が、置換のあとは本文の続きとして読める形。2 回目は、残っていた本文を伏せる向きだけに変わる
   - ファズテストの探索(`-fuzz`)は、版のリリース前などに時間を決めて行い、見つかったものをこの基準で振り分ける。普段の `go test` は、`testdata/fuzz/` の入力と種だけを流す。現実的な形は、表のテストや合成ログの断片として加える
 - 冪等性のファズテスト(`FuzzMaskStable`・`FuzzHashStable`。`internal/transform/fuzz_test.go`)の入力は、現実的な断片の組み合わせ(v1.2 で変えた): ファズテストのバイト列を、断片の表(`fuzzFragments`。各種別の値・置換済みの形・文脈の語)と区切りの表(`fuzzSeparators`。空白を含む区切り・改行・JSON の区切り)の選び方として読み、行を組み立てる(`fragmentText`)。区切りなしの密着や、記号だけで断片を直接つなぐ形は作らない
   - 断片・区切りを足すときは、ログ・テキストに実際に現れる形にする。記号が値に隣り合う形は、断片の中に書く
@@ -259,7 +263,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 
 - 連番の順序 = 入力の順(ファイルの指定順 → 行の順 → 行内の開始位置の順)。重なりの解決は 3.1 節のとおり決定的
 - 「同じ値」の判定キー = (種別名, 値のバイト列)。正規化しない場合、ラベル → 値の対応が一意になり、往復で 1 バイトも変わらないことが保証される(→ **Q3**)
-- 検出は並列に行う(v1.4。Q95)。処理は「読み取り(1 つ)→ 検出(ワーカー、複数)→ 書き換えと書き込み(1 つ、入力の順)」の 3 段で、連番を振る `Rep.Append` と `Stats`、`Inspect` は最後の段だけで呼ぶ。検出は行ごとに独立でなければならない。行をまたぐ状態が要る検出(#14 の PEM)は、ワーカーに持たせず、読み取りの段階で求める形を、着手するときに決める(Q98)
+- 検出は並列に行う(v1.4。Q95)。処理は「読み取り(1 つ)→ 検出(ワーカー、複数)→ 書き換えと書き込み(1 つ、入力の順)」の 3 段で、連番を振る `Rep.Append` と `Stats`、`Inspect` は最後の段だけで呼ぶ。検出は行ごとに独立でなければならない。行をまたぐ状態が要る検出(PEM の秘密鍵)は、ワーカーに持たせず、読み取りの段の `detect.PEMScanner` が範囲を求めてブロックに記録し、ワーカーは `Detector.FindSpans` で候補に加える(Q98、Q105)。印のないブロックは `bytes.Index` と、行番号のための `bytes.Count` の 1 回ずつで終わる
 - 番号を消費しないもの: `--allow` の値、特殊アドレス、`--ip-scope` 外、保護範囲
 - Go の map の反復順に依存する処理を、出力・連番・stats のどこにも入れない(stats は `label.Types` の固定順で出す)
 - 前処理(3.4 節)は「その種別が一致しうる必要条件」だけにする。前処理あり/なしで結果が同じことをファズテストで確認する(前処理の誤りが、mask と restore で同じように効いて気づきにくいのを防ぐ)

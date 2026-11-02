@@ -8,7 +8,7 @@ import (
 )
 
 func TestParseTypes(t *testing.T) {
-	def := KindSet(0).With(KindEmail).With(KindIPv4).With(KindIPv6).With(KindSecret)
+	def := KindSet(0).With(KindEmail).With(KindIPv4).With(KindIPv6).With(KindSecret).With(KindUserPath)
 	aws := KindSet(0).With(KindAWSAccount).With(KindAWSS3Bucket).With(KindAWSHost)
 	tests := []struct {
 		spec string
@@ -73,7 +73,7 @@ func TestParseTypesErrorNamesTheUnknownTypeAndTheValidOnes(t *testing.T) {
 	if err == nil {
 		t.Fatal("want error")
 	}
-	for _, want := range []string{"phone_jp", "default", "aws", "cloud", "email", "ipv4", "ipv6", "secret", "uuid", "aws_account", "aws_s3_bucket"} {
+	for _, want := range []string{"phone_jp", "default", "aws", "cloud", "email", "ipv4", "ipv6", "secret", "user_path", "uuid", "aws_account", "aws_s3_bucket"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}
@@ -96,7 +96,7 @@ func TestDefaultKinds(t *testing.T) {
 // 種別の表の性質(仕様 4 章): 種別名は重複せず、クラウドの種別は `<クラウド>_` で始まり、
 // 既定で有効の種別はクラウドの種別でない。並びは、共通の種別のあとに、クラウドごとにまとめる。
 func TestTypesTable(t *testing.T) {
-	want := []string{"email", "ipv4", "ipv6", "secret", "uuid", "host", "custom", "aws_account", "aws_s3_bucket", "aws_host"}
+	want := []string{"email", "ipv4", "ipv6", "secret", "user_path", "uuid", "host", "custom", "aws_account", "aws_s3_bucket", "aws_host"}
 	var got []string
 	seen := map[string]bool{}
 	for i, ti := range Types {
@@ -108,7 +108,8 @@ func TestTypesTable(t *testing.T) {
 		if ti.Cloud != "" && !strings.HasPrefix(ti.Name(), ti.Cloud+"_") {
 			t.Errorf("%q does not start with its cloud %q", ti.Name(), ti.Cloud)
 		}
-		if ti.Cloud == "" && strings.Contains(ti.Name(), "_") {
+		// user_path は、クラウドに依存しない種別で、`_` は語の区切り(Q100)。
+		if ti.Cloud == "" && ti.Kind != KindUserPath && strings.Contains(ti.Name(), "_") {
 			t.Errorf("%q looks like a cloud type but has no cloud", ti.Name())
 		}
 		if ti.Cloud != "" && ti.Default {

@@ -98,7 +98,7 @@ func New(o Options) (*Detector, error) {
 
 // builtinFinders は、種別ごとの検出器を返す。o は normalize 済みでなければならない。
 // 検出器は、段階が進むごとに加わった(email は段階 3、ipv4 / ipv6 は段階 4、secret は段階 5、uuid は段階 6。
-// v1.1 の aws_account は段階 4、aws_s3_bucket は段階 5、v1.2 の aws_host は段階 3、v1.3 の host・custom は段階 5、6)。
+// v1.1 の aws_account は段階 4、aws_s3_bucket は段階 5、v1.2 の aws_host は段階 3、v1.3 の host・custom は段階 5、6、v1.5 の user_path は段階 1)。
 func builtinFinders(o Options) []finder {
 	var fs []finder
 	if o.Kinds.Has(KindEmail) {
@@ -112,6 +112,9 @@ func builtinFinders(o Options) []finder {
 	}
 	if o.Kinds.Has(KindSecret) {
 		fs = append(fs, secretFinder{format: o.Format})
+	}
+	if o.Kinds.Has(KindUserPath) {
+		fs = append(fs, newUserPathFinder(o.Format))
 	}
 	if o.Kinds.Has(KindUUID) {
 		fs = append(fs, uuidFinder{versions: o.UUIDVersions})
@@ -226,9 +229,25 @@ func (d *Detector) Clone() *Detector {
 //  5. 重なりを解決する。範囲が長いほうを優先し、同じ長さなら、保護範囲、種別の優先順位、
 //     開始位置の順で決める。負けた候補は、重なっていない部分も含めて捨てる
 func (d *Detector) Find(line []byte, dst []Match) ([]Match, int) {
+	return d.find(line, nil, dst)
+}
+
+// FindSpans は、Find に、読み取りの段が見つけた PEM の秘密鍵の範囲(1 行分)を、`secret` の候補として加えたもの。
+// 範囲が行全体の本文(Body)なら、ほかの種別の検出を行わない。範囲は、Find の候補と同じ規則で扱う
+// (--allow、保護範囲、重なりの解決)。
+func (d *Detector) FindSpans(line []byte, spans []PEMSpan, dst []Match) ([]Match, int) {
+	return d.find(line, spans, dst)
+}
+
+func (d *Detector) find(line []byte, spans []PEMSpan, dst []Match) ([]Match, int) {
 	d.raw = d.raw[:0]
-	for _, f := range d.finders {
-		d.raw = f.find(line, d.raw)
+	if len(spans) == 0 || !spans[0].Body {
+		for _, f := range d.finders {
+			d.raw = f.find(line, d.raw)
+		}
+	}
+	for _, s := range spans {
+		d.raw = append(d.raw, Match{Start: s.Start, End: s.End, Kind: KindSecret})
 	}
 
 	d.cands = d.cands[:0]

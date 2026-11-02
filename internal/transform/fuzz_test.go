@@ -53,6 +53,25 @@ var fuzzFragments = []string{
 	"curl https://internal.corp.example.jp/api", "taro@acme.co.jp", "taro@mail.corp.example.jp", "postgres://app:s3cret@db.mycompany.internal/",
 	"notcorp.example.jp", "corp.example.jp.evil.org", "<custom_1>", "<host_1>", "custom_3f9a1c0b7d2e", "host_3f9a1c0b7d2e", "password=<custom_1>",
 	"https://u:<secret_1>@<host_1>/", "https://u:secret_3f9a1c0b7d2e@host_3f9a1c0b7d2e/",
+	// ホームディレクトリのパス(v1.5)
+	`File "/home/yamada/proj/app.py", line 3`, "/Users/hanako/Library/Logs", `C:\Users\Taro Yamada\AppData\Local`,
+	`{"path":"C:\\Users\\yamada\\app.log"}`, "C:/Users/yamada/app.log", "/mnt/c/Users/yamada/x", "file:///home/yamada/a.txt",
+	"HOME=/home/yamada", "PWD=/home/user", "/home/ubuntu/x", "/home/$USER/x", "GET /home/dashboard HTTP/1.1",
+	"/home/<user_path_1>/proj", `C:\Users\<user_path_1>\AppData`, "/home/user_path_3f9a1c0b7d2e/proj", "<user_path_1>", "user_path_3f9a1c0b7d2e",
+	// PEM の秘密鍵(v1.5)
+	"-----BEGIN RSA PRIVATE KEY-----\nQUJDREVG\nR0hJSktM\n-----END RSA PRIVATE KEY-----", "-----BEGIN RSA PRIVATE KEY-----\n<secret_1>\n<secret_2>\n-----END RSA PRIVATE KEY-----",
+	"-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\n\nQUJDREVG\n-----END RSA PRIVATE KEY-----", "-----BEGIN CERTIFICATE-----\nQUJDREVG\n-----END CERTIFICATE-----",
+	"{\"pem\":\"-----BEGIN RSA PRIVATE KEY-----\\nQUJD\\n-----END RSA PRIVATE KEY-----\\n\"}", "KEY=-----BEGIN RSA PRIVATE KEY----- QUJDREVGR0hJSktM -----END RSA PRIVATE KEY-----", "-----BEGIN RSA PRIVATE KEY-----<secret_1>-----END RSA PRIVATE KEY-----",
+	"-----BEGIN RSA PRIVATE KEY-----\nQUJDREVG\n", "expected -----BEGIN RSA PRIVATE KEY----- here",
+	"{\"log\":\"-----BEGIN RSA PRIVATE KEY-----\\n\"}\n{\"log\":\"QUJD\\n\"}\n{\"log\":\"-----END RSA PRIVATE KEY-----\\n\"}", "{\"log\":\"<secret_1>\\n\"}",
+	"t=1 -----BEGIN RSA PRIVATE KEY-----\nt=2 Proc-Type: 4,ENCRYPTED\nt=3 QUJD\nt=4 -----END RSA PRIVATE KEY-----", "t=2 <secret_1>",
+	"{\"log\":\"2026-11-01 INFO -----BEGIN RSA PRIVATE KEY-----\\n\"}\n{\"log\":\"2026-11-01 INFO Proc-Type: 4,ENCRYPTED\\n\"}\n{\"log\":\"2026-11-01 INFO QUJD\\n\"}\n{\"log\":\"2026-11-01 INFO -----END RSA PRIVATE KEY-----\\n\"}", "{\"log\":\"token=<secret_1>\\n\"}",
+	"key=-----BEGIN RSA PRIVATE KEY-----\\n\nQUJD\\n\n-----END RSA PRIVATE KEY-----\\n", "KEY=\"-----BEGIN RSA PRIVATE KEY-----\\n\\\nQUJD\\n\\\n-----END RSA PRIVATE KEY-----\\n\"",
+	"{\"log\":\"-----BEGIN RSA PRIVATE KEY-----\\nQUJD\\n\",\"stream\":\"stderr\"}\n{\"log\":\"REVG\\n\"}", "key=-----BEGIN RSA PRIVATE KEY-----\\n ", "-----BEGIN RSA PRIVATE KEY-----secret_3f9a1c0b7d2e",
+	`\\wsl$\Ubuntu\home\yamada\x`, "//wsl$/Ubuntu/home/yamada/x", "//wsl.localhost/Ubuntu/home/yamada/x", `C:\Users/yamada/x`, `C:/Users\yamada\x`, "jar:file:/C:/Users/yamada/app.jar", `C:\/Users\/Taro Yamada\/x`,
+	"/cygdrive/c/Users/yamada/x", "/cygdrive/c/Users/Taro Yamada/x", "/cygdrive/c/Users/<user_path_1>/x",
+	"GET http://10.0.0.5/home/dashboard HTTP/1.1", "http://172.16.0.3/c/users/123", "http://172.16.0.3/Users/123", "10.0.0.5/home/dashboard", "http://[2001:db8::1]/home/x",
+	"http://<ipv4_private_1>/home/dashboard", `http:\/\/10.0.0.5\/home\/dashboard`, "https://api.corp.example.jp/home/dashboard", "https://acme/home/dashboard", "taro@example.com/home/yamada", "/home/yamada/home/hanako",
 	// 崩れたラベル(v1.3)
 	"&lt;email_1&gt;", `\<email_1\>`, `\\10.0.0.5\share`, "&lt;taro@example.com&gt;",
 	// 文脈(値でないもの)

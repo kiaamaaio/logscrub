@@ -5,7 +5,7 @@
 ## 全般
 
 - 検出は完全ではありません。**外部に出す前に、出力を必ず確認してください。**
-- 氏名・住所、画像・PDF・バイナリ、複数行にまたがる値(PEM 秘密鍵など)は、対象外です。
+- 氏名・住所、画像・PDF・バイナリ、複数行にまたがる値(PEM の秘密鍵を除く)は、対象外です。
 - 電話番号、郵便番号、クレジットカード番号、マイナンバー、base64 の文字列は、v1 の対象外です。任意の正規表現は指定できません(語の指定は `--deny`)。
 - 上記の形式に当てはまらない、独自形式のトークンは検出されません。
 
@@ -35,6 +35,23 @@
 - 置換済みのラベルの直後に続くキー名(`<email_1>password=abc`)は、キー名として扱いません(置換の結果を再度流したときに、`10.0.0.1passwd=x` の `x` が置換されないようにするため)。
 - `session_id=<UUID>` のように、キー名の値が UUID の場合は、`<uuid_N>` でなく `<secret_N>` になります。
 - URL のパスワードは、`<スキーム>://<ユーザー>:<パスワード>@<ホスト名の文字>` の形のときだけ検出します。空白・`/`・`?`・`#` や、URL に書けない文字(`"` `'` `` ` `` `<` `>` `\` `{` `}` `|` `^`)を含むパスワード(URL エンコードされていないもの)は、その手前までになるか、検出されません。`secret` を無効にして `email` だけを指定すると、パスワードは置換されずに残ります(その `@` は、メールアドレスとして扱いません)。ユーザー・パスワードは `@` を含んでよく、ホストの手前の最後の `@` までをユーザー情報とします。そのため、パスのない URL の後ろに、空白なしで `,` `;` などと `@` を含む文字列が続くと(`redis://:pw@10.0.0.5:6379,admin=taro@example.com`)、ユーザー情報が後ろの `@` まで伸び、`pw@10.0.0.5:6379,admin=taro` が 1 つの値として置換されます。スキームの直前が `_` の形(`x_https://u:p@h`)は、URL として扱いません(hash の出力 `email_<16 進数>` の後ろに `://` が続く場合に、16 進数をスキームとして読まないため)。
+
+- PEM の秘密鍵は、BEGIN の印を見て判定します。`tail` や `grep` で切り出して BEGIN の行がない本文は、検出できません。
+- END の印の前に本文の形でない行が来ると、そこでブロックを終えます(stderr に通知します)。END の印がある鍵でも、途中に別の行が混ざると、その行より後ろの本文は残ります。行の先頭に日時などが付くログでは、BEGIN の印と同じ列から本文を判定します。行頭の長さが行ごとに違うときと、BEGIN の印の直前が base64 の文字のとき(`ts=1 msg=-----BEGIN PRIVATE KEY-----` の `=`)は、行末に base64 の文字が 40 文字以上続く行だけが本文になるので、短い行やヘッダーの行でブロックが終わり、その後ろの本文は残ります(stderr に通知します)。
+- 行の先頭に日時などが付く形と文字列で包まれた形では、END の印に続けて書かれた本文(`t=3 AAAA-----END PRIVATE KEY-----`、`{"log":"AAAA-----END PRIVATE KEY-----\n"}` の `AAAA`)が残り、stderr の通知も出ません。
+- 行頭に日時などが付くログで、BEGIN の印の列と同じ長さの行は、末尾が空白か記号なら、空行として扱われてブロックが続きます。その行は置換されず、続く行が本文の形なら伏せられます。
+- 本文の形の短い語(`done` など)は、END のないブロックの中では、本文として置換されます。
+- ブロックの途中に(END の印の有無によらず)、行全体がトークンの行(`ghp_…`、JWT、`sk_live_…`。Docker の `{"log":"ghp_…\n"}` の形でも同じ)があると、トークンは置換されますが、その行でブロックが終わり、後ろの本文は残ります(stderr に通知します)。ただし、行末に base64 の文字が 40 文字以上続くトークン(`_` の後ろが 40 文字以上の `ghp_…`、`sk_live_…`、署名の末尾の 40 文字に `-` `_` のない JWT)は、本文の行として読まれるので、ブロックが続き、後ろの本文も伏せられます。ブロックが終わった場合、その出力を再度 `mask` すると、置換済みの行でブロックが続くので、残っていた本文が伏せられ、結果が変わります。このとき、残っていた本文には、新しい連番のラベルが付くので、1 回目のラベルと同じ番号になることがあります。
+- 鍵の本文は、行ごとに別のラベルになります。4096 ビットの RSA で約 50 個になり、後ろの `<secret_N>` の番号がその分ずれます。
+- 1 行ごとに文字列で包まれた鍵は、BEGIN の印の後ろが文字の `\n` で、そのあとが閉じ引用符、行末、`\` だけのときに検出します(Docker の `{"log":"-----BEGIN PRIVATE KEY-----\n",…}`、ソースコードの `"-----BEGIN PRIVATE KEY-----\n" +`、シェルなどの行の継続の `KEY="-----BEGIN PRIVATE KEY-----\n\`)。
+- BEGIN の印の後ろにほかの文字が続く形は、END の印がなければ、その行の印の後ろだけを 1 つのラベルにします。本文の 1 行目が印と同じ行にある形(`{"log":"-----BEGIN PRIVATE KEY-----\nAAAA\n",…}`、`KEY="-----BEGIN PRIVATE KEY-----\nAAAA\n\`、`key=-----BEGIN PRIVATE KEY-----\nAAAA\n`、空白のあとに base64 の文字が 16 文字以上続く形)と、`\n` の後ろに空白や `\n` が続く形(`key=-----BEGIN PRIVATE KEY-----\n `、`key=-----BEGIN PRIVATE KEY-----\n\n`)が当たります。次の行からの本文は残ります(stderr に通知します)。
+- END のない 1 行の形のあとは、同じ行の残りを見ません。END のない鍵が 1 行に 2 つあると、1 つ目だけが伏せられ、2 つ目の本文は残ります(`{"a":"-----BEGIN PRIVATE KEY-----\nAAAA\n","b":"-----BEGIN PRIVATE KEY-----\nBBBB\n"}` の `\nBBBB\n`。`"b"` の値が印と `\n` だけなら、次の行からの本文)。stderr の通知は、1 つ目の 1 件だけです。
+- 同じ行に BEGIN の印が 2 つあり、END の印がなく、1 つ目の後ろに本文がない形でも、2 つ目は見ないので、その本文は残ります。1 つ目が印だけの形(`{"a":"-----BEGIN PRIVATE KEY-----","b":"-----BEGIN PRIVATE KEY-----\nBBBB\n"}`、`expected -----BEGIN PRIVATE KEY----- got -----BEGIN PRIVATE KEY-----\nBBBB\n` の `\nBBBB\n`。`"b"` の値が印と `\n` だけなら、次の行からの本文)は、stderr の通知が出ません。1 つ目が `\n` で終わる複数行の形(`{"a":"-----BEGIN PRIVATE KEY-----\n","b":"-----BEGIN PRIVATE KEY-----\nBBBB\n"}` の `\nBBBB\n`)は、次の行を 1 つ目のブロックとして見ます。ブロックが閉じなければ通知が出ますが、次の行に END の印があると、通知は出ません。
+- `\n` がない形(`"-----BEGIN PRIVATE KEY-----",` の次の行に続く形、行末が `\` だけの `KEY=-----BEGIN PRIVATE KEY-----\`)と、印の後ろが空白と短い語の形(`-----BEGIN PRIVATE KEY----- AAAA`)は、本文の行を検出できず、stderr の通知も出ません。
+- `\` を 2 重にした形(`{"log":"{\"msg\":\"-----BEGIN PRIVATE KEY-----\\n<本文>\\n\"}\n"}`。Docker のログの中の JSON のロガーなど)は、同じ行に END の印がなければ、本文が残り、stderr の通知も出ません。
+- 文字列で包まれた鍵の本文は、1 レコードに 1 行で、その行の最初の文字の `\n` の手前にあるものとして判定します。1 レコードに複数行がある形(`{"log":"AAAA\nBBBB\n"}` の `BBBB`)と、前のフィールドに `\n` がある形(`{"a":"x\n","log":"AAAA\n"}` の `AAAA`)は、本文が残り、stderr の通知も出ません。`/` をエスケープした形(`{"log":"AAAA\/BBBB\n"}`)は、そこでブロックが終わり、本文が残ります(stderr に通知します)。
+- END のないブロックを伏せた出力を再度流すと、ブロックがまた閉じないので、1 回目と同じ BEGIN の行番号の通知が残ることがあります。本文の行で入力が終わる形(`-----BEGIN PRIVATE KEY-----` と `<secret_1>` の 2 行)、本文の形でない行でブロックが終わる形、END のない 1 行の形の行でブロックが終わる形(`{"log":"-----BEGIN PRIVATE KEY-----\nBBBB\n","stream":"x"}`、`"-----BEGIN PRIVATE KEY-----\nBBBB\n" x`)が当たります。ブロックを終えた行が、置換のあとは本文の続きとして読めるようになると、残っていた本文が 2 回目に伏せられ、出力が変わります。たとえば、上の、行全体がトークンの行の項目、ラベルが base64 の文字だけでできる `--mask-format '{type}{n}'` の、`email1` のようなほかの種別のラベルの行、行頭に日時などが付くログで、ラベルと空白の長さが BEGIN の印の列と同じになる行(`12:00:01: -----BEGIN PRIVATE KEY-----` のブロックの `x@example.org BBBB` は `<email_1> BBBB` になり、`<email_1> ` が 10 文字なので、2 回目は `BBBB` と後ろの本文が伏せられます)、`--mode hash` の `--hash-length` が 40 以上で、行末がハッシュ値になる行(`contact taro@example.com` が `contact email_<16 進数>` になる行の、後ろの本文)です。mask では、残っていた本文に新しい連番のラベルが付くので、1 回目のラベルと同じ番号になることがあります。
+- PuTTY の `.ppk` など、PEM でない形式も対象外です。
 
 ## AWS の値
 
@@ -71,6 +88,17 @@
 - 国際化ドメインは、`xn--…` の形でだけ指定できます。
 - 指定していないドメインは検出しません(別名や、CNAME の先は分かりません)。
 
+## ホームディレクトリのパス
+
+- 形だけで判定するので、`/home/` で始まる Web のパス(`GET /home/dashboard`、`/home/v1/items`)や、Windows の形に見える `GET /c/users/123` の `dashboard`・`v1`・`123` も置換されます。`restore` で戻せます。`--allow` でも残せます。
+- パスの途中の `/home/`・`/Users/`(`/var/home/yamada`、`/data/home/yamada`、`/Volumes/Data/Users/yamada`)と、ドメインのある URL、IP アドレスの URL(`https://10.0.0.1/home/yamada`)は対象外です。ただし、`[…]` で囲んだ IPv6 アドレスの直後のパス(`http://[2001:db8::1]/home/dashboard`)は、対象になります。ユーザー名がパスの外にある形(`user=yamada`、`~yamada`)も対象外です。`--deny` で指定してください。
+- [docs/detection.md](docs/detection.md#ホームディレクトリのパスuser_path) の表の形に当たらないパスは対象外で、ユーザー名が残ります。次は、その例です(この一覧にない形も残ります): 2 重にエスケープしたパス(`C:\\\\Users\\\\yamada`)、`file:///mnt/c/Users/…`、`file:///c/Users/…`、`file:///cygdrive/c/Users/…`、`\/mnt\/c\/Users\/…` と `\/c\/Users\/…` と `\/cygdrive\/c\/Users\/…`、`file:\/\/\/home\/…`、`/` をエスケープした WSL の形(`\/\/wsl$\/Ubuntu\/home\/yamada`、`\/\/wsl.localhost\/Ubuntu\/home\/yamada`、`\/\/?\/UNC\/wsl$\/Ubuntu\/home\/yamada`、`\/\/?\/UNC\/wsl.localhost\/Ubuntu\/home\/yamada`)、エスケープした形で区切りが混ざるパス(`C:\\Users/yamada`)、ドライブのない形(`HOMEPATH=\Users\yamada`)、英数字の直後のパス(`-I/home/yamada`、`-L/Users/yamada`)、WSL の形の大文字(`\\WSL$\Ubuntu\home\yamada`)、`/mnt` と `file:///` の語の大文字(`/MNT/C/Users/yamada`、`FILE:///C:/users/yamada`)、WSL の形で区切りが混ざるパス(`\\wsl$\Ubuntu/home/yamada`)、WSL の URL(`file://wsl$/Ubuntu/home/yamada`、`file:////wsl$/Ubuntu/home/yamada`、`file:////wsl.localhost/Ubuntu/home/yamada`、`file://wsl.localhost/Ubuntu/home/yamada`)、WSL の長いパス(`\\?\UNC\wsl$\Ubuntu\home\yamada`、`\\?\UNC\wsl.localhost\Ubuntu\home\yamada`、`//?/UNC/wsl$/Ubuntu/home/yamada`、`//?/UNC/wsl.localhost/Ubuntu/home/yamada`、`\\\\?\\UNC\\wsl$\\Ubuntu\\home\\yamada`、`\\\\?\\UNC\\wsl.localhost\\Ubuntu\\home\\yamada`)、Windows のデバイスのパス(`\\.\C:\Users\yamada`、`\\\\.\\C:\\Users\\yamada`、`\\.\UNC\wsl$\Ubuntu\home\yamada`)、Cygwin のホームディレクトリ(`C:\cygwin64\home\yamada`、`/cygdrive/c/cygwin64/home/yamada`)、MSYS2 のホームディレクトリ(`C:\msys64\home\yamada`、`/c/msys64/home/yamada`)、ドライブ名だけの形で区切りが混ざるパス(`/c/Users\yamada`、`/mnt/c/Users\yamada`、`/cygdrive/c/Users\yamada`)、`/` が重なるパス(`//home/yamada`、`//Users/yamada`、`/home//yamada`、`C://Users/yamada`、`/c//Users/yamada`、`/mnt/c//Users/yamada`)、UNC の共有(`\\fs01\users\yamada`、`\\fs01\home\yamada`、`\\fs01\c$\Users\yamada`、`//fs01/home/yamada`、`//fs01/users/yamada`。サーバーと共有の名前が自由で、形で判定できないため)。
+- 空白を含む名前は、Windows の形で、後ろに `\` か `/` があるときだけ 1 つの値になります。最後の要素(`C:\Users\Taro Yamada`)は `Taro` だけが置換され、`Yamada` が残ります。Linux・macOS の形の空白でも、同じです。URL の `%20`(`file:///C:/Users/Taro%20Yamada/`)と、`/` をエスケープした URL(`file:\/C:\/Users\/Taro Yamada\/x`)も同じです。
+- キー名の値の中のパスで、キー名の値が空白で切れると、後ろの部分が残ります(`private_key: C:\Users\Taro Yamada\.ssh\id_rsa` の `Yamada`)。
+- 空白を含む名前の後ろに、空白で区切られたパスが続くと、間の語も値に含まれます(`C:\Users\taro and /var/log` は `taro and` が 1 つの値)。
+- 対象外の名前(`user`、`admin` など)が実際のユーザー名でも、残ります。
+- 置換済みのラベルの直後のパス(`<ipv4_private_1>/home/yamada`)は、対象にしません(`http://10.0.0.5/home/dashboard` の置換の結果を再度流したときに、`dashboard` が置換されないようにするため)。
+
 ## UUID
 
 - 既定では無効です(リクエスト ID・トレース ID の場合もあるため)。ハイフン無しの 32 桁は、対象外です。
@@ -98,10 +126,17 @@
 - 本物の値が、たまたま `<種別>_<12 桁の小文字 16 進数>`(例: `secret_3f9a1c0b7d2e`、`host_3f9a1c0b7d2e`)と同じ形だと、
   置換されません(上記の通知で気づけます)。
 
+## `--review`
+
+- 怪しい語の判定は、長さと文字の種類だけの目安です。残った値をすべて見つけるものではありません(短い値、英字だけ・数字だけの値、記号を含む値は印が付きません)。ハッシュ値や ID のような、問題のない値にも付きます。
+- 確認の目は必要です。色の付いていない部分も読んでください。
+- 古い Windows のコンソールでは、色の指定が文字として表示されることがあります(確かめていません)。その場合は、環境変数 `NO_COLOR` を設定してください。
+
 ## 冪等性
 
 - 値を置換した結果、隣の文字列とのつながりが変わり、2 回目に、新しい値が検出されることがあります
   (例: `000000A10.0.0.0fC00::` は、1 回目に `10.0.0.0` だけが置換され、2 回目に `fC00::` が検出されます)。
-- 冪等性を保証するのは、現実のログ・テキストに現れうる入力に対してです。値どうしや値と記号が区切りなしで密着した、
+- 冪等性を保証するのは、現実のログ・テキストに現れうる入力に対してです(下の PEM の鍵のブロックを除きます)。値どうしや値と記号が区切りなしで密着した、
   手で作らない限り現れない入力(`::1:0@0.AA%0@0.AA`、`passwd=!A://:&@00` など)では、上のように 2 回目に新しい値が
   検出されたり、置換済みのラベルを含む範囲が再度置換されたりすることがあり、このような形には個別に対応しません。
+- PEM の鍵のブロックが END の印まで続かず、ブロックを終えた行が、置換のあとは本文の続きとして読める形では、手で作った入力でなくても、2 回目に、残っていた本文が伏せられて結果が変わることがあります。起きる形は、[secret](#secret) の、行全体がトークンの行の項目と、END のないブロックを伏せた出力の項目を見てください。

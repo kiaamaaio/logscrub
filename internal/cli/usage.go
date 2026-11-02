@@ -33,6 +33,8 @@ const secretFormatsHelp = `Supported secret formats:
   JWT                   eyJ... . eyJ... . ... (three parts)
   Authorization header  the credentials after "Bearer " or "Basic ", when they are the
                         value of Authorization or of one of the key names below
+  PEM private key       the lines between -----BEGIN ... PRIVATE KEY----- and -----END ...
+                        (each line gets its own label), also on one line
   Key-based             the value of password, passwd, secret, token, api_key, apikey,
                         access_key, private_key, client_secret, access_token,
                         refresh_token, auth_token, session_id (case-insensitive;
@@ -51,11 +53,11 @@ secrets; see --types. Several FILEs are read in the given order as one input
 Options (they may be written before or after FILE):
   --mode mask|hash          mask: <email_1> style labels (default).
                             hash: <type>_<hex> using HMAC-SHA256; cannot be restored.
-  --types LIST              comma separated types: email, ipv4, ipv6, secret, uuid,
-                            host, custom, aws_account, aws_s3_bucket, aws_host;
+  --types LIST              comma separated types: email, ipv4, ipv6, secret,
+                            user_path, uuid, host, custom, aws_account, aws_s3_bucket, aws_host;
                             or groups: default, aws, cloud. Only the listed types are
                             replaced (add "default" to keep the default ones).
-                            Default: default (email, ipv4, ipv6, secret; uuid,
+                            Default: default (email, ipv4, ipv6, secret, user_path; uuid,
                             host, custom and aws_* are off).
                             Run "logscrub types" for the list.
   --uuid-versions 4,7       replace only these UUID versions (1-8); enables uuid.
@@ -78,6 +80,14 @@ Options (they may be written before or after FILE):
   --stats                   print the number of replacements per type to stderr.
   --fail-on-detect          exit with status 2 when something was replaced.
   -o, --output FILE         write to FILE instead of stdout.
+  --out-dir DIR             write one masked file per FILE into DIR (numbering continues
+                            across files). Paths are kept relative to the common parent
+                            of the FILEs; existing files are never overwritten.
+  --review                  show the result on stdout for checking it: replacements
+                            and suspicious strings left in the text are colored,
+                            control characters are made visible. Do not pass this
+                            output on. Use "| less -R" for long logs. NO_COLOR turns
+                            the colors off. Not with --output or --out-dir.
   -h, --help                show this help.
 
 Exit status: 0 success, 1 error, 2 something was replaced (--fail-on-detect).

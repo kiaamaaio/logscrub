@@ -1,0 +1,48 @@
+2026-11-01T12:00:00Z INFO loading key for taro@example.com
+-----BEGIN RSA PRIVATE KEY-----
+QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5YWJjZGVmZ2hpamts
+bW5vcHFyc3R1dnd4eXowMTIzNDU2Nzg5QUJDREVGR0hJSktMTU5PUFFSU1RVVldY
+ZmFrZQ==
+-----END RSA PRIVATE KEY-----
+-----BEGIN ENCRYPTED PRIVATE KEY-----
+Proc-Type: 4,ENCRYPTED
+DEK-Info: AES-128-CBC,00112233445566778899AABBCCDDEEFF
+
+QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5YWJjZGVmZ2hpamts
+-----END ENCRYPTED PRIVATE KEY-----
+-----BEGIN CERTIFICATE-----
+QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5YWJjZGVmZ2hpamts
+-----END CERTIFICATE-----
+{"name":"svc","pem":"-----BEGIN RSA PRIVATE KEY-----\nQUJD\nREVG\n-----END RSA PRIVATE KEY-----\n","owner":"hanako@example.com"}
+KEY=-----BEGIN RSA PRIVATE KEY----- QUJDREVGR0hJSktMTU5PUFFSU1RVVldY -----END RSA PRIVATE KEY-----
+{"private_key":"-----BEGIN RSA PRIVATE KEY-----\nQUJD\n-----END RSA PRIVATE KEY-----\n"}
+2026-11-01T12:00:01Z ERROR expected "-----BEGIN RSA PRIVATE KEY-----" in the file
+-----BEGIN RSA PRIVATE KEY-----
+QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5YWJjZGVmZ2hpamts
+2026-11-01T12:00:02Z ERROR key is cut here, src=10.0.0.1
+2026-11-01T12:00:03Z INFO done
+{"log":"-----BEGIN RSA PRIVATE KEY-----\n","stream":"stderr","time":"2026-11-01T12:00:04Z"}
+{"log":"QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5YWJjZGVmZ2hpamts\n","stream":"stderr","time":"2026-11-01T12:00:04Z"}
+{"log":"ZmFrZQ==\n","stream":"stderr","time":"2026-11-01T12:00:04Z"}
+{"log":"-----END RSA PRIVATE KEY-----\n","stream":"stderr","time":"2026-11-01T12:00:04Z"}
+{"log":"2026-11-01 INFO -----BEGIN ENCRYPTED PRIVATE KEY-----\n","stream":"stderr"}
+{"log":"2026-11-01 INFO Proc-Type: 4,ENCRYPTED\n","stream":"stderr"}
+{"log":"2026-11-01 INFO \n","stream":"stderr"}
+{"log":"2026-11-01 INFO QUJDREVG\n","stream":"stderr"}
+{"log":"2026-11-01 WARN ZmFrZQ==\n","stream":"stderr"}
+{"log":"2026-11-01 INFO -----END ENCRYPTED PRIVATE KEY-----\n","stream":"stderr"}
+KEY=-----BEGIN RSA PRIVATE KEY-----\n
+QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5YWJjZGVmZ2hpamts\n
+-----END RSA PRIVATE KEY-----\n
+KEY="-----BEGIN RSA PRIVATE KEY-----\n\
+QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5YWJjZGVmZ2hpamts\n\
+ZmFrZQ==\n\
+-----END RSA PRIVATE KEY-----\n"
+{"log":"-----BEGIN RSA PRIVATE KEY-----\nQUJDREVG\n","stream":"stderr"}
+{"log":"ZmFrZQ==\n","stream":"stderr"}
+KEY="-----BEGIN RSA PRIVATE KEY-----\nQUJDREVG\n\
+ZmFrZQ==\n\
+key=-----BEGIN RSA PRIVATE KEY-----\n\n
+ZmFrZQ==\n
+-----BEGIN RSA PRIVATE KEY----- QUJDREVGR0hJSktMTU5P
+ZmFrZQ==

@@ -25,6 +25,24 @@ JSON などの文法を壊さないよう、キー名が引用符で囲まれて
 `passwd://…` のように `:` の直後が `//` の場合は、キー名ではなく URL のスキームとして扱います(パスワードがあれば、URL のパスワードとして置換します)。
 値が `<スキーム>://<ユーザー>:<パスワード>@<ホスト>` の形で始まる場合(`password=postgres://app:s3cret@db/`)も、キー名ベースの値としては扱わず、パスワードの部分だけを置換します(`password=postgres://app:<secret_1>@db/`)。ユーザー情報のない URL(`token=https://hooks.example.com/…`)は、今までどおり値全体を置換します。
 
+### PEM の秘密鍵
+
+`-----BEGIN … PRIVATE KEY-----`(`RSA`、`EC`、`DSA`、`OPENSSH`、`ENCRYPTED` など)と `-----BEGIN PGP PRIVATE KEY BLOCK-----` のブロックの本文を置換します。印は残ります。`CERTIFICATE`、`PUBLIC KEY` は対象外です。
+
+```console
+$ logscrub mask key.pem
+-----BEGIN RSA PRIVATE KEY-----
+<secret_1>
+<secret_2>
+-----END RSA PRIVATE KEY-----
+```
+
+- 本文は、行ごとに別のラベルになります。行の数と改行コードは変わらず、`restore` で 1 バイトも違わずに戻ります。
+- 1 行に収まった形(`{"pem":"-----BEGIN…\n…\n-----END…\n"}`、改行を空白にした形)は、印の間を 1 つのラベルにします。
+- 1 行ごとに文字列で包まれたログ(Docker の `{"log":"…\n",…}`)と、行頭に日時などが付くログの本文も伏せます。
+- END の印がなければ、本文の形でない行でブロックを終えて、通常の処理に戻ります。後ろのログは消えません。この場合、BEGIN の行番号を stderr に通知します。
+- END の印のない 1 行の形(`{"log":"-----BEGIN…\n…\n",…}`)は、印の後ろを 1 つのラベルにします。次の行に本文が続いても伏せないので、BEGIN の行番号を stderr に通知します。
+
 ## AWS の値
 
 AWS アカウント ID と S3 のバケット名は、秘密情報ではありませんが、組織を特定できます。
@@ -88,6 +106,28 @@ connect <aws_host_1>.ap-northeast-1.rds.amazonaws.com:5432
 - EC2 のホスト名(`ec2-…`、`ip-…`)は `ipv4`、S3 のホスト名は `aws_s3_bucket`、ECR・S3 Control のホスト名は `aws_account` として置換されます(`aws_host` にはなりません)。
 - `admin@mydb.….rds.amazonaws.com` のように、メールアドレスの一部として読めるホスト名は、長いメールアドレスが優先されます。
 - 表の形は、2026-10-18 に AWS の公式ドキュメントで確認しました。
+
+## ホームディレクトリのパス(`user_path`)
+
+スタックトレースやエラーメッセージのパスに出る人名を伏せます。既定で有効です。置換するのはユーザー名の部分だけで、パスの残りは残ります。
+
+```console
+$ echo 'File "/home/yamada/proj/app.py", line 3' | logscrub mask
+File "/home/<user_path_1>/proj/app.py", line 3
+```
+
+| 形 | 例 |
+|---|---|
+| Linux・macOS | `/home/yamada/`、`/Users/yamada/`、`file:///home/yamada/`、`\/home\/yamada\/`(`/` をエスケープした JSON) |
+| WSL の共有 | `\\wsl$\Ubuntu\home\yamada\`、`\\wsl.localhost\Ubuntu\home\yamada\`(`\` を 2 重にした形も)、`//wsl$/Ubuntu/home/yamada/`、`//wsl.localhost/Ubuntu/home/yamada/` |
+| Windows | `C:\Users\yamada\`、`C:\\Users\\yamada\\`(JSON など)、`C:\/Users\/yamada\/`、`C:/Users/yamada/`、`/mnt/c/Users/yamada/`(WSL)、`/c/Users/yamada/`(Git Bash)、`/cygdrive/c/Users/yamada/`(Cygwin)、`file:///C:/Users/yamada/`、`file:/C:/Users/yamada/`、`/C:/Users/yamada/`、`C:\Users/yamada/`、`C:/Users\yamada\`(区切りが混ざる形) |
+
+- `/home/yamada` と `/Users/yamada` は、同じラベルになります。
+- `/home/yamada` のように、後ろに `/` がなくても対象です。日本語の名前も対象です。
+- Windows の形は、大文字・小文字を区別せず(`/mnt`、`file:///` の語は区別します)、次の区切りがあれば空白を含む名前も 1 つの値にします(`C:\Users\Taro Yamada\AppData`)。
+- 次の名前は人名でないので、対象にしません: `user`、`ubuntu`、`ec2-user`、`debian`、`centos`、`admin`、`runner`、`node`、`vagrant`、`Administrator`、`Public`、`Default`、`Default User`、`All Users`、`Shared`、`Guest`。ほかの名前を残すときは、`--allow` にユーザー名を指定します。
+- `/home/$USER/`、`/home/*/` は対象外です。ほかの対象外の形は、[LIMITATIONS.md](../LIMITATIONS.md#ホームディレクトリのパス)を見てください。
+- `--deny` の語と同じ範囲なら、`<custom_N>` になります。
 
 ## 指定した語(`custom`)
 

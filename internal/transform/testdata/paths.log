@@ -1,0 +1,16 @@
+Traceback (most recent call last):
+  File "/home/yamada/proj/app.py", line 3, in <module>
+  File "/Users/hanako/Library/Logs/app.py", line 7
+  File "/home/yamada/proj/lib.py", line 9
+at C:\Users\Taro Yamada\AppData\Local\app.js:10:5
+{"path":"C:\\Users\\suzuki\\app.log","cwd":"C:/Users/suzuki/work"}
+wsl cwd=/mnt/c/Users/tanaka/src git=/c/Users/tanaka/src url=file:///home/sato/a.txt
+HOME=/home/yamada.
+/home/山田/report.txt を開けません
+PWD=/home/user SHELL=/bin/bash /home/ubuntu/deploy /home/ec2-user/x /root/x C:\Users\Public\x
+/home/$USER/.ssh /home/*/x /var/home/x https://example.com/home/x
+token=/home/yamada/.token mail=/home/taro@example.com/x
+GET /home/dashboard HTTP/1.1 200
+java=file:/C:/Users/kato/app.jar slash=/C:/Users/kato/x mixed=C:\Users/kato/x other=C:/Users\kato\x
+wsl=\\wsl$\Ubuntu\home\ito\x json={"p":"\\\\wsl.localhost\\Ubuntu\\home\\ito\\x"} slashes=//wsl$/Ubuntu/home/ito/x //wsl.localhost/Ubuntu-22.04/home/ito
+https://wsl.localhost/Ubuntu/home/ito
