@@ -13,7 +13,7 @@
   - 速度が 4.1 節の基準を満たしていること
 - 止まる条件: Q の回答待ち、仕様との食い違い、Q の範囲を超える公開のオプションや出力の変更、既存の期待値やゴールデンの変更、速度の基準の「止まる」に当たるとき、同じ失敗を 2 回直せなかったとき
 - 未確定事項: [questions.md](questions.md)、[questions-1.md](questions-1.md)(Q113〜Q122)。回答待ちの項目は推測で実装しない
-- 段階ごとの記録: [log.md](log.md)。`/code-review` の修正の記録: [log-review.md](log-review.md)、[log-review-1.md](log-review-1.md)(1〜4 回目)、[log-review-2.md](log-review-2.md)(5〜6 回目)
+- 段階ごとの記録: [log.md](log.md)。`/code-review` の修正の記録: [log-review.md](log-review.md)、[log-review-1.md](log-review-1.md)(1〜4 回目)、[log-review-2.md](log-review-2.md)(5〜6 回目)、[log-review-3.md](log-review-3.md)(7 回目、Q126)
 
 ---
 
