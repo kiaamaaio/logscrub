@@ -69,6 +69,7 @@ var fuzzFragments = []string{
 	"key=-----BEGIN RSA PRIVATE KEY-----\\n\nQUJD\\n\n-----END RSA PRIVATE KEY-----\\n", "KEY=\"-----BEGIN RSA PRIVATE KEY-----\\n\\\nQUJD\\n\\\n-----END RSA PRIVATE KEY-----\\n\"",
 	"{\"log\":\"-----BEGIN RSA PRIVATE KEY-----\\nQUJD\\n\",\"stream\":\"stderr\"}\n{\"log\":\"REVG\\n\"}", "key=-----BEGIN RSA PRIVATE KEY-----\\n ", "-----BEGIN RSA PRIVATE KEY-----secret_3f9a1c0b7d2e",
 	`\\wsl$\Ubuntu\home\yamada\x`, "//wsl$/Ubuntu/home/yamada/x", "//wsl.localhost/Ubuntu/home/yamada/x", `C:\Users/yamada/x`, `C:/Users\yamada\x`, "jar:file:/C:/Users/yamada/app.jar", `C:\/Users\/Taro Yamada\/x`,
+	"/cygdrive/c/Users/yamada/x", "/cygdrive/c/Users/Taro Yamada/x", "/cygdrive/c/Users/<user_path_1>/x",
 	// 崩れたラベル(v1.3)
 	"&lt;email_1&gt;", `\<email_1\>`, `\\10.0.0.5\share`, "&lt;taro@example.com&gt;",
 	// 文脈(値でないもの)

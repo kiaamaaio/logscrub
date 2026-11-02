@@ -120,7 +120,7 @@ File "/home/<user_path_1>/proj/app.py", line 3
 |---|---|
 | Linux・macOS | `/home/yamada/`、`/Users/yamada/`、`file:///home/yamada/`、`\/home\/yamada\/`(`/` をエスケープした JSON) |
 | WSL の共有 | `\\wsl$\Ubuntu\home\yamada\`、`\\wsl.localhost\Ubuntu\home\yamada\`(`\` を 2 重にした形も)、`//wsl$/Ubuntu/home/yamada/`、`//wsl.localhost/Ubuntu/home/yamada/` |
-| Windows | `C:\Users\yamada\`、`C:\\Users\\yamada\\`(JSON など)、`C:\/Users\/yamada\/`、`C:/Users/yamada/`、`/mnt/c/Users/yamada/`(WSL)、`/c/Users/yamada/`(Git Bash)、`file:///C:/Users/yamada/`、`file:/C:/Users/yamada/`、`/C:/Users/yamada/`、`C:\Users/yamada/`、`C:/Users\yamada\`(区切りが混ざる形) |
+| Windows | `C:\Users\yamada\`、`C:\\Users\\yamada\\`(JSON など)、`C:\/Users\/yamada\/`、`C:/Users/yamada/`、`/mnt/c/Users/yamada/`(WSL)、`/c/Users/yamada/`(Git Bash)、`/cygdrive/c/Users/yamada/`(Cygwin)、`file:///C:/Users/yamada/`、`file:/C:/Users/yamada/`、`/C:/Users/yamada/`、`C:\Users/yamada/`、`C:/Users\yamada\`(区切りが混ざる形) |
 
 - `/home/yamada` と `/Users/yamada` は、同じラベルになります。
 - `/home/yamada` のように、後ろに `/` がなくても対象です。日本語の名前も対象です。

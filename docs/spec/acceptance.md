@@ -68,7 +68,7 @@ secret:
 - PEM の秘密鍵の本文が行ごとに `<secret_N>` になり、印、行の数、改行コードは保たれる。`CERTIFICATE` のブロックは置換されない
 - PEM の 1 行の形(`\n` が文字の形、改行を空白にした形)の本文が 1 つの `<secret_N>` になる
 - END のない PEM のブロックは、本文の形でない行で終わり、その行は通常どおり処理され、stderr に行番号だけが通知される。`"-----BEGIN PRIVATE KEY-----"` だけの行の後ろのログが伏せられない
-- 日時の付いた PEM の本文を伏せた出力を再度流しても、END のない PEM の通知が出ない
+- END のある、日時の付いた PEM の本文を伏せた出力を再度流しても、END のない PEM の通知が出ない
 - 行頭の長さが同じ日時の付いた PEM で、暗号化された鍵のヘッダーと短い最後の行も `<secret_N>` になる
 - 1 行ごとに文字列で包まれた PEM(`{"log":"…\n",…}`)の本文が行ごとに `<secret_N>` になる
 - 文字列の中の行頭の長さが同じ PEM(`{"log":"2026-11-01 INFO …\n",…}`)で、暗号化された鍵のヘッダーと短い最後の行も `<secret_N>` になる
@@ -83,7 +83,7 @@ user_path:
 - `PWD=/home/user`、`/home/ubuntu/`、`/home/$USER/`、`/var/home/x`、`https://example.com/home/x` は置換されない
 - `/home/yamada` と `/Users/yamada` が同じラベルになる
 - JSON の文字列の中の `\n/home/yamada/x`、`\/home\/yamada\/x`、`C:\/Users\/yamada\/x` のユーザー名が `<user_path_N>` になる
-- `C:\/Users\/Taro Yamada\/x`、`file:/C:/Users/yamada/x`、`C:\Users/yamada/x`、`\\wsl$\Ubuntu\home\yamada\x`、`//wsl$/Ubuntu/home/yamada/x` のユーザー名が `<user_path_N>` になる
+- `C:\/Users\/Taro Yamada\/x`、`file:/C:/Users/yamada/x`、`C:\Users/yamada/x`、`\\wsl$\Ubuntu\home\yamada\x`、`//wsl$/Ubuntu/home/yamada/x`、`/cygdrive/c/Users/yamada/x` のユーザー名が `<user_path_N>` になる
 - `https://wsl.localhost/Ubuntu/home/yamada` は置換されない
 - `--deny yamada` では、`/home/yamada/` も `<custom_1>` になる
 

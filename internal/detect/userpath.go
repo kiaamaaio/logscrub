@@ -142,7 +142,7 @@ func wslHomeStart(line []byte, p int) int {
 	return -1
 }
 
-// windowsSlashStart は、p の `/` の手前が、`C:`、`/C:`、`/c`、`/mnt/c`、`file:///C:` のどれかかを返す。
+// windowsSlashStart は、p の `/` の手前が、`C:`、`/C:`、`/c`、`/mnt/c`、`/cygdrive/c`、`file:///C:` のどれかかを返す。
 func windowsSlashStart(line []byte, p int) bool {
 	if p < 2 {
 		return false
@@ -156,7 +156,11 @@ func windowsSlashStart(line []byte, p int) bool {
 	if line[p-2] != '/' || !isASCIILetter(line[p-1]) {
 		return false
 	}
-	return pathBoundary(line, p-2) || bytes.HasSuffix(line[:p-2], []byte("/mnt")) && pathBoundary(line, p-len("/mnt/c"))
+	if pathBoundary(line, p-2) || bytes.HasSuffix(line[:p-2], []byte("/mnt")) && pathBoundary(line, p-len("/mnt/c")) {
+		return true
+	}
+	s := p - len("/cygdrive/c")
+	return s >= 0 && hasPrefixFold(line[s:], "/cygdrive/") && pathBoundary(line, s)
 }
 
 func isUserNameByte(c byte) bool {
