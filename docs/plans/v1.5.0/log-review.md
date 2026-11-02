@@ -101,4 +101,4 @@ mask(ファイルから)が前回の 360.0 MB/s より低いので、修正の�
 
 - 修正: LIMITATIONS.md(Q124、再度流したときの通知、`user_path` の形)、コメント、Q の範囲を Q124 までに直す(SPEC.md 11 章、DEVELOPMENT.md、`docs/plans/README.md`、計画の README)、CHANGELOG と仕様に変更が要らないことの確認
 - 修正のあとの別のセッションのレビュー(7 回目)
-- PR の説明に 6 回目の結果を書く(案は 6 回目のセッションで示した。push と PR の更新は許可を得てから)
+- 2026-11-02 に、ユーザーの許可を得て PR の説明を更新した。`gh pr edit` は Projects (classic) のエラーで失敗するので、`gh api -X PATCH` を使った。push は、AI の環境では SSH の鍵が使えないので、ユーザーが実行する
