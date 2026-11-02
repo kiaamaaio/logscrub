@@ -200,3 +200,12 @@ a05c16b のバイナリ(`.go` は今と同じ)で確かめた。値はすべて�
 
 - 2026-11-02 に、ユーザーの許可を得て PR の説明を更新した(`gh api -X PATCH`。8〜10 回目の指摘、[#29](https://github.com/kiaamaaio/logscrub/issues/29) のリンクを含む)
 - push。ユーザーが実行する(194498a より後のコミットは、まだ push していない)
+
+## 4 回目の指摘の登録
+
+[回数の調査](../../research/2026-11-02-v1.5.0-review-count.md)で、4 回目の `--review` の 2 件が、PR の説明、この記録、issue のどこにも残っていないと分かった。2026-11-02 に、ユーザーの許可を得て [#30](https://github.com/kiaamaaio/logscrub/issues/30)、[#31](https://github.com/kiaamaaio/logscrub/issues/31) に登録し、PR の説明の 4 回目の表にリンクを足した(`gh api -X PATCH`)。
+
+登録の前に、a05c16b と同じコードのバイナリ(`./scripts/go build -o /cache/lgi ./cmd/logscrub`)で、2 件とも再現することを確かめた。値はすべて架空。
+
+- hash の出力 1 行(`user_path_<hex>`、`ipv4_private_<hex>`、`email_<hex>`)を `mask --review` に通すと、`2 strings look like unreplaced values` が出る
+- U+200B、U+200E、U+200F、U+061C はそのままのバイトで出る。U+202E は `‮` になる。31 文字の語の途中に U+200B を入れると、怪しい語の通知が出なくなる
