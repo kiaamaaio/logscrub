@@ -65,6 +65,28 @@ secret:
 - `"token": 12345`、`"password": null`、`"token": {"a":1}` は置換されない
 - ログに文字列として埋め込まれた JSON(`{"message":"{\"password\":\"abc\"}"}`)の値が置換される
 - JSON の文字列の中の `token=abc\ndef`、`?token=abc\u0026user=x` は、`abc` だけが置換される
+- PEM の秘密鍵の本文が行ごとに `<secret_N>` になり、印、行の数、改行コードは保たれる。`CERTIFICATE` のブロックは置換されない
+- PEM の 1 行の形(`\n` が文字の形、改行を空白にした形)の本文が 1 つの `<secret_N>` になる
+- END のない PEM のブロックは、本文の形でない行で終わり、その行は通常どおり処理され、stderr に行番号だけが通知される。`"-----BEGIN PRIVATE KEY-----"` だけの行の後ろのログが伏せられない
+- END のある、日時の付いた PEM の本文を伏せた出力を再度流しても、END のない PEM の通知が出ない
+- 行頭の長さが同じ日時の付いた PEM で、暗号化された鍵のヘッダーと短い最後の行も `<secret_N>` になる
+- 1 行ごとに文字列で包まれた PEM(`{"log":"…\n",…}`)の本文が行ごとに `<secret_N>` になる
+- 文字列の中の行頭の長さが同じ PEM(`{"log":"2026-11-01 INFO …\n",…}`)で、暗号化された鍵のヘッダーと短い最後の行も `<secret_N>` になる
+- 文字列で包まれた PEM で、末尾が置換済みの行でブロックが終わる出力を再度流しても、END のない PEM の通知が出ない
+- END のない PEM の 1 行の形(`{"log":"-----BEGIN…\nAAAA\n",…}`、`key=-----BEGIN…\n `)は、印の後ろが 1 つの `<secret_N>` になり、stderr に行番号だけが通知される
+- END のない PEM の 1 行の形を伏せた出力を再度流しても(mask、hash、`--mask-format '{type}_{n}'`)、END のない PEM の通知が出ない
+- PEM の秘密鍵を含む入力が、mask → restore で 1 バイトも違わずに戻り、再度流しても変わらない(mask、hash の両方)
+
+user_path:
+
+- `/home/yamada/proj/app.py` が `/home/<user_path_1>/proj/app.py` に、`C:\Users\Taro Yamada\AppData`、`C:\\Users\\yamada\\app.log` のユーザー名が `<user_path_N>` になる
+- `PWD=/home/user`、`/home/ubuntu/`、`/home/$USER/`、`/var/home/x`、`https://example.com/home/x` は置換されない
+- `/home/yamada` と `/Users/yamada` が同じラベルになる
+- JSON の文字列の中の `\n/home/yamada/x`、`\/home\/yamada\/x`、`C:\/Users\/yamada\/x` のユーザー名が `<user_path_N>` になる
+- `C:\/Users\/Taro Yamada\/x`、`file:/C:/Users/yamada/x`、`C:\Users/yamada/x`、`\\wsl$\Ubuntu\home\yamada\x`、`//wsl$/Ubuntu/home/yamada/x`、`/cygdrive/c/Users/yamada/x` のユーザー名が `<user_path_N>` になる
+- `https://wsl.localhost/Ubuntu/home/yamada` は置換されない
+- `http://10.0.0.5/home/dashboard` は `http://<ipv4_private_1>/home/dashboard` になり、その出力を再度流しても変わらない(`--mask-format '[{type}-{n}]'` でも同じ)
+- `--deny yamada` では、`/home/yamada/` も `<custom_1>` になる
 
 UUID:
 
@@ -192,3 +214,17 @@ CLI:
 - サブコマンドなし、または不明なサブコマンドで、使い方が stderr に出て終了コード 1 になる
 - すべての種別名が `mask --help` に載っている
 - `go.mod` に外部の依存がない(標準ライブラリのみ)
+
+`--out-dir`:
+
+- `logscrub mask --out-dir DIR logs/a/app.log logs/b/app.log` が `DIR/a/app.log`、`DIR/b/app.log` を書き、連結した内容が `logscrub mask logs/a/app.log logs/b/app.log` の出力と同じになる
+- 書き出したファイルのラベルが、`--source` を同じ順に指定した `restore` で戻る
+- 書き出し先に既存のファイルがあると、何も書かずにエラー終了する。`-`、ディレクトリ、同じファイルの 2 回指定、`--output`・`--review` との同時指定も同じ
+- 処理の途中で失敗すると、今回書いたファイルが残らない
+
+`--review`:
+
+- 色の指定を除いた出力が、制御文字のない入力では、通常の mask の出力と同じになる
+- ログの中の制御文字が、見える形で出力される
+- `NO_COLOR` で色の指定がなくなる
+- 怪しい語の通知に値が出ず、置換の結果、`--stats`、終了コードが `--review` の有無で変わらない

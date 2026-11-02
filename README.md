@@ -75,6 +75,35 @@ $ pbpaste | logscrub restore --source <(grep ERROR app.log)
 
 AI の回答でラベルがエスケープされていても(`&lt;email_1&gt;`、`\<email_1\>`)、元の値に戻します。括りを外した `email_1` は戻しません。
 
+### 出力を確認する
+
+`--review` は、置換した箇所と、置換しなかった怪しい語に色を付けて表示します。長いログは `less -R` で見ます。
+
+```console
+$ logscrub mask --review app.log | less -R
+```
+
+- 怪しい語は、英数字などの 20 文字以上の並びで、英字と数字の両方を含むものです。置換はしません。件数と行番号を stderr に出します。
+- この出力は確認専用です。色の指定が入り、ログの中の制御文字は `^[` のような形になるので、他者や AI に渡すものは `--review` なしで作ってください。
+- 環境変数 `NO_COLOR` があると、色を付けません。
+
+### AI エージェントにファイルを読ませる
+
+AI がファイルを直接読む使い方では、`--out-dir` で伏せた写しのディレクトリを作り、AI にはそちらを読ませます。
+
+```console
+$ logscrub mask --out-dir masked logs/a/app.log logs/b/app.log
+$ find masked -type f
+masked/a/app.log
+masked/b/app.log
+```
+
+- 番号はファイルをまたいで通しです。同じ値は、どのファイルでも同じラベルになります。
+- `restore` には、`--source` を同じ順に指定します: `logscrub restore --source logs/a/app.log --source logs/b/app.log answer.txt`
+- 書き出し先は、入力の共通の親ディレクトリからの相対パスです。
+- 既存のファイルは上書きせず、エラーにします。入力を変えてやり直すときは、前の写しを消してください(番号の違うファイルが混ざらないように)。
+- 伏せた写しだけを読めるように、AI の作業ディレクトリや権限を分けてください。元のファイルが読める状態では、この使い方の意味がありません。
+
 ### hash: 鍵つきのハッシュに置き換える
 
 同じ値は、同じ鍵なら、常に同じ出力になります。別のマシンでも同じです。元には戻せません。
@@ -130,6 +159,8 @@ $ logscrub types --verbose                          # 対応する種別と、se
 | `--stats` | 置換した件数を、種別ごとに stderr に出す |
 | `--fail-on-detect` | 1 件でも置換したら、終了コード 2 で終える(出力は通常どおり) |
 | `-o`, `--output FILE` | 出力先のファイル(入力と同じファイルは指定できない) |
+| `--review` | 置換した箇所と怪しい語に色を付けて表示する(確認専用。[使い方](#出力を確認する)) |
+| `--out-dir DIR` | 入力ごとに、伏せたファイルを DIR に書く。番号は通し([使い方](#ai-エージェントにファイルを読ませる)) |
 
 hash モード専用のオプション(`--hash-length`、`--email-hash`、`--key-file`)を、mask モードで指定するとエラーです。
 
@@ -154,7 +185,8 @@ stderr に出します(終了コードは 0)。
 |---|---|---|
 | `email` | メールアドレス(TLD は英字 2 文字以上) | 有効 |
 | `ipv4` / `ipv6` | IP アドレス。グローバルとプライベートを、ラベルで区別する(`<ipv4_global_1>`、`<ipv4_private_1>`) | 有効 |
-| `secret` | トークン類([対応形式](docs/detection.md#secret-の対応形式)) | 有効 |
+| `secret` | トークン類、PEM の秘密鍵([対応形式](docs/detection.md#secret-の対応形式)) | 有効 |
+| `user_path` | ホームディレクトリのパスのユーザー名(`/home/<user_path_1>/`。[詳細](docs/detection.md#ホームディレクトリのパスuser_path)) | 有効 |
 | `uuid` | UUID(バージョン 1〜8) | 無効 |
 | `aws_account` | AWS アカウント ID(ARN・ECR・SQS・S3 Control の中のもの。[AWS の値](docs/detection.md#aws-の値)) | 無効 |
 | `aws_s3_bucket` | S3 のバケット名(`s3://`・S3 の URL・ARN の中のもの。[AWS の値](docs/detection.md#aws-の値)) | 無効 |
@@ -166,7 +198,7 @@ stderr に出します(終了コードは 0)。
 
 | まとまり | 含まれる種別 |
 |---|---|
-| `default` | 既定で有効の種別(`email`、`ipv4`、`ipv6`、`secret`) |
+| `default` | 既定で有効の種別(`email`、`ipv4`、`ipv6`、`secret`、`user_path`) |
 | `aws` | `aws_` で始まる種別(`aws_account`、`aws_s3_bucket`、`aws_host`) |
 | `cloud` | すべてのクラウドの種別(今は `aws` と同じ) |
 
@@ -193,7 +225,8 @@ IP アドレスだけを隠しても、ホスト名から元の値が読めて�
 - **決定的**: 同じ入力・同じオプションなら、常に同じ出力です。
 - **冪等**: 置換済みの出力を、同じオプションで再度流しても変わりません(`<email_1>`、`password=<secret_1>`、
   hash の `email_<hex>` など)。置換済みの形のため置換せずに残した文字列があると、件数と行番号を stderr に
-  1 行で知らせます(本物の値がたまたま同じ形だった場合に、気づくためです)。手で作らない限り現れない入力での例外は、
+  1 行で知らせます(本物の値がたまたま同じ形だった場合に、気づくためです)。例外(手で作らない限り現れない入力、
+  END の印まで続かない PEM の鍵のブロック)は、
   [LIMITATIONS.md の「冪等性」](LIMITATIONS.md#冪等性)を見てください。
 - **値を出さない**: stderr やエラーメッセージに、置換対象の値(元の入力の中身)は出しません。
 
@@ -212,19 +245,19 @@ IP アドレスだけを隠しても、ホスト名から元の値が読めて�
 
 | 実行 | 速度 | 最大メモリ |
 |---|---|---|
-| `logscrub mask < big.log > /dev/null` | 約 365 MB/s | 42 MB |
-| 同上(`GOMAXPROCS=1`) | 約 208 MB/s | 37 MB |
-| `cat big.log \| logscrub mask > /dev/null` | 約 328 MB/s | 38 MB |
-| `logscrub mask --types default,uuid < big.log` | 約 360 MB/s | 38 MB |
-| AWS の値(ホスト名、URL のパスワードを含む)を含む合成ログを `--types default,aws` で | 約 297 MB/s | 39 MB |
-| 同上(`aws_host` なし: `--types default,aws_account,aws_s3_bucket`) | 約 328 MB/s | 36 MB |
-| 語を 1000 個指定(`--deny-file`) | 語の綴りにより 約 269〜337 MB/s | 37 MB |
-| `--domain` を指定 | 約 334 MB/s | 40 MB |
-| `--mode hash` | 約 407 MB/s | 19 MB |
-| `logscrub restore --source big.log`(MB/s は元の入力の大きさ) | 約 320 MB/s | 41 MB |
+| `logscrub mask < big.log > /dev/null` | 約 346 MB/s | 38 MB |
+| 同上(`GOMAXPROCS=1`) | 約 183 MB/s | 38 MB |
+| `cat big.log \| logscrub mask > /dev/null` | 約 297 MB/s | 38 MB |
+| `logscrub mask --types default,uuid < big.log` | 約 317 MB/s | 38 MB |
+| AWS の値(ホスト名、URL のパスワードを含む)を含む合成ログを `--types default,aws` で | 約 266 MB/s | 40 MB |
+| 同上(`aws_host` なし: `--types default,aws_account,aws_s3_bucket`) | 約 300 MB/s | 34 MB |
+| 語を 1000 個指定(`--deny-file`) | 語の綴りにより 約 250〜307 MB/s | 38 MB |
+| `--domain` を指定 | 約 300 MB/s | 36 MB |
+| `--mode hash` | 約 360 MB/s | 16 MB |
+| `logscrub restore --source big.log`(MB/s は元の入力の大きさ) | 約 279 MB/s | 44 MB |
 
 - **メモリ**: 対応表(検出した値の種類数に比例)が主です。値の種類数が一定(1,000 種類)なら、入力が
-  20MB でも 100MB でも、最大 17MB ほどです。ほぼすべての値が異なる 100MB のログでは、39.3MB でした。
+  20MB でも 100MB でも、最大 18MB ほどです。ほぼすべての値が異なる 100MB のログでは、40.1MB でした。
   ほかに、ワーカーごとの固定の作業領域と、処理中の最長の行の分を使います。
 - **並列処理**: 検出は、複数のワーカーで並列に行います。ワーカー数は `GOMAXPROCS`(既定は CPU の数)から決め、上限は 8 です。
   連番を振る処理は 1 か所なので、ワーカー数によらず出力は同じです。上の値は 2 CPU での測定で、3 CPU 以上では測っていません。

@@ -73,5 +73,6 @@ func runRestore(e *env, args []string) int {
 	// 戻せなかったラベルは、警告(終了コードは 0)。
 	printMissing(e, res.Missing)
 	printUnchanged(e, res.Source.Kept, res.Source.KeptLineCount, res.Source.KeptLines)
+	printUnclosed(e, &res.Source)
 	return exitOK
 }
