@@ -220,3 +220,30 @@ Q125 の修正のときに、実バイナリで確かめた。修正の内容は
 - 別案: `<ドライブ>://Users/` だけを形に足し、残りは LIMITATIONS.md に書く(Q125 の `/cygdrive/` と同じ扱い)。`<ドライブ>:` があるので誤検出は少ない。テスト、ファズテスト、`-perf`、別のセッションのレビューをやり直す
 
 **回答(2026-11-02)**: 案のとおり
+
+## 9 回目の `/code-review` の指摘
+
+別のセッションで `1cb3532..194498a` を中心に high で行った。実バイナリで確かめた形だけを書く。ほかの指摘は [log-review.md](log-review.md)。
+
+### Q128: 置換済みのラベルの直後のパス
+
+既定の `mask` の出力を再度流すと、ラベルの直後のパスが置換され、出力が変わる。
+
+| 入力 | 1 回目 | 2 回目 |
+|---|---|---|
+| `GET http://10.0.0.5/home/dashboard HTTP/1.1` | `GET http://<ipv4_private_1>/home/dashboard HTTP/1.1` | `GET http://<ipv4_private_1>/home/<user_path_1> HTTP/1.1` |
+| `proxy to http://172.16.0.3/c/users/123 failed` | `proxy to http://<ipv4_private_1>/c/users/123 failed` | `proxy to http://<ipv4_private_1>/c/users/<user_path_1> failed` |
+| `https://api.example.com/home/dashboard`(`--domain example.com`) | `https://<host_1>/home/dashboard` | `https://<host_1>/home/<user_path_1>` |
+
+1 回目は IP アドレスの末尾の英数字のために形の前の条件(`pathBoundary`。`internal/detect/userpath.go:90`)を満たさず、2 回目はラベルの `>` のために満たす。実装は仕様 4.8 の条件のとおりだが、仕様 7 章の「置換済みの出力を流し直す使い方」の冪等に反するので、仕様の中で食い違っている。[DEVELOPMENT.md](../../DEVELOPMENT.md) の振り分けでは「直す」に当たる(置換済みのログを流し直す使い方で、結果が変わるもの)。
+
+- ほかに起きる形: `10.0.0.5/home/dashboard`、`http://172.16.0.3/Users/123`、`http://2001:db8::1/home/x`、`--deny acme` の `https://acme/home/dashboard`、`taro@example.com/home/yamada`、`--mask-format '[{type}-{n}]'`
+- 起きない形: `http://10.0.0.5:8080/home/dashboard`(ポートの数字が前にある)、`--mode hash`、`--mask-format '{type}_{n}'`、`--mask-format '{type}{n}'`(ラベルの末尾が英数字)
+- `pathBoundary` の `>` の扱いは、`user_path` を足した 7c10069 からある(その時点のコードで確かめた。実行はしていない)。v1.4.0 にはない動き。`fuzzFragments` には、IP アドレスの URL の直後にパスが続く断片がない
+
+判断してほしいこと:
+
+- 案: 仕様 4.8 の形の前の条件に「置換済みの形の直後でない」を足す。1 回目の出力は変えず、2 回目を 1 回目と同じにする(`secret` のキー名の、LIMITATIONS.md 35 行目と同じ扱い)。`[{type}-{n}]` があるので、`>` の 1 文字でなく書式の形で判定する。`fuzzFragments` に足し、テスト、ファズテスト、`-perf`、別のセッションのレビューをやり直す
+- 別案: 実装は変えず、LIMITATIONS.md の「冪等性」に書く。修正は資料だけで済む。振り分けの基準の例外になり、仕様 7 章の但し書きも直す
+
+**回答**: 未回答
