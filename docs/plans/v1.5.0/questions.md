@@ -292,8 +292,9 @@ END のない 1 行の形を 1 つ処理すると、その行の処理を終え�
 
 次の形のユーザー名が残る。通知は出ず、LIMITATIONS.md の対象外の一覧にもない。Q115、Q120 と同じく、形を足すかの判断が要る。
 
-- `/cygdrive/c/Users/yamada/x`(Cygwin。`/c/Users/` の前が `e` なので、形の前の条件に当たらない)、`file:///cygdrive/c/Users/yamada/x`、`C:\cygwin64\home\yamada\x`、`/cygdrive/c/cygwin64/home/yamada/x`
-- `\\fs01\users\yamada\x`、`\\fs01\home\yamada\x`、`\\fs01\c$\Users\yamada\x`、`\\.\UNC\wsl$\Ubuntu\home\yamada\x`
+- `/cygdrive/c/Users/yamada/x`(Cygwin。`/c/Users/` の前が `e` なので、形の前の条件に当たらない)、`file:///cygdrive/c/Users/yamada/x`、`C:\cygwin64\home\yamada\x`、`/cygdrive/c/cygwin64/home/yamada/x`、`\\fs01\users\yamada\x`、`\\fs01\home\yamada\x`、`\\fs01\c$\Users\yamada\x`、`\\.\UNC\wsl$\Ubuntu\home\yamada\x`
 
 - 案: `/cygdrive/<ドライブ>/Users/` だけを Windows の形に足す(`/cygdrive/` は誤検出が少ない)。残りは LIMITATIONS.md に書く。UNC はサーバーと共有の名前が自由で、形が弱い。実装を変えるので、テスト、ファズテスト、`-perf`、別のセッションのレビューをやり直す
 - 別案: 実装は変えず、すべて LIMITATIONS.md に書く(Q118、Q122、Q124 と同じ理由)。残る確認は資料のレビューだけになる
+
+**回答(2026-11-02)**: 案のとおり
