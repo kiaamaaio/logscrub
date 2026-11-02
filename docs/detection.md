@@ -124,7 +124,7 @@ File "/home/<user_path_1>/proj/app.py", line 3
 
 - `/home/yamada` と `/Users/yamada` は、同じラベルになります。
 - `/home/yamada` のように、後ろに `/` がなくても対象です。日本語の名前も対象です。
-- Windows の形は、大文字・小文字を区別せず、次の区切りがあれば空白を含む名前も 1 つの値にします(`C:\Users\Taro Yamada\AppData`)。
+- Windows の形は、大文字・小文字を区別せず(`/mnt`、`file:///` の語は区別します)、次の区切りがあれば空白を含む名前も 1 つの値にします(`C:\Users\Taro Yamada\AppData`)。
 - 次の名前は人名でないので、対象にしません: `user`、`ubuntu`、`ec2-user`、`debian`、`centos`、`admin`、`runner`、`node`、`vagrant`、`Administrator`、`Public`、`Default`、`Default User`、`All Users`、`Shared`、`Guest`。ほかの名前を残すときは、`--allow` にユーザー名を指定します。
 - `/home/$USER/`、`/home/*/` は対象外です。ほかの対象外の形は、[LIMITATIONS.md](../LIMITATIONS.md#ホームディレクトリのパス)を見てください。
 - `--deny` の語と同じ範囲なら、`<custom_N>` になります。

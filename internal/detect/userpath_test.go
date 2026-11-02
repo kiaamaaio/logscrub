@@ -117,6 +117,11 @@ func TestUserPathForms(t *testing.T) {
 		{`\\fs01\home\yamada\x`, nil},
 		{`\\fs01\c$\Users\yamada\x`, nil},
 		{`\\.\UNC\wsl$\Ubuntu\home\yamada\x`, nil},
+		// `/mnt` と `file:///` の語は、大文字・小文字を区別する(Q126)
+		{"/MNT/C/Users/yamada/x", nil},
+		{"FILE:///C:/users/yamada/x", nil},
+		{"/mnt/C/USERS/yamada/x", []string{"yamada"}},
+		{"FILE:/C:/users/yamada/x", []string{"yamada"}},
 		// 値にならない文字
 		{"/home/$USER/x", nil},
 		{"/home/${USER}/x", nil},

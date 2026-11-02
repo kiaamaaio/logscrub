@@ -268,3 +268,25 @@ Q125 の回答と、7 回目の指摘の振り分けのとおりに直した。�
 - 上の、大文字・小文字の判断
 - 修正のあとの別のセッションのレビュー(8 回目)
 - push と PR の説明の更新。push はユーザーが実行する
+
+## Q126 の反映
+
+上の「見つかったこと」は、2026-11-02 に案のとおりと確定した(Q126)。実装は変えていない。資料と、テストの表だけの修正。
+
+- 案の `file:` を、確かめた動きに合わせて `file:///` にした。`FILE:/C:/users/yamada/x` は置換されるので、語の区別が効くのは `file:///` の形だけ
+- 仕様 4.8 の表、`docs/detection.md`、LIMITATIONS.md に、`/mnt` と `file:///` の語を区別することを書いた。`docs/detection.md` は依頼の範囲になかったが、同じ「区別せず」の文があるので合わせた
+- `TestUserPathForms` に、残る 2 形と、置換される 2 形を足した
+- questions.md が 300 行なので、Q113〜Q122 を [questions-1.md](questions-1.md) に分けた。番号、節の見出し、内容は変えていない(移した部分が元のファイルの内容のままであることを、スクリプトで確かめた)。計画の README にリンクを足した
+- Q の範囲を Q126 までに直した(SPEC.md 11 章、DEVELOPMENT.md、`docs/plans/README.md`、計画の README)
+
+### 確認の結果
+
+- `./scripts/go test ./...`: すべて ok。`./scripts/go vet ./...`、`GOOS=windows GOARCH=amd64 ./scripts/go vet ./...`、`./scripts/go run cmd/gofmt -l cmd internal`、`./scripts/doc-size-check`: 通った(gofmt の出力なし)
+- `git diff --stat HEAD -- '*.go'` の変更は `userpath_test.go` だけ。`-trimpath -buildvcs=false -ldflags=-buildid=` で作った、b68dd83 と修正のあとのバイナリは 1 バイトも違わない
+- LIMITATIONS.md に足した `/MNT/C/Users/yamada`、`FILE:///C:/users/yamada` を、書いた文字列のまま `mask` に通した。どちらも変わらない
+- ファズテストと `-perf` は、実装の動きを変えないので実行していない
+
+### 残っていること(Q126 のあと)
+
+- 修正のあとの別のセッションのレビュー(8 回目)。範囲は `5e333ae..` を中心にする
+- push と PR の説明の更新。push はユーザーが実行する
