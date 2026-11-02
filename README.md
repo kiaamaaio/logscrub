@@ -25,11 +25,11 @@ $ echo "taro@example.com 192.168.0.1 password=hunter2" | logscrub mask
 ファイル名は `logscrub-<版>-<OS>-<CPU>` で、OS は `linux`・`darwin`・`windows`、CPU は `amd64`・`arm64` です(Windows は末尾に `.exe`)。
 
 ```console
-$ curl -fLO https://github.com/kiaamaaio/logscrub/releases/download/v1.4.0/logscrub-v1.4.0-linux-amd64
-$ curl -fLO https://github.com/kiaamaaio/logscrub/releases/download/v1.4.0/SHA256SUMS
+$ curl -fLO https://github.com/kiaamaaio/logscrub/releases/download/v1.5.0/logscrub-v1.5.0-linux-amd64
+$ curl -fLO https://github.com/kiaamaaio/logscrub/releases/download/v1.5.0/SHA256SUMS
 $ sha256sum --check --ignore-missing SHA256SUMS
-$ chmod +x logscrub-v1.4.0-linux-amd64
-$ sudo mv logscrub-v1.4.0-linux-amd64 /usr/local/bin/logscrub
+$ chmod +x logscrub-v1.5.0-linux-amd64
+$ sudo mv logscrub-v1.5.0-linux-amd64 /usr/local/bin/logscrub
 $ logscrub --version
 ```
 
