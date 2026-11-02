@@ -72,6 +72,7 @@
   - 不正な UTF-8 のバイト列は、そのまま通す(落とさない)
 - 冪等: すでに置換済みの値(`<email_1>`、`hash_…@example.com`、`password=<secret_1>` の値部分 等)を再変換しない(4 章「置換済みの値は検出しない」参照)。
   - 冪等性を保証するのは、現実のログ・テキストに現れうる入力と、置換済みの出力を流し直す使い方に対してとする(v1.2 で明確化)。値どうし・値と記号が区切りなしで密着するなど、手で作らない限り現れない入力(`0@0.AA%@0.AA@0.AA` など)では、置換によって隣の文字とのつながりが変わり、2 回目に新しい値が検出されることがある(置換済みのラベルを含む範囲が、再度置換されることもある)。この形は、見つかっても仕様の規則を足して直さず、[LIMITATIONS.md](../LIMITATIONS.md) の「冪等性」に書く
+  - 例外(v1.5 で明確化): PEM の鍵のブロックが END の印まで続かず(4.1 節)、ブロックを終えた行が、置換のあとは本文の続きとして読める形では、手で作った入力でなくても、2 回目に、残っていた本文が伏せられて結果が変わることがある。2 回目は本文を伏せる向きだけに変わるので、直さず、[LIMITATIONS.md](../LIMITATIONS.md) の「冪等性」に書く([plans/v1.5.0/questions.md](plans/v1.5.0/questions.md) Q129)
   - 理由: ファズテストが見つける、この種の入力に合わせて規則を足すと、規則の継ぎ目が増えて、次の同じ種類の問題を生むため([plans/v1.2.0/README.md](plans/v1.2.0/README.md) 5 章「見つかった問題の振り分け」)。値が置換されずに残る問題(見逃し)は、入力が現実的なら、この扱いにせず直す
 - 置換済みの形のため残した文字列は、件数と行番号を stderr に通知する(6 章参照)。本物の値がたまたま置換済みの形と一致した場合の見落としを防ぐため。
 - ログ・エラーメッセージに、置換対象の生の値を出さない。
@@ -138,5 +139,5 @@ logscrub/
 
 ## 11. 未決事項
 
-なし(v1.1 の細部は [plans/v1.1.0/README.md](plans/v1.1.0/README.md) 5 章の Q32〜Q46、v1.2 の細部は [plans/v1.2.0/README.md](plans/v1.2.0/README.md) 5 章の Q47〜Q70、v1.3 の細部は [plans/v1.3.0/README.md](plans/v1.3.0/README.md) 5 章の Q71〜Q84、v1.4 の細部は [plans/v1.4.0/questions.md](plans/v1.4.0/questions.md) の Q94〜Q99、v1.5 の細部は [plans/v1.5.0/questions.md](plans/v1.5.0/questions.md) の Q100〜Q128 で確定済み)
+なし(v1.1 の細部は [plans/v1.1.0/README.md](plans/v1.1.0/README.md) 5 章の Q32〜Q46、v1.2 の細部は [plans/v1.2.0/README.md](plans/v1.2.0/README.md) 5 章の Q47〜Q70、v1.3 の細部は [plans/v1.3.0/README.md](plans/v1.3.0/README.md) 5 章の Q71〜Q84、v1.4 の細部は [plans/v1.4.0/questions.md](plans/v1.4.0/questions.md) の Q94〜Q99、v1.5 の細部は [plans/v1.5.0/questions.md](plans/v1.5.0/questions.md) の Q100〜Q129 で確定済み)
 

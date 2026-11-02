@@ -4,7 +4,7 @@
 版ごとの実装計画と進捗は [plans/](plans/) にある(この資料の内容は、v1.0.0 の実装計画から移した)。
 
 - 仕様: [SPEC.md](SPEC.md)(以下「仕様」。節番号は仕様のもの。SPEC.md は目次で、4〜6 章・9 章の本文は [spec/](spec/) にある)
-- 文中の Q 番号は、Q1〜Q31 が [plans/v1.0.0/README.md](plans/v1.0.0/README.md)、Q32〜Q46 が [plans/v1.1.0/README.md](plans/v1.1.0/README.md)、Q47〜Q70 が [plans/v1.2.0/README.md](plans/v1.2.0/README.md)、Q71〜Q84 が [plans/v1.3.0/README.md](plans/v1.3.0/README.md) の 5 章「未確定事項」の項目、Q94〜Q99 が [plans/v1.4.0/questions.md](plans/v1.4.0/questions.md)、Q100〜Q128 が [plans/v1.5.0/questions.md](plans/v1.5.0/questions.md) の項目(すべて確定済み)
+- 文中の Q 番号は、Q1〜Q31 が [plans/v1.0.0/README.md](plans/v1.0.0/README.md)、Q32〜Q46 が [plans/v1.1.0/README.md](plans/v1.1.0/README.md)、Q47〜Q70 が [plans/v1.2.0/README.md](plans/v1.2.0/README.md)、Q71〜Q84 が [plans/v1.3.0/README.md](plans/v1.3.0/README.md) の 5 章「未確定事項」の項目、Q94〜Q99 が [plans/v1.4.0/questions.md](plans/v1.4.0/questions.md)、Q100〜Q129 が [plans/v1.5.0/questions.md](plans/v1.5.0/questions.md) の項目(すべて確定済み)
 
 ---
 
@@ -247,8 +247,9 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
   - この方式は仕様の「置換済みの形の文字列は検出しない」の解釈を含むため、**Q1** で確認する
 - mask の出力が、周囲の文字とつながって新しい候補を生まないことは、例を挙げて確かめきれないため、ファズテスト(`mask(mask(x)) == mask(x)`、hash も同様)で確認する
 - 見つかった問題の振り分け(v1.2 で決めた。仕様 7 章の冪等の但し書き):
-  - 直す: 現実にありうる形で、値が置換されずに残るもの。置換済みのログを流し直す使い方で、結果が変わるもの
+  - 直す: 現実にありうる形で、値が置換されずに残るもの。置換済みのログを流し直す使い方で、結果が変わるもの(次の PEM の例外を除く)
   - 直さず、[LIMITATIONS.md](../LIMITATIONS.md) の「冪等性」に書く: 値どうし・値と記号が区切りなしで密着するなど、手で作らない限り現れない形の冪等性の違反。その入力は `testdata/fuzz/` に加えない(`go test` が失敗し続けるため)
+  - 直さず、[LIMITATIONS.md](../LIMITATIONS.md) の「冪等性」に書く(例外。Q129): PEM の鍵のブロックが END の印まで続かず、ブロックを終えた行が、置換のあとは本文の続きとして読める形。2 回目は、残っていた本文を伏せる向きだけに変わる
   - ファズテストの探索(`-fuzz`)は、版のリリース前などに時間を決めて行い、見つかったものをこの基準で振り分ける。普段の `go test` は、`testdata/fuzz/` の入力と種だけを流す。現実的な形は、表のテストや合成ログの断片として加える
 - 冪等性のファズテスト(`FuzzMaskStable`・`FuzzHashStable`。`internal/transform/fuzz_test.go`)の入力は、現実的な断片の組み合わせ(v1.2 で変えた): ファズテストのバイト列を、断片の表(`fuzzFragments`。各種別の値・置換済みの形・文脈の語)と区切りの表(`fuzzSeparators`。空白を含む区切り・改行・JSON の区切り)の選び方として読み、行を組み立てる(`fragmentText`)。区切りなしの密着や、記号だけで断片を直接つなぐ形は作らない
   - 断片・区切りを足すときは、ログ・テキストに実際に現れる形にする。記号が値に隣り合う形は、断片の中に書く

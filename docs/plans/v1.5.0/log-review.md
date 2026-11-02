@@ -142,10 +142,10 @@ a05c16b のバイナリ(`./scripts/go build -o /cache/lgr10 ./cmd/logscrub`)で�
 | 指摘 | 振り分け |
 |---|---|
 | 仕様 7 章の但し書きと、手で作っていない PEM のブロックの例外が食い違う | Q129 |
-| 例外の説明が「END のない」だが、END があっても、途中に本文の形でない行があれば同じ(`LIMITATIONS.md` 39、44、142 行目、README) | この PR で直す |
+| 例外の説明が「END のない」だが、END があっても、途中に本文の形でない行があれば同じ(`LIMITATIONS.md` 40、44、142 行目、README) | この PR で直す |
 | 94 行目の「IP アドレスの URL は対象外」は、`[…]` の IPv6 で成り立たない(`http://[2001:db8::1]/home/dashboard` は `/home/<user_path_1>`) | この PR で直す |
 | `wslHomeStart` のループ変数 `f` が受け手を隠す | 直さない(動きは正しい) |
-| 断片を足すと `testdata/fuzz/` の入力が別の断片を選ぶ(`%len(fuzzFragments)`) | issue の案をユーザーに示す。前からの動きで、利用者に害はない |
+| 断片を足すと `testdata/fuzz/` の入力が別の断片を選ぶ(`%len(fuzzFragments)`) | [#29](https://github.com/kiaamaaio/logscrub/issues/29)(ユーザーの許可を得て登録)。前からの動きで、利用者に害はない |
 
 ### 依頼された確認の結果
 
@@ -168,7 +168,34 @@ a05c16b のバイナリ(`./scripts/go build -o /cache/lgr10 ./cmd/logscrub`)で�
 
 ### 残っていること(10 回目のあと)
 
-- Q129 の回答。回答に沿って、上の 2 件と Q129 を直し、Q の範囲を直す
-- 修正の前に log-review.md を分ける(書き足すと 30KB を超える)
-- 修正のあとの別のセッションのレビュー(11 回目)
-- push と PR の説明の更新(8〜10 回目の指摘を含む)。push はユーザーが実行する
+- Q129 は 2026-11-02 に、案のとおりと確定した
+- 修正: 上の 2 件と Q129。Q の範囲を Q129 までに直す。修正の前に log-review.md を分ける
+- push と PR の説明の更新(8〜10 回目の指摘、[#29](https://github.com/kiaamaaio/logscrub/issues/29) のリンクを含む)。push はユーザーが実行する
+
+## 10 回目の `/code-review` の修正と Q129
+
+上の「残っていること」の修正。実装は変えていない(`.go` の差分なし)。資料だけの修正。修正の前は 1d5cbf7。
+
+- 分割: 書き足すと 30KB を超えるので、先に 8 回目と 8 回目の修正を [log-review-4.md](log-review-4.md) に分けた(e2bde99)。移した内容は `diff` で差分なし。リンクは、計画の README、log-review-1〜3.md、この資料の 5 行目、questions.md の 8 回目を直した
+- Q129: 仕様 7 章の但し書きに、PEM の鍵のブロックの例外を足した。DEVELOPMENT.md 3.2 節の振り分けと、LIMITATIONS.md の「冪等性」を合わせた
+- END の有無: LIMITATIONS.md の secret の 2 項目と「冪等性」、README の説明を、END の印の前にブロックが終わる形に直した
+- IPv6: LIMITATIONS.md のパスの項目に、`[…]` で囲んだ形は対象になることを足した
+- Q の範囲を Q129 までに直した(SPEC.md 11 章、DEVELOPMENT.md、`docs/plans/README.md`、計画の README)
+- ファズの入力の指摘は [#29](https://github.com/kiaamaaio/logscrub/issues/29) に登録した
+
+### 確認の結果
+
+a05c16b のバイナリ(`.go` は今と同じ)で確かめた。値はすべて架空。
+
+- `http://[2001:db8::1]/home/dashboard`(LIMITATIONS.md から取り出した): `http://[<ipv6_global_1>]/home/<user_path_1>`
+- BEGIN、本文、`retry later` か `ghp_` + 36 文字、本文、END: どちらも 2 つ目の本文と END の行が残り、通知が出る
+- `./scripts/go test ./...`: すべて ok(キャッシュの結果)。`./scripts/go vet ./...`、`./scripts/doc-size-check`: 通った
+- ファズテスト、`-perf`、`-race` は実行していない(実装を変えていない)
+
+### レビューの打ち止め
+
+2026-11-02 に、ユーザーの判断で、`/code-review` を 10 回目で打ち止めた。この修正の別のセッションのレビュー(11 回目)は行わない。CLAUDE.md のレビューを終える条件のうち、「別のセッションのレビューで指摘が 0 件」は確かめていない。判断待ちの Q はない。
+
+### 残っていること(10 回目の修正のあと)
+
+- push と PR の説明の更新(8〜10 回目の指摘、[#29](https://github.com/kiaamaaio/logscrub/issues/29) のリンクを含む)。push はユーザーが実行する
