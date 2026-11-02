@@ -102,3 +102,43 @@ mask(ファイルから)が前回の 360.0 MB/s より低いので、修正の�
 - 修正: LIMITATIONS.md(Q124、再度流したときの通知、`user_path` の形)、コメント、Q の範囲を Q124 までに直す(SPEC.md 11 章、DEVELOPMENT.md、`docs/plans/README.md`、計画の README)、CHANGELOG と仕様に変更が要らないことの確認
 - 修正のあとの別のセッションのレビュー(7 回目)
 - 2026-11-02 に、ユーザーの許可を得て PR の説明を更新した。`gh pr edit` は Projects (classic) のエラーで失敗するので、`gh api -X PATCH` を使った。push は、AI の環境では SSH の鍵が使えないので、ユーザーが実行する
+
+## 6 回目の `/code-review` の修正
+
+実装の動きは変えていない。資料とコメントだけの修正。
+
+- LIMITATIONS.md(secret): Q124 の形を書いた。通知は 1 つ目の 1 件だけで、2 つ目の本文が残ること。`"b"` の値が印と `\n` だけの形では、次の行からの本文が残ること
+- LIMITATIONS.md(secret): 再度流したときに通知が残る形を書いた。6 回目で確かめた 1 行の形の行でブロックが終わる形に加えて、もっと広い形でも残ることを、今回確かめて書いた(下の表)
+- LIMITATIONS.md(ホームディレクトリのパス): 6 回目の 5 形を書いた。同じように残る `\/\/?\/UNC\/wsl.localhost\/Ubuntu\/home\/yamada` と `\\\\.\\C:\\Users\\yamada` も、実バイナリで確かめて足した
+- コメント: `pem.go` の `beginLine`、`Unclosed`、`stats.go` の `Unclosed`、`common.go` の `printUnclosed` に、END のない 1 行の形を足した
+- Q の範囲を Q124 までに直した(SPEC.md 11 章、DEVELOPMENT.md、`docs/plans/README.md`、計画の README)
+- CHANGELOG、仕様、`docs/detection.md`: 変更は要らない。動きを変えておらず、限界の正本は LIMITATIONS.md のため
+
+e403f7a のバイナリで確かめた形(架空の値)。mask、`--mode hash`、`--mask-format '{type}_{n}'` のうち、下の表の「対象」のもので実行した。どれも 2 回目の stdout は 1 回目と同じ。
+
+| 形(1 行目は `{"log":"-----BEGIN…\n"}` か印だけの行) | 対象 | 1 回目の通知 | 2 回目の通知 |
+|---|---|---|---|
+| `{"log":"AAAA\n"}`、`{"log":"-----BEGIN…\nBBBB\n","stream":"x"}` | mask、hash、`{type}_{n}` | 2 件(1、3 行目) | 1 件(1 行目) |
+| `AAAA`、`"-----BEGIN…\nBBBB\n" x` | mask、hash、`{type}_{n}` | 2 件(1、3 行目) | 1 件(1 行目) |
+| `AAAA`、`BBBB` で入力が終わる(印だけの行) | mask | 1 件(1 行目) | 1 件(1 行目) |
+| `{"log":"AAAA\n"}` で入力が終わる | mask | 1 件(1 行目) | 1 件(1 行目) |
+| `AAAA`、`some log line here`(印だけの行) | mask | 1 件(1 行目) | 1 件(1 行目) |
+| `{"log":"AAAA\n"}`、`{"log":"done now\n"}` | mask | 1 件(1 行目) | 1 件(1 行目) |
+
+- 判断: 仕様 9 章の「日時の付いた PEM の本文を伏せた出力を再度流しても、END のない PEM の通知が出ない」は、END のあるブロックの確認と読み、仕様との食い違いとしなかった。END のある形(日時つき)は 2 回目の通知が 0 件。日時つきでも END のない形は、ほかの形と同じく通知が残る(2 形を実行して確かめた)。本文の規則(仕様 4.1 の「ブロックを終えた行の、本文の範囲の末尾が `secret` の置換済みの形なら、通知しない」)とは合っている
+- Q124 の出力は `restore --source` で戻ることを確かめた
+
+### 修正のあとの確認
+
+コミットの前の作業ツリー(e403f7a に、この修正を足したもの)で実行した。
+
+- `./scripts/go test ./...`: すべて ok(`cli`、`transform` は再実行、ほかはキャッシュの結果)。`./scripts/go vet ./...`、`./scripts/go run cmd/gofmt -l cmd internal`、`./scripts/doc-size-check`: 通った(gofmt の出力なし)
+- LIMITATIONS.md の「次の形は対象外で」の項目の 23 形を、書いた文字列のまま `mask` に通した。23 形とも `yamada` が残る
+- `git diff -U0 -- '*.go'` の変更行は、すべてコメント
+- `-trimpath -buildvcs=false -ldflags=-buildid=` で作った、e403f7a と修正のあとのバイナリは 1 バイトも違わない
+- ファズテストと `-perf` は、実装の動きを変えないので実行していない。`-race` も同じ理由で実行していない
+
+### 残っていること(6 回目の修正のあと)
+
+- 修正のあとの別のセッションのレビュー(7 回目)
+- push と PR の説明の更新。push はユーザーが実行する

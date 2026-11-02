@@ -164,7 +164,7 @@ func printSuspects(e *env, st *transform.Stats) {
 	}
 }
 
-// printUnclosed は、END のない PEM のブロックの、件数と行番号を通知する(仕様 6 章)。
+// printUnclosed は、END のない PEM のブロックと、END のない 1 行の形の、件数と行番号を通知する(仕様 6 章)。
 func printUnclosed(e *env, st *transform.Stats) {
 	if st.Unclosed == 0 {
 		return

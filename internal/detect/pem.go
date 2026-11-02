@@ -40,11 +40,11 @@ type PEMScanner struct {
 	bodySeen  bool
 	line      int  // data[:counted] までの行数
 	counted   int  // data の中の、行数を数え終えた位置
-	beginLine int  // 開いているブロックの BEGIN の行番号
+	beginLine int  // 開いているブロックか、END のない 1 行の形の BEGIN の行番号
 	column    int  // 開いているブロックの BEGIN の印の列。文字列で包まれた形では開き引用符の次から数える。手前が空白だけなら 0(行頭に日時などが付くログ。仕様 4.1)
 	escaped   bool // 開いているブロックが、1 行ごとに文字列で包まれた形(`{"log":"…\n",…}`。仕様 4.1)
 
-	// Unclosed は、END のないブロックの数。UnclosedLines は、その BEGIN の行番号(最初の MaxUnclosedLines 件まで)。
+	// Unclosed は、END のないブロックと、END のない 1 行の形の数。UnclosedLines は、その BEGIN の行番号(最初の MaxUnclosedLines 件まで)。
 	Unclosed      int
 	UnclosedLines []int
 }
