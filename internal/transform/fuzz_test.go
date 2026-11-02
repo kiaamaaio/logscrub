@@ -70,6 +70,8 @@ var fuzzFragments = []string{
 	"{\"log\":\"-----BEGIN RSA PRIVATE KEY-----\\nQUJD\\n\",\"stream\":\"stderr\"}\n{\"log\":\"REVG\\n\"}", "key=-----BEGIN RSA PRIVATE KEY-----\\n ", "-----BEGIN RSA PRIVATE KEY-----secret_3f9a1c0b7d2e",
 	`\\wsl$\Ubuntu\home\yamada\x`, "//wsl$/Ubuntu/home/yamada/x", "//wsl.localhost/Ubuntu/home/yamada/x", `C:\Users/yamada/x`, `C:/Users\yamada\x`, "jar:file:/C:/Users/yamada/app.jar", `C:\/Users\/Taro Yamada\/x`,
 	"/cygdrive/c/Users/yamada/x", "/cygdrive/c/Users/Taro Yamada/x", "/cygdrive/c/Users/<user_path_1>/x",
+	"GET http://10.0.0.5/home/dashboard HTTP/1.1", "http://172.16.0.3/c/users/123", "http://172.16.0.3/Users/123", "10.0.0.5/home/dashboard", "http://[2001:db8::1]/home/x",
+	"http://<ipv4_private_1>/home/dashboard", `http:\/\/10.0.0.5\/home\/dashboard`, "https://api.corp.example.jp/home/dashboard", "https://acme/home/dashboard", "taro@example.com/home/yamada", "/home/yamada/home/hanako",
 	// 崩れたラベル(v1.3)
 	"&lt;email_1&gt;", `\<email_1\>`, `\\10.0.0.5\share`, "&lt;taro@example.com&gt;",
 	// 文脈(値でないもの)

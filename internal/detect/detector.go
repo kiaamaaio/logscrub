@@ -114,7 +114,7 @@ func builtinFinders(o Options) []finder {
 		fs = append(fs, secretFinder{format: o.Format})
 	}
 	if o.Kinds.Has(KindUserPath) {
-		fs = append(fs, userPathFinder{})
+		fs = append(fs, newUserPathFinder(o.Format))
 	}
 	if o.Kinds.Has(KindUUID) {
 		fs = append(fs, uuidFinder{versions: o.UUIDVersions})

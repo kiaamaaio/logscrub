@@ -150,3 +150,89 @@ d9e37a6 で実行した。
 - 修正: 上の表の分と Q128。Q の範囲を Q128 までに直す
 - 修正のあとの別のセッションのレビュー(10 回目)。範囲は修正の差分と Q128 の周辺に絞る
 - push と PR の説明の更新(8、9 回目の指摘を含む)。push はユーザーが実行する
+
+## 9 回目の `/code-review` の修正と Q128
+
+上の「残っていること」の修正。修正の前は d5c6d2f。
+
+### 分割
+
+書き足すと 300 行を超えるので、先に 7 回目、7 回目の修正、Q126 の反映を [log-review-3.md](log-review-3.md) に分けた(e980cc4)。節の見出しと内容は変えていない(`diff` で差分なし)。リンクは、計画の README、log-review-1.md、log-review-2.md、この資料の 5 行目、questions.md の 7 回目と Q125 の 2 か所を直した。
+
+### Q128 の修正
+
+- `internal/detect/userpath.go`: `pathBoundary` に「置換済みのラベルの直後でない」を足した。形の判定はすべて `pathBoundary` を通るので、形ごとの変更はない。`>` の 1 文字でなく、`label.Format.EndsAt` で判定する(`[{type}-{n}]` でも効き、`x>/home/yamada`、`<user>/home/yamada`、`<email_01>/home/yamada` は今までどおり置換される)。書式を持つため、`userPathFinder` の関数をメソッドにした
+- hash の出力は末尾が英数字なので、今の文字の条件で対象外のまま。`{type}_{n}`、`{type}{n}` のラベルも同じ
+- 仕様 4.8 の形の前の条件と理由、仕様 9 章、LIMITATIONS.md(ホームディレクトリのパスの末尾の項目)に書いた
+- テスト: `TestUserPathAfterLabel`(形ごと、書式ごと、ラベルでない形)、`TestUserPathAfterReplacedValue`(Q128 の表と「ほかに起きる形」。mask 4 書式と hash 2 種の 2 回目、`restore`)。`fuzzFragments` に、値の直後のパスの 11 形を足した(断片の数が変わるので、`testdata/fuzz/` の入力の読まれ方も変わる)
+- `/home/yamada/home/hanako` の 1 回目の `/home/<user_path_1>/home/hanako` も同じ原因で、2 回目に `hanako` が置換されていた。Q128 の一覧にない形だが、同じ修正で直る。テストと断片に足した
+- 修正の前に新しいテストと断片を流し、`TestUserPathAfterReplacedValue` と `FuzzMaskStable` の種が Q128 の形で失敗することを確かめた(`the second pass would replace a value that is not next to a placeholder`、`match: "dashboard"`)
+- 修正のあとに直したのは、新しいテストの期待値の誤り 6 件で、実装は変えていない。`:` の直後の `/Users/` は macOS の形、`file:/C:/users/` は `/C:/` の前の `:` で、ラベルの直後かに関係なく対象になる(今の仕様どおりで、1 回目と 2 回目で変わらない)。ドライブの形でだけ読める小文字の `users` の行に変え、残る 3 形はテストの中に「対象」として残した
+- ゴールデン: 変えていない
+
+### 9 回目の指摘の修正
+
+- README の「冪等」: 例外に END の印のない PEM の鍵のブロックを足した。LIMITATIONS.md の「冪等性」に項目を足し、「secret」の項目へリンクした。仕様 7 章は変えていない(依頼の範囲の外。手で作った入力に限る但し書きと、END のないブロックの例外の関係は、10 回目のレビューの目で見てほしい)
+- LIMITATIONS.md 44 行目: 行末に base64 の文字が 40 文字以上続くトークンは本文の行として読まれ、ブロックが続くことを書いた
+- LIMITATIONS.md 94 行目: `/Users/` がパスの途中の形と、IP アドレスの URL を足した
+- LIMITATIONS.md 95 行目: 形は足さず、`docs/detection.md` の表の形に当たらないパスは残ること、一覧は例であることを書いた
+- Q の範囲を Q128 までに直した(SPEC.md 11 章、DEVELOPMENT.md、`docs/plans/README.md`、計画の README)
+- CHANGELOG は変えていない。`user_path` は v1.5.0 で加わるので、v1.4.0 から見た変更ではない
+
+### 速度のための変更
+
+最初の修正では、`pathBoundary` が毎回 `EndsAt` を呼び、変更した経路だけを通すログで 5% を超える低下が出た。原因を直した。どれも結果は変えない。
+
+| 段階 | `/x/users/` が多い(最速 / 中央値) | `/home/` が多い | ラベルの直後のパスが多い |
+|---|---|---|---|
+| 最初の修正 | -7.9% / -9.7% | -6.4% / -3.2% | -37.7% / -39.0% |
+| `matchAt`、`EndsAt` をポインタの受け手に(`Format` は 300 バイトを超え、呼ぶたびに写していた) | -2.1% / -3.2% | -3.4% / -3.4% | -6.2% / -8.6% |
+| `EndsAt` で、ラベルの先頭になりえない位置を飛ばす | 回数を増やすと -4.6〜-6.1% / -5.9〜-7.2% | -4.3〜-5.4% / -4.0〜-4.6% | +24.3% / +23.4% |
+| `pathBoundary` で、ラベルの末尾の文字と一致するときだけ `EndsAt` を呼ぶ(`labelEnd`。最終) | 下の表 | 下の表 | 下の表 |
+
+- 3 行目までの結果を踏まえ、`labelEnd` を足した。末尾が連番や種別名の書式では文字がラベルごとに変わるが、英数字なので、そのラベルの直後は文字の条件で対象外になる
+- `internal/label/format.go` の受け手の変更で、`(Format{}).EndsAt` がコンパイルできなくなるので、`email_test.go` の 1 か所を `var zero Format` に直した。期待値は同じ
+- ラベルの直後のパスが多いログが速くなったのは、前のバイナリがそのパスを 2 回目に置換していた分がなくなるため
+
+### 確認の結果
+
+下はすべて最終のコードで実行した(コミットの前の作業ツリー。この記録の追記の前)。値はすべて架空。
+
+- `./scripts/go test ./...`: すべて ok。`./scripts/go vet ./...`、`GOOS=windows GOARCH=amd64 ./scripts/go vet ./...`、`./scripts/go run cmd/gofmt -l cmd internal`(出力なし)、`./scripts/doc-size-check`: 通った
+- ゴールデン: `git diff --quiet -- internal/transform/testdata` が成功。1 バイトも変わっていない
+- 1 回目の出力: `paths.log`、`app.log`、`.cache/big.log` の mask の出力は、d5c6d2f のバイナリと sha256 が同じ
+- Q128 の形と周辺の 14 行(`--domain example.com --deny acme`)を、既定、`[{type}-{n}]`、`{type}_{n}`、`{type}{n}`、`--mode hash` で流した。1 回目の stdout はすべて d5c6d2f のバイナリと同じ。2 回目の stdout はすべて 1 回目と同じ
+- LIMITATIONS.md 95 行目: 本文から取り出した `…` を含まない 48 形と、`path=`、`"`、`/x` を付けた 144 行は、`mask --types user_path` で 1 バイトも変わらず、通知も出ない。9 回目の指摘の 4 形(`/Users//yamada`、`file:////home/yamada`、`/cygdrive/c//Users/yamada`、`/mnt/c\Users\yamada`)と 94 行目の 2 形(`/Volumes/Data/Users/yamada/x`、`https://10.0.0.1/home/yamada/x`)も、ユーザー名が残る
+- LIMITATIONS.md 44 行目: BEGIN、`AAAA`、トークン、`BBBB` で確かめた。`ghp_` と `sk_live_` の後ろが 39 文字なら `BBBB` が残り、40 文字なら伏せられる。JWT の署名が 39 文字なら残り、40 文字なら伏せられる。署名の末尾の 40 文字に `-` か `_` があると残り、その手前にあれば伏せられる。`{"log":"…\n"}` の形でも、36・40 文字の `ghp_`、24・99 文字の `sk_live_`、20・43 文字の署名で同じ。ブロックが終わる形は、2 回目に `BBBB` が伏せられて出力が変わり、続く形は変わらない
+- `-race` は実行していない。依頼の確認に入っておらず、足した項目は読むだけ(検出器の値は作ったあとに変わらない)
+
+### ファズテスト
+
+`./scripts/go test ./internal/transform -run '^$' -fuzz … -fuzztime 90s`。各 90 秒、失敗なし。`testdata/fuzz/` への追加もなし。
+
+| 対象 | 実行回数 |
+|---|---|
+| `FuzzMaskStable` | 896,997 |
+| `FuzzHashStable` | 461,625 |
+| `FuzzRestoreRoundTrip` | 233,649 |
+
+### 性能
+
+d5c6d2f のバイナリと交互に測った。`big.log` は 105MB で 11 回ずつ。経路だけを通す 3 つは 50MB で、`/x/users/` と `/home/` は 25 回ずつ、ラベルの直後は 11 回ずつ。どの行にも手がかりが 2 つあるログ。計画の 4.1 節の基準(既定で動く検出は前の段階から 5% 以内)の範囲内。
+
+| 測定 | 前(最速) | 後(最速) | 差(最速 / 中央値) |
+|---|---|---|---|
+| `big.log`、`GOMAXPROCS=1` | 182.9 MB/s | 178.9 MB/s | -2.2% / -3.2% |
+| `big.log`、`GOMAXPROCS=2` | 333.7 MB/s | 330.4 MB/s | -1.0% / -1.1% |
+| `/x/users/` が多い、`GOMAXPROCS=2` | 353.5 MB/s | 344.4 MB/s | -2.6% / -1.8% |
+| `/home/` が多い、`GOMAXPROCS=2` | 380.5 MB/s | 379.9 MB/s | -0.2% / -0.7% |
+| ラベルの直後のパスが多い、`GOMAXPROCS=2` | 380.7 MB/s | 467.6 MB/s | +22.8% / +22.7% |
+
+同じコードの別の回では、`/x/users/` が +0.9〜-0.1% / -1.1〜-1.8%、`/home/` が -0.8〜+0.7% / -0.7%。`labelEnd` の前の `big.log` は -1.1〜+1.0% で、`big.log` の差はこの程度に揺れる。
+
+`./scripts/go test -run Perf -v -timeout 40m ./cmd/logscrub -perf`(100MB、3 回の最速、2 コア): 3 つのテストが PASS。mask(ファイルから)は 302.0 MB/s、パイプからは 261.5 MB/s、`GOMAXPROCS=1` は 165.5 MB/s、`GOMAXPROCS=2` は 299.5 MB/s、`--mode hash` は 326.9 MB/s、restore は 262.8 MB/s。値が密な 10MB の行は 19.7〜20.8 MB/s で、仕様 7 章の 50MB/s より低い。これまでの記録(19.6〜20.7 MB/s)と同じ既知の形で、今回の変更では変わっていない。
+
+### 残っていること(9 回目の修正のあと)
+
+- 修正のあとの別のセッションのレビュー(10 回目)。範囲は d5c6d2f からの差分と Q128 の周辺に絞る
+- push と PR の説明の更新(8、9 回目の指摘を含む)。push はユーザーが実行する

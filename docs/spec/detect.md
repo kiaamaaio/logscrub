@@ -228,7 +228,8 @@ EC2 のホスト名は、IP アドレスを `-` 区切りで含む。IP アド�
 | Windows | `<ドライブ>:\Users\`、`<ドライブ>:\\Users\\`(JSON、Python の repr)、`<ドライブ>:\/Users\/`、`<ドライブ>:/Users/`、`<ドライブ>:\Users/`、`<ドライブ>:/Users\`、`/mnt/<ドライブ>/Users/`(WSL)、`/<ドライブ>/Users/`(Git Bash)、`/cygdrive/<ドライブ>/Users/`(Cygwin)、`file:///<ドライブ>:/Users/`、`file:/<ドライブ>:/Users/`、`/<ドライブ>:/Users/` | 区別しない(`/mnt`、`file:///` の語は区別する) |
 
 - `<ドライブ>` は英字 1 文字。
-- 形の前の条件: 行頭か、英数字・`-`・`_`・`.`・`/`・`\` 以外の文字か、文字の `\n`・`\t`・`\r`(JSON の文字列の中の改行など)か、`\\?\`(エスケープした `\\\\?\\` も含む)の直後(`file:///` の形は `file:` の前で判定する)。`//wsl` の形は、前が `:` でないこと。`https://example.com/home/x`、`https://wsl.localhost/Ubuntu/home/x`、`/var/home/x`、`/api/Users/x` は対象外。
+- 形の前の条件: 行頭か、英数字・`-`・`_`・`.`・`/`・`\` 以外の文字か、文字の `\n`・`\t`・`\r`(JSON の文字列の中の改行など)か、`\\?\`(エスケープした `\\\\?\\` も含む)の直後(`file:///` の形は `file:` の前で判定する)。`//wsl` の形は、前が `:` でないこと。置換済みの形の直後でないこと(`<ipv4_private_1>/home/x`。末尾の文字でなく、現在の `--mask-format` の形で判定する。hash の出力は末尾が英数字なので、文字の条件で対象外になる)。`https://example.com/home/x`、`https://wsl.localhost/Ubuntu/home/x`、`/var/home/x`、`/api/Users/x` は対象外。
+  - 理由: 置換される値の直後のパス(`http://10.0.0.5/home/dashboard`)は、1 回目は値の末尾の英数字で対象にならないが、ラベルの末尾の `>` で条件を満たすと、2 回目に置換されてしまうため(冪等性。[plans/v1.5.0/questions.md](../plans/v1.5.0/questions.md) Q128)
 - ユーザー名の範囲:
   - 英数字・`.`・`_`・`-`・`@`・`+` と非 ASCII のバイトの連なり。末尾の `.` は含めない(文末の `/home/yamada.`)
   - `$USER`、`*`、`<user>`、`%USERNAME%` は、文字の条件で対象にならない

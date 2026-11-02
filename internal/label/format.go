@@ -146,7 +146,8 @@ func (f Format) Scan(line []byte, fn func(start, end int, typ string, n int)) {
 	}
 }
 
-func (f Format) matchAt(line []byte, i int) (end int, typ string, n int, ok bool) {
+// matchAt と EndsAt は、1 行の中で何度も呼ばれるので、値を写さないようポインタで受ける(Format は 300 バイトを超える)。
+func (f *Format) matchAt(line []byte, i int) (end int, typ string, n int, ok bool) {
 	p := i
 	if !bytes.HasPrefix(line[p:], f.pre) {
 		return 0, "", 0, false
@@ -233,13 +234,16 @@ func (f Format) MatchAt(line []byte, i int) (int, bool) {
 // EndsAt は、line の中に、e の位置で終わるラベル(MatchAt と同じ条件)があるかを返す。ゼロ値の書式では、常に false。
 // 連番は桁の続く限り読むので、`<email_12>` の途中や、書式 `{type}_{n}` の `email_12` の `email_1` では終わらない。
 // ラベルの長さには上限がある(リテラルと、最も長い種別名と、maxDigits 桁)ので、手前の決まった範囲だけを試す。
-func (f Format) EndsAt(line []byte, e int) bool {
+func (f *Format) EndsAt(line []byte, e int) bool {
 	if !f.ok || e <= 0 || e > len(line) || !bytes.HasSuffix(line[:e], f.post) {
 		return false
 	}
 	maxLen := len(f.pre) + len(f.mid) + len(f.post) + maxTypeLen + maxDigits
 	for i := max(0, e-maxLen); i < e; i++ {
-		if end, ok := f.MatchAt(line, i); ok && end == e {
+		if len(f.pre) > 0 && line[i] != f.pre[0] || len(f.pre) == 0 && !f.first[line[i]] {
+			continue // ラベルの先頭になりえない位置(行ごとに数十回試さないため)
+		}
+		if end, _, _, ok := f.matchAt(line, i); ok && end == e {
 			return true
 		}
 	}

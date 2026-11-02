@@ -217,7 +217,8 @@ func TestFormatEndsAt(t *testing.T) {
 			t.Errorf("%q.EndsAt(%q, %d) = %v, want %v", tt.format, tt.line, tt.e, got, tt.want)
 		}
 	}
-	if (Format{}).EndsAt([]byte("<email_1>"), 9) {
+	var zero Format
+	if zero.EndsAt([]byte("<email_1>"), 9) {
 		t.Error("the zero Format matched")
 	}
 }

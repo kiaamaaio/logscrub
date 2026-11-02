@@ -157,6 +157,80 @@ func TestUserPathForms(t *testing.T) {
 	}
 }
 
+// 置換済みのラベルの直後は、形の前の条件を満たさない。1 回目に値の末尾の英数字のために対象にならないパスが、
+// 2 回目にラベルの終わりで対象にならないようにする(仕様 4.8。Q128)。
+func TestUserPathAfterLabel(t *testing.T) {
+	cases := []struct {
+		format string
+		line   string
+		want   []string
+	}{
+		// すべての形が、同じ条件を通る
+		{"<{type}_{n}>", "http://<ipv4_private_1>/home/dashboard", nil},
+		{"<{type}_{n}>", "<email_1>/home/yamada", nil},
+		{"<{type}_{n}>", "<host_1>/Users/yamada", nil},
+		{"<{type}_{n}>", `<host_1>\/home\/yamada`, nil},
+		{"<{type}_{n}>", `<host_1>\/Users\/yamada`, nil},
+		{"<{type}_{n}>", `<custom_1>C:\Users\yamada`, nil},
+		{"<{type}_{n}>", `<custom_1>C:\\Users\\yamada`, nil},
+		{"<{type}_{n}>", `<custom_1>C:\/users\/yamada`, nil},
+		{"<{type}_{n}>", "<custom_1>C:/users/yamada", nil},
+		{"<{type}_{n}>", `<custom_1>C:\Users/yamada`, nil},
+		{"<{type}_{n}>", `<custom_1>C:/Users\yamada`, nil},
+		{"<{type}_{n}>", "<ipv4_private_1>/c/users/123", nil},
+		{"<{type}_{n}>", "<ipv4_private_1>/C:/users/123", nil},
+		{"<{type}_{n}>", "<ipv4_private_1>/mnt/c/Users/123", nil},
+		{"<{type}_{n}>", "<ipv4_private_1>/cygdrive/c/Users/123", nil},
+		{"<{type}_{n}>", "<custom_1>file:///home/yamada", nil},
+		{"<{type}_{n}>", "<custom_1>file:///C:/users/yamada", nil},
+		{"<{type}_{n}>", `<custom_1>\\wsl$\Ubuntu\home\yamada`, nil},
+		{"<{type}_{n}>", "<custom_1>//wsl$/Ubuntu/home/yamada", nil},
+		// 1 回目の出力の、パスの続きの `/home/`(`/home/yamada/home/hanako`)
+		{"<{type}_{n}>", "/home/<user_path_1>/home/hanako", nil},
+		// `>` の 1 文字でなく、書式の形で判定する
+		{"<{type}_{n}>", "x>/home/yamada", []string{"yamada"}},
+		{"<{type}_{n}>", "<user>/home/yamada", []string{"yamada"}},
+		{"<{type}_{n}>", "<email_0>/home/yamada", []string{"yamada"}},
+		{"<{type}_{n}>", "<email_01>/home/yamada", []string{"yamada"}},
+		{"<{type}_{n}>", "<email_1> /home/yamada", []string{"yamada"}},
+		{"<{type}_{n}>", "<email_1>>/home/yamada", []string{"yamada"}},
+		{"<{type}_{n}>", "[email-1]/home/yamada", []string{"yamada"}},
+		{"[{type}-{n}]", "http://[ipv4_private-1]/home/dashboard", nil},
+		{"[{type}-{n}]", "[email-1]/c/users/123", nil},
+		{"[{type}-{n}]", "[a]/home/yamada", []string{"yamada"}},
+		{"[{type}-{n}]", "<email_1>/home/yamada", []string{"yamada"}},
+		{"({n}:{type})", "(1:email)/home/yamada", nil},
+		{"({n}:{type})", "(1:notype)/home/yamada", []string{"yamada"}},
+		// 書式の末尾が、形の前の条件の特別な文字でも、ラベルの直後は対象にしない
+		{`{type}#{n}\n`, `email#1\n/home/yamada`, nil},
+		{`{type}#{n}\n`, `x\n/home/yamada`, []string{"yamada"}},
+		// `:` の直後の `/Users/`(macOS の形)と `/C:/users/` は、形の前の文字が `:` なので、ラベルの直後でなくても対象。
+		// 1 回目と 2 回目で変わらない
+		{"<{type}_{n}>", "<custom_1>C:/Users/yamada", []string{"yamada"}},
+		{"<{type}_{n}>", `<custom_1>C:\/Users\/yamada`, []string{"yamada"}},
+		{"<{type}_{n}>", "<custom_1>file:/C:/users/yamada", []string{"yamada"}},
+		// `\\?\` は、ラベルより後ろの文字で形が始まる
+		{"<{type}_{n}>", `<custom_1>\\?\C:\Users\yamada`, []string{"yamada"}},
+		// 末尾が英数字の書式は、これまでどおり、文字の条件で対象外
+		{"{type}_{n}", "http://ipv4_private_1/home/dashboard", nil},
+		{"{type}{n}", "http://ipv4_private1/home/dashboard", nil},
+	}
+	for _, c := range cases {
+		d, err := New(Options{Kinds: KindSet(0).With(KindUserPath), Format: mustFormat(t, c.format)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ms, _ := d.Find([]byte(c.line), nil)
+		var got []string
+		for _, m := range ms {
+			got = append(got, c.line[m.Start:m.End])
+		}
+		if strings.Join(got, "|") != strings.Join(c.want, "|") {
+			t.Errorf("%s %q: got %q, want %q", c.format, c.line, got, c.want)
+		}
+	}
+}
+
 func TestUserPathOverlaps(t *testing.T) {
 	cases := []struct {
 		name string

@@ -133,6 +133,52 @@ func TestUserPathWithBareFormat(t *testing.T) {
 	}
 }
 
+// 値の直後のパスは、1 回目に形の前の条件を満たさず、値を置換した出力を再度流しても、対象にならない(Q128)。
+// mask の 2 回目が 1 回目と同じで、restore で戻ること。hash の出力は末尾が英数字なので、もともと対象にならない。
+func TestUserPathAfterReplacedValue(t *testing.T) {
+	deny := []string{"acme"}
+	domains := []string{"example.com"}
+	cases := []struct {
+		line string
+		want string // 既定の書式の 1 回目の出力
+	}{
+		{"GET http://10.0.0.5/home/dashboard HTTP/1.1", "GET http://<ipv4_private_1>/home/dashboard HTTP/1.1"},
+		{"proxy to http://172.16.0.3/c/users/123 failed", "proxy to http://<ipv4_private_1>/c/users/123 failed"},
+		{"https://api.example.com/home/dashboard", "https://<host_1>/home/dashboard"},
+		{"10.0.0.5/home/dashboard", "<ipv4_private_1>/home/dashboard"},
+		{"http://172.16.0.3/Users/123", "http://<ipv4_private_1>/Users/123"},
+		{"http://2001:db8::1/home/x", "http://<ipv6_global_1>/home/x"},
+		{"https://acme/home/dashboard", "https://<custom_1>/home/dashboard"},
+		{"taro@example.org/home/yamada", "<email_1>/home/yamada"},
+		{`{"url":"http:\/\/10.0.0.5\/home\/dashboard"}`, `{"url":"http:\/\/<ipv4_private_1>\/home\/dashboard"}`},
+		{"http://10.0.0.5/mnt/c/Users/123", "http://<ipv4_private_1>/mnt/c/Users/123"},
+		{"http://10.0.0.5/cygdrive/c/Users/123", "http://<ipv4_private_1>/cygdrive/c/Users/123"},
+		{"/home/yamada/home/hanako", "/home/<user_path_1>/home/hanako"},
+	}
+	for _, c := range cases {
+		for _, format := range []string{"<{type}_{n}>", "[{type}-{n}]", "{type}_{n}", "{type}{n}"} {
+			opts := detect.Options{Format: mustFormat(t, format), Deny: deny, Domains: domains}
+			masked, restored, _ := roundTrip(t, opts, c.line)
+			if format == "<{type}_{n}>" && masked != c.want {
+				t.Errorf("%q: got %q, want %q", c.line, masked, c.want)
+			}
+			if restored != c.line {
+				t.Errorf("%s %q: restored %q", format, c.line, restored)
+			}
+			if twice, _ := mask(t, opts, masked); twice != masked {
+				t.Errorf("%s %q: second pass %q -> %q", format, c.line, masked, twice)
+			}
+		}
+		for _, mode := range []EmailHash{EmailHashFull, EmailHashLocal} {
+			opts := detect.Options{Deny: deny, Domains: domains}
+			once, _ := hashRun(t, opts, testKey, 12, mode, c.line)
+			if twice, _ := hashRun(t, opts, testKey, 12, mode, once); twice != once {
+				t.Errorf("hash %q: second pass %q -> %q", c.line, once, twice)
+			}
+		}
+	}
+}
+
 // 合成ログ(1MB の JSON 行を含む)でも、2 回流しても結果が変わらず、改行の数が保たれる。
 func TestMaskSyntheticLogIsIdempotent(t *testing.T) {
 	var sb strings.Builder

@@ -85,6 +85,7 @@ user_path:
 - JSON の文字列の中の `\n/home/yamada/x`、`\/home\/yamada\/x`、`C:\/Users\/yamada\/x` のユーザー名が `<user_path_N>` になる
 - `C:\/Users\/Taro Yamada\/x`、`file:/C:/Users/yamada/x`、`C:\Users/yamada/x`、`\\wsl$\Ubuntu\home\yamada\x`、`//wsl$/Ubuntu/home/yamada/x`、`/cygdrive/c/Users/yamada/x` のユーザー名が `<user_path_N>` になる
 - `https://wsl.localhost/Ubuntu/home/yamada` は置換されない
+- `http://10.0.0.5/home/dashboard` は `http://<ipv4_private_1>/home/dashboard` になり、その出力を再度流しても変わらない(`--mask-format '[{type}-{n}]'` でも同じ)
 - `--deny yamada` では、`/home/yamada/` も `<custom_1>` になる
 
 UUID:

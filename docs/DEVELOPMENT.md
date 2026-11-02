@@ -4,7 +4,7 @@
 版ごとの実装計画と進捗は [plans/](plans/) にある(この資料の内容は、v1.0.0 の実装計画から移した)。
 
 - 仕様: [SPEC.md](SPEC.md)(以下「仕様」。節番号は仕様のもの。SPEC.md は目次で、4〜6 章・9 章の本文は [spec/](spec/) にある)
-- 文中の Q 番号は、Q1〜Q31 が [plans/v1.0.0/README.md](plans/v1.0.0/README.md)、Q32〜Q46 が [plans/v1.1.0/README.md](plans/v1.1.0/README.md)、Q47〜Q70 が [plans/v1.2.0/README.md](plans/v1.2.0/README.md)、Q71〜Q84 が [plans/v1.3.0/README.md](plans/v1.3.0/README.md) の 5 章「未確定事項」の項目、Q94〜Q99 が [plans/v1.4.0/questions.md](plans/v1.4.0/questions.md)、Q100〜Q127 が [plans/v1.5.0/questions.md](plans/v1.5.0/questions.md) の項目(すべて確定済み)
+- 文中の Q 番号は、Q1〜Q31 が [plans/v1.0.0/README.md](plans/v1.0.0/README.md)、Q32〜Q46 が [plans/v1.1.0/README.md](plans/v1.1.0/README.md)、Q47〜Q70 が [plans/v1.2.0/README.md](plans/v1.2.0/README.md)、Q71〜Q84 が [plans/v1.3.0/README.md](plans/v1.3.0/README.md) の 5 章「未確定事項」の項目、Q94〜Q99 が [plans/v1.4.0/questions.md](plans/v1.4.0/questions.md)、Q100〜Q128 が [plans/v1.5.0/questions.md](plans/v1.5.0/questions.md) の項目(すべて確定済み)
 
 ---
 
